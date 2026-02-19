@@ -3,11 +3,41 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'" />
     <title>LizMeter</title>
+    <style>
+      :root {
+        --tn-bg: #1a1b2e;
+        --tn-panel: #16213e;
+        --tn-surface: #1f2335;
+        --tn-border: #292e42;
+        --tn-text: #c0caf5;
+        --tn-text-dim: #a9b1d6;
+        --tn-muted: #565f89;
+        --tn-blue: #7aa2f7;
+        --tn-purple: #bb9af7;
+        --tn-green: #9ece6a;
+        --tn-yellow: #e0af68;
+        --tn-red: #f7768e;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--tn-bg);
+        color: var(--tn-text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: var(--tn-surface); }
+      ::-webkit-scrollbar-thumb { background: var(--tn-border); border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--tn-muted); }
+    </style>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="./src/main.js"></script>
+    <script type="module" src="./src/main.tsx"></script>
   </body>
 </html>

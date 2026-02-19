@@ -1,0 +1,194 @@
+{
+  "feature": "tomato-clock",
+  "description": "A Pomodoro Timer that allows users to set timer duration, enter session titles, start/pause/reset countdown, and record all completed sessions in SQLite",
+  "priority": "P1",
+  "created": "2026-02-19T17:00:00Z",
+  "updated": "2026-02-19T19:06:53+08:00",
+  "stage": "complete",
+  "pipeline": {
+    "1-prd": {
+      "status": "complete",
+      "assignee": "athena",
+      "started": "2026-02-19T17:00:00Z",
+      "completed": "2026-02-19T17:30:00Z",
+      "document": "prd.md"
+    },
+    "2-prd-review": {
+      "status": "complete",
+      "assignee": "athena",
+      "started": "2026-02-19T17:45:00Z",
+      "completed": "2026-02-19T18:00:00Z",
+      "document": "prd-review.md",
+      "verdict": "approved-with-notes",
+      "gate": {
+        "requires": ["1-prd"],
+        "condition": "prd.status === 'approved'"
+      }
+    },
+    "3-tech-spec": {
+      "status": "complete",
+      "assignee": "hephaestus",
+      "started": "2026-02-19T18:15:00Z",
+      "completed": "2026-02-19T19:00:00Z",
+      "document": "tech-spec.md",
+      "gate": {
+        "requires": ["2-prd-review"],
+        "condition": "prd-review.verdict === 'approved'"
+      }
+    },
+    "4-spec-review-pm": {
+      "status": "complete",
+      "assignee": "athena",
+      "started": "2026-02-19T19:15:00Z",
+      "completed": "2026-02-19T19:30:00Z",
+      "verdict": "approved-with-notes",
+      "document": "spec-review-pm.md",
+      "gate": {
+        "requires": ["3-tech-spec"],
+        "condition": "tech-spec.status === 'complete'"
+      }
+    },
+    "5-spec-review-sa": {
+      "status": "complete",
+      "assignee": "apollo",
+      "started": "2026-02-19T19:15:00Z",
+      "completed": "2026-02-19T19:35:00Z",
+      "verdict": "approved-with-notes",
+      "document": "spec-review-sa.md",
+      "gate": {
+        "requires": ["3-tech-spec"],
+        "condition": "tech-spec.status === 'complete'"
+      }
+    },
+    "6-test-plan": {
+      "status": "complete",
+      "assignee": "artemis",
+      "started": "2026-02-19T09:05:11Z",
+      "completed": "2026-02-19T09:45:00Z",
+      "document": "test-plan.md",
+      "gate": {
+        "requires": ["4-spec-review-pm", "5-spec-review-sa"],
+        "condition": "both reviews passed"
+      }
+    },
+    "7-implementation": {
+      "status": "complete",
+      "assignee": "ares",
+      "started": "2026-02-19T09:16:50Z",
+      "completed": "2026-02-19T10:37:09Z",
+      "document": "implementation-notes.md",
+      "gate": {
+        "requires": ["6-test-plan"],
+        "condition": "test-plan exists"
+      }
+    },
+    "8-code-review": {
+      "status": "complete",
+      "verdict": "approved",
+      "assignee": "hermes",
+      "started": "2026-02-19T19:06:53+08:00",
+      "completed": "2026-02-19T19:06:53+08:00",
+      "document": "code-review.md",
+      "gate": {
+        "requires": ["7-implementation"],
+        "condition": "implementation complete"
+      }
+    }
+  },
+  "documents": {
+    "prd.md": {
+      "created": "2026-02-19T17:30:00Z",
+      "author": "athena",
+      "status": "approved",
+      "version": "1.0"
+    },
+    "prd-review.md": {
+      "created": "2026-02-19T18:00:00Z",
+      "author": "athena",
+      "status": "complete",
+      "verdict": "approved-with-notes",
+      "version": "1.0"
+    },
+    "tech-spec.md": {
+      "created": "2026-02-19T19:00:00Z",
+      "author": "hephaestus",
+      "status": "complete",
+      "version": "1.0",
+      "based_on": "prd.md v1.0"
+    },
+    "spec-review-pm.md": {
+      "created": "2026-02-19T17:05:11+08:00",
+      "author": "athena",
+      "status": "complete",
+      "verdict": "approved-with-notes",
+      "version": "1.0"
+    },
+    "spec-review-sa.md": {
+      "created": "2026-02-19T17:05:11+08:00",
+      "author": "apollo",
+      "status": "complete",
+      "verdict": "approved-with-notes",
+      "version": "1.0"
+    },
+    "test-plan.md": {
+      "created": "2026-02-19T09:45:00Z",
+      "author": "artemis",
+      "status": "complete",
+      "version": "1.0",
+      "based_on": "prd.md v1.0, tech-spec.md v1.0"
+    },
+    "implementation-notes.md": {
+      "created": "2026-02-19T10:37:09Z",
+      "author": "ares",
+      "status": "complete",
+      "version": "1.0"
+    }
+  },
+  "history": [
+    {
+      "timestamp": "2026-02-19T17:00:00Z",
+      "event": "Feature created by Kratos",
+      "details": "Battlefield initialized, pipeline ready"
+    },
+    {
+      "timestamp": "2026-02-19T17:30:00Z",
+      "event": "PRD created by Athena",
+      "details": "prd.md v1.0 written with 11 P0, 4 P1, 2 P2 requirements"
+    },
+    {
+      "timestamp": "2026-02-19T18:00:00Z",
+      "event": "PRD reviewed by Athena",
+      "details": "Verdict: APPROVED WITH NOTES. 3 minor issues noted (feature completeness metric is tautological, planned vs actual duration ambiguity, title-on-reset behavior unspecified). No blockers. Pipeline advanced to 3-tech-spec."
+    },
+    {
+      "timestamp": "2026-02-19T19:00:00Z",
+      "event": "Tech spec created by Hephaestus",
+      "details": "tech-spec.md v1.0 written. Key decisions: better-sqlite3 for SQLite, useReducer for timer state machine, wall-clock delta for timer accuracy, single-page layout. 16 files to create, 5 files to modify. 1 new dependency (better-sqlite3). All 3 PRD review notes addressed. Pipeline advanced to 4-spec-review-pm."
+    },
+    {
+      "timestamp": "2026-02-19T19:30:00Z",
+      "event": "Tech spec PM review completed by Athena",
+      "details": "Verdict: APPROVED WITH NOTES. All 17 functional requirements and all NFRs fully covered. Two minor notes: (1) TodaySessionCount query mechanism unspecified (P2, non-blocking), (2) duration configuration UI control not in component tree (implementation detail). No blocking gaps."
+    },
+    {
+      "timestamp": "2026-02-19T17:05:11+08:00",
+      "event": "Tech spec SA review completed by Apollo",
+      "details": "Verdict: APPROVED WITH NOTES. 1 major finding (build:main needs --external better-sqlite3). 4 minor findings (input validation location, db init error handling, session save trigger, SET_TITLE state diagram). Architecture is sound. Both reviews passed — pipeline advanced to 6-test-plan."
+    },
+    {
+      "timestamp": "2026-02-19T09:45:00Z",
+      "event": "Test plan created by Artemis",
+      "details": "test-plan.md v1.0 written. 69 total test cases: 50 P0, 16 P1, 2 P2. Coverage: 13 timer reducer unit tests (all FSM transitions + illegal transitions), 16 database module unit tests (schema, CRUD, pagination, validation), 2 format utility tests, 5 custom hook tests, 15 component tests, 5 IPC integration tests, 3 security tests, 9 E2E tests (Playwright + Electron), 1 build verification test. All SA review findings have explicit test coverage. Pipeline advanced to 7-implementation."
+    },
+    {
+      "timestamp": "2026-02-19T10:37:09Z",
+      "event": "Implementation completed by Ares",
+      "details": "All 16 source files created, 5 files modified. 73 tests written and passing. TypeScript clean (tsc --noEmit). ESLint clean. dprint formatted. All Apollo SA findings addressed: --external better-sqlite3 in build:main, input validation in main process IPC handlers, try/catch + dialog.showErrorBox on initDatabase(), useEffect on status==='completed' for session save, SET_TITLE works in running and paused states. Title preserved on RESET. Wall-clock timer accuracy with 250ms intervals. Pipeline advanced to 8-code-review."
+    },
+    {
+      "timestamp": "2026-02-19T19:06:53+08:00",
+      "event": "Code review completed by Hermes",
+      "details": "Verdict: APPROVED. All 73 tests pass. tsc, eslint, dprint all clean. All Apollo SA findings confirmed addressed. 3 minor non-blocking issues noted: inconsistent duration lower bound in saveSession, stale closure risk in save useEffect, 500ms history refresh race. 2 nits. Feature pipeline complete."
+    }
+  ]
+}
