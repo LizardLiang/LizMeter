@@ -9,10 +9,10 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
-    include: ["src/**/*.test.{ts,tsx}"],
+    include: ["src/**/*.test.{ts,tsx}", "electron/**/*.test.{ts,tsx}"],
     setupFiles: ["./src/test/setup.ts"],
     environmentMatchGlobs: [
-      ["src/main/**", "node"],
+      ["electron/main/**", "node"],
     ],
   },
 });

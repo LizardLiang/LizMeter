@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ListSessionsInput, SaveSessionInput, TimerSettings } from "../shared/types.ts";
+import type { ListSessionsInput, SaveSessionInput, TimerSettings } from "../../src/shared/types.ts";
 
 contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
@@ -11,5 +11,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),
     save: (settings: TimerSettings) => ipcRenderer.invoke("settings:save", settings),
+  },
+  window: {
+    minimize: () => ipcRenderer.send("window:minimize"),
+    maximize: () => ipcRenderer.send("window:maximize"),
+    close: () => ipcRenderer.send("window:close"),
   },
 });

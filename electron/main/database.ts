@@ -1,7 +1,9 @@
-// src/main/database.ts
+// electron/main/database.ts
 // SQLite database module for the main process
 // All operations are synchronous (better-sqlite3 API)
 
+import { app } from "electron";
+import path from "node:path";
 import Database from "better-sqlite3";
 import type {
   ListSessionsInput,
@@ -10,7 +12,7 @@ import type {
   Session,
   TimerSettings,
   TimerType,
-} from "../shared/types.ts";
+} from "../../src/shared/types.ts";
 
 let db: Database.Database | null = null;
 
@@ -33,8 +35,8 @@ export function initDatabase(dbPath?: string): void {
     db = null;
   }
 
-  const path = dbPath ?? getDefaultDbPath();
-  db = new Database(path);
+  const resolvedPath = dbPath ?? getDefaultDbPath();
+  db = new Database(resolvedPath);
 
   // Enable WAL mode for better performance
   db.pragma("journal_mode = WAL");
@@ -60,16 +62,7 @@ export function initDatabase(dbPath?: string): void {
 }
 
 function getDefaultDbPath(): string {
-  // Dynamic import of electron and path is necessary here:
-  // - database.ts is a main-process-only module loaded by Electron
-  // - Tests call initDatabase(":memory:") and bypass this code path entirely
-  // - ESLint rule suppressed intentionally: no alternative to require() for
-  //   runtime-conditional Electron API access in a bundled ESM context
-  /* eslint-disable @typescript-eslint/no-require-imports */
-  const electronModule = require("electron") as { app: { getPath: (name: string) => string; }; };
-  const pathModule = require("node:path") as { join: (...args: string[]) => string; };
-  /* eslint-enable @typescript-eslint/no-require-imports */
-  return pathModule.join(electronModule.app.getPath("userData"), "lizmeter.db");
+  return path.join(app.getPath("userData"), "lizmeter.db");
 }
 
 export function closeDatabase(): void {

@@ -17,5 +17,5 @@
     "noUnusedParameters": false,
     "types": ["node"]
   },
-  "include": ["src/main", "src/preload", "src/shared"]
+  "include": ["electron/main", "electron/preload", "src/shared"]
 }

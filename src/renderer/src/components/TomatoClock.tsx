@@ -19,9 +19,8 @@ export function TomatoClock() {
   const { settings, isLoading: settingsLoading } = useSettings();
   const effectiveSettings = settings ?? DEFAULT_SETTINGS;
 
-  const { state, start, pause, resume, reset, setTimerType, setTitle, dismissCompletion, saveError } = useTimer(
-    effectiveSettings,
-  );
+  const { state, start, pause, resume, reset, setTimerType, setTitle, setRemaining, dismissCompletion, saveError } =
+    useTimer(effectiveSettings);
 
   const { sessions, isLoading: historyLoading, error: historyError, refresh, deleteSession } = useSessionHistory();
 
@@ -77,6 +76,7 @@ export function TomatoClock() {
         onDismiss={dismissCompletion}
         onTimerTypeChange={setTimerType}
         onTitleChange={setTitle}
+        onRemainingChange={setRemaining}
       />
 
       <SessionHistory

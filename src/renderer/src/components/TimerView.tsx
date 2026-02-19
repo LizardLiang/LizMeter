@@ -20,6 +20,7 @@ interface TimerViewProps {
   onDismiss: () => void;
   onTimerTypeChange: (type: TimerType) => void;
   onTitleChange: (title: string) => void;
+  onRemainingChange: (seconds: number) => void;
 }
 
 export function TimerView({
@@ -35,6 +36,7 @@ export function TimerView({
   onDismiss,
   onTimerTypeChange,
   onTitleChange,
+  onRemainingChange,
 }: TimerViewProps) {
   // Visual distinction between work and break timer types (FR-023)
   const accentColor = timerType === "work" ? "#7aa2f7" : timerType === "short_break" ? "#9ece6a" : "#bb9af7";
@@ -66,7 +68,7 @@ export function TimerView({
         disabled={isRunningOrPaused || status === "completed"}
       />
 
-      <TimerDisplay remainingSeconds={remainingSeconds} status={status} />
+      <TimerDisplay remainingSeconds={remainingSeconds} status={status} onRemainingChange={onRemainingChange} />
 
       <SessionTitleInput
         value={title}

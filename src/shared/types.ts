@@ -56,4 +56,9 @@ export interface ElectronAPI {
     get: () => Promise<TimerSettings>;
     save: (settings: TimerSettings) => Promise<void>;
   };
+  window: {
+    minimize: () => void;
+    maximize: () => void;
+    close: () => void;
+  };
 }

@@ -22,6 +22,7 @@ export interface TimerState {
 type TimerAction =
   | { type: "SET_TIMER_TYPE"; payload: TimerType; }
   | { type: "SET_TITLE"; payload: string; }
+  | { type: "SET_REMAINING"; payload: number; } // custom duration in seconds (idle only)
   | { type: "START"; }
   | { type: "PAUSE"; }
   | { type: "RESUME"; }
@@ -67,6 +68,13 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
         timerType: action.payload,
         remainingSeconds: duration,
       };
+    }
+
+    case "SET_REMAINING": {
+      // Only allowed when idle — let the user pick a custom starting time
+      if (state.status !== "idle") return state;
+      const clamped = Math.max(1, Math.min(7200, action.payload));
+      return { ...state, remainingSeconds: clamped };
     }
 
     case "SET_TITLE": {
@@ -179,6 +187,7 @@ export interface UseTimerReturn {
   reset: () => void;
   setTimerType: (type: TimerType) => void;
   setTitle: (title: string) => void;
+  setRemaining: (seconds: number) => void;
   dismissCompletion: () => void;
   saveError: string | null;
 }
@@ -243,6 +252,7 @@ export function useTimer(settings: TimerSettings): UseTimerReturn {
     reset: () => dispatch({ type: "RESET" }),
     setTimerType: (type: TimerType) => dispatch({ type: "SET_TIMER_TYPE", payload: type }),
     setTitle: (title: string) => dispatch({ type: "SET_TITLE", payload: title }),
+    setRemaining: (seconds: number) => dispatch({ type: "SET_REMAINING", payload: seconds }),
     dismissCompletion: () => dispatch({ type: "CLEAR_COMPLETION" }),
     saveError,
   };

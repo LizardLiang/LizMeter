@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'" />
+    <title>LizMeter</title>
+    <style>
+      :root {
+        --tn-bg: #1a1b2e;
+        --tn-panel: #16213e;
+        --tn-surface: #1f2335;
+        --tn-border: #292e42;
+        --tn-text: #c0caf5;
+        --tn-text-dim: #a9b1d6;
+        --tn-muted: #565f89;
+        --tn-blue: #7aa2f7;
+        --tn-purple: #bb9af7;
+        --tn-green: #9ece6a;
+        --tn-yellow: #e0af68;
+        --tn-red: #f7768e;
+      }
+      *, *::before, *::after { box-sizing: border-box; }
+      html, body, #root {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: var(--tn-bg);
+        color: var(--tn-text);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: var(--tn-surface); }
+      ::-webkit-scrollbar-thumb { background: var(--tn-border); border-radius: 3px; }
+      ::-webkit-scrollbar-thumb:hover { background: var(--tn-muted); }
+
+      /* ── Custom Title Bar ── */
+      #titlebar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        height: 32px;
+        background: var(--tn-panel);
+        border-bottom: 1px solid var(--tn-border);
+        -webkit-app-region: drag;
+        user-select: none;
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        z-index: 9999;
+      }
+      #titlebar-label {
+        padding-left: 12px;
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--tn-muted);
+        letter-spacing: 0.5px;
+      }
+      #titlebar-label span {
+        color: var(--tn-blue);
+      }
+      #titlebar-controls {
+        display: flex;
+        height: 100%;
+        -webkit-app-region: no-drag;
+      }
+      #titlebar-controls button {
+        border: none;
+        background: transparent;
+        color: var(--tn-text-dim);
+        width: 46px;
+        height: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.15s, color 0.15s;
+      }
+      #titlebar-controls button:hover {
+        background: var(--tn-surface);
+        color: var(--tn-text);
+      }
+      #titlebar-controls button:last-child:hover {
+        background: var(--tn-red);
+        color: #fff;
+      }
+      #titlebar-controls button svg {
+        width: 10px;
+        height: 10px;
+      }
+      #root {
+        margin-top: 32px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="titlebar">
+      <div id="titlebar-label"><span>Liz</span>Meter</div>
+      <div id="titlebar-controls">
+        <button id="btn-minimize" aria-label="Minimize">
+          <svg viewBox="0 0 10 1"><rect fill="currentColor" width="10" height="1"/></svg>
+        </button>
+        <button id="btn-maximize" aria-label="Maximize">
+          <svg viewBox="0 0 10 10"><rect fill="none" stroke="currentColor" stroke-width="1" x="0.5" y="0.5" width="9" height="9"/></svg>
+        </button>
+        <button id="btn-close" aria-label="Close">
+          <svg viewBox="0 0 10 10"><line stroke="currentColor" stroke-width="1.2" x1="0" y1="0" x2="10" y2="10"/><line stroke="currentColor" stroke-width="1.2" x1="10" y1="0" x2="0" y2="10"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="root"></div>
+    <script>
+      document.getElementById("btn-minimize").addEventListener("click", () => window.electronAPI.window.minimize());
+      document.getElementById("btn-maximize").addEventListener("click", () => window.electronAPI.window.maximize());
+      document.getElementById("btn-close").addEventListener("click", () => window.electronAPI.window.close());
+    </script>
+    <script type="module" src="./src/renderer/src/main.tsx"></script>
+  </body>
+</html>

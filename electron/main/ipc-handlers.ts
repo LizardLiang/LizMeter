@@ -1,8 +1,8 @@
-// src/main/ipc-handlers.ts
+// electron/main/ipc-handlers.ts
 // Registers all IPC handlers for the main process
 
 import { ipcMain } from "electron";
-import type { ListSessionsInput, SaveSessionInput, TimerSettings } from "../shared/types.ts";
+import type { ListSessionsInput, SaveSessionInput, TimerSettings } from "../../src/shared/types.ts";
 import { deleteSession, getSettings, listSessions, saveSession, saveSettings } from "./database.ts";
 
 export function registerIpcHandlers(): void {
