@@ -1,0 +1,16 @@
+{
+  "typescript": {
+    "quoteStyle": "alwaysDouble",
+    "semiColons": "always",
+    "indentWidth": 2,
+    "lineWidth": 120,
+    "trailingCommas": "onlyMultiLine"
+  },
+  "json": {},
+  "includes": ["src/**/*.{ts,tsx}", "*.json"],
+  "excludes": ["node_modules", "dist"],
+  "plugins": [
+    "https://plugins.dprint.dev/typescript-0.93.4.wasm",
+    "https://plugins.dprint.dev/json-0.19.4.wasm"
+  ]
+}

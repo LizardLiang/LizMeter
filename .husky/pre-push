@@ -1,0 +1,5 @@
+branch=$(git rev-parse --abbrev-ref HEAD)
+
+if [ "$branch" = "master" ] || [ "$branch" = "main" ]; then
+  bun run test
+fi

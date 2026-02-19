@@ -1,0 +1,50 @@
+{
+  "name": "lizmeter",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/main/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run build:main && electron .",
+    "build:main": "bun build src/main/index.ts --outdir dist/main --target=node",
+    "build:preload": "bun build src/preload/index.ts --outdir dist/preload --target=node",
+    "build:renderer": "bun build src/renderer/src/main.tsx --outdir dist/renderer --minify",
+    "build": "bun run build:main && bun run build:preload && bun run build:renderer",
+    "lint": "eslint src/",
+    "fmt": "dprint fmt",
+    "fmt:check": "dprint check",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "prepare": "husky"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.0.3",
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.58.2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@types/bun": "latest",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "^4.0.18",
+    "dprint": "^0.51.1",
+    "electron": "^40.6.0",
+    "electron-builder": "^26.8.1",
+    "electron-playwright-helpers": "^2.1.0",
+    "eslint": "^10.0.0",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.0",
+    "husky": "^9.1.7",
+    "jsdom": "^28.1.0",
+    "playwright": "^1.58.2",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.56.0",
+    "vitest": "^4.0.18"
+  },
+  "dependencies": {
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  }
+}
