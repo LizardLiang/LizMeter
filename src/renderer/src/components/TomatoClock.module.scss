@@ -1,0 +1,60 @@
+@use "../styles/mixins" as *;
+
+.root {
+  display: flex;
+  flex-direction: row;
+  height: calc(100vh - 32px);
+  width: 100vw;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 15% 40%, #1a1b2e 0%, #0c0c16 100%);
+}
+
+.main {
+  flex: 1;
+  overflow-y: auto;
+  min-width: 0;
+}
+
+.timerPage {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 28px 24px;
+  width: 100%;
+  animation: fade-in-up 0.28s ease both;
+}
+
+.timerHeading {
+  @include page-heading;
+  text-align: center;
+  margin-bottom: 20px;
+}
+
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: calc(100vh - 32px);
+  background: #0c0c16;
+}
+
+.loadingText {
+  color: #3b4261;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+
+.tagSection {
+  margin-top: 14px;
+  padding: 14px 16px;
+  background: linear-gradient(135deg, #1e203055 0%, #1a1b2e35 100%);
+  border-radius: 6px;
+  border: 1px solid #292e4230;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.tagSectionLabel {
+  @include section-label;
+}

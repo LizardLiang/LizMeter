@@ -1,0 +1,205 @@
+@use "../styles/mixins" as *;
+
+.sidebar {
+  height: calc(100vh - 32px);
+  background-color: #1a1b26;
+  border-left: 1px solid #292e42;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  transition: width 220ms cubic-bezier(0.4, 0, 0.2, 1), min-width 220ms cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  flex-shrink: 0;
+  // width/min-width set inline (dynamic: isOpen)
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #292e42;
+  flex-shrink: 0;
+  // justify-content and padding set inline (dynamic: isOpen)
+}
+
+.headerLabel {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #565f89;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity 150ms;
+  margin-right: 8px;
+  // opacity set inline (dynamic: isOpen)
+}
+
+.scroll {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  flex-direction: column;
+  gap: 0;
+  // display set inline (dynamic: isOpen → flex | none)
+}
+
+.section {
+  padding: 10px 12px;
+  border-bottom: 1px solid #1e2030;
+}
+
+.sectionLabel {
+  @include section-label;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  // background-color set inline (dynamic: timerStatusColor)
+}
+
+.statusText {
+  font-size: 12px;
+  font-weight: 600;
+  // color set inline (dynamic: timerStatusColor)
+}
+
+.remainingText {
+  font-size: 12px;
+  color: #c0caf5;
+  margin-left: auto;
+}
+
+.tagsLabel {
+  font-size: 10px;
+  color: #565f89;
+  margin-bottom: 4px;
+}
+
+.filterRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.chip {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background-color: #1e2030;
+  color: #565f89;
+  white-space: nowrap;
+}
+
+.chipActive {
+  composes: chip;
+  background-color: #7aa2f7;
+  color: #1a1b26;
+}
+
+.filterBy {
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.filterByLabel {
+  font-size: 10px;
+  color: #565f89;
+}
+
+.stateMsg {
+  font-size: 11px;
+  color: #565f89;
+  padding: 8px 0;
+}
+
+.errorMsg {
+  font-size: 11px;
+  color: #f7768e;
+  padding: 4px 0;
+}
+
+.emptyMsg {
+  font-size: 11px;
+  color: #565f89;
+  font-style: italic;
+}
+
+.loadMoreBtn {
+  margin-top: 6px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid #292e42;
+  background-color: transparent;
+  color: #565f89;
+  font-size: 11px;
+  cursor: pointer;
+  width: 100%;
+
+  &:hover {
+    background-color: #1e2030;
+  }
+}
+
+// SessionRow styles
+.row {
+  padding: 6px 0;
+  border-bottom: 1px solid #1e2030;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rowTop {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.rowDuration {
+  font-size: 12px;
+  font-weight: 600;
+  color: #c0caf5;
+  flex: 1;
+}
+
+.rowDate {
+  font-size: 10px;
+  color: #565f89;
+}
+
+.rowDelBtn {
+  @include icon-btn;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.rowTitle {
+  font-size: 11px;
+  color: #a9b1d6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rowTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}

@@ -1,0 +1,129 @@
+@use "../styles/mixins" as *;
+
+@keyframes pulseDot {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 #9ece6a50;
+  }
+  50% {
+    opacity: 0.8;
+    box-shadow: 0 0 0 4px #9ece6a00;
+  }
+}
+
+.sidebar {
+  width: 64px;
+  min-width: 64px;
+  height: calc(100vh - 32px);
+  background: linear-gradient(180deg, #0f0f1a 0%, #13131f 100%);
+  border-right: 1px solid #1e2030;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 20px 0 16px;
+  gap: 4px;
+  flex-shrink: 0;
+  position: relative;
+}
+
+.btn {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  border: none;
+  background-color: transparent;
+  color: #3b4261;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.2s ease, background-color 0.2s ease, transform 0.15s ease;
+
+  // CSS tooltip
+  &::before {
+    content: attr(title);
+    position: absolute;
+    left: calc(100% + 14px);
+    top: 50%;
+    transform: translateY(-50%) translateX(-4px);
+    background: #1e2030;
+    border: 1px solid #292e42;
+    border-radius: 5px;
+    color: #a9b1d6;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    padding: 5px 10px;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s ease, transform 0.18s ease;
+    z-index: 200;
+    box-shadow: 0 4px 16px #00000050;
+  }
+
+  &:hover {
+    background-color: #7aa2f70c;
+    color: #565f89;
+    transform: translateX(1px);
+
+    &::before {
+      opacity: 1;
+      transform: translateY(-50%) translateX(0);
+    }
+  }
+
+  &:active {
+    transform: translateX(0);
+  }
+}
+
+.btnActive {
+  composes: btn;
+  background: linear-gradient(135deg, #7aa2f718 0%, #7aa2f70c 100%);
+  color: #7aa2f7;
+
+  &:hover {
+    background: linear-gradient(135deg, #7aa2f722 0%, #7aa2f712 100%);
+    color: #7aa2f7;
+    transform: none;
+  }
+
+  &:active {
+    transform: none;
+  }
+}
+
+.activeBar {
+  position: absolute;
+  left: -10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 22px;
+  border-radius: 0 3px 3px 0;
+  background: linear-gradient(180deg, #7aa2f7 0%, #bb9af7 100%);
+  box-shadow: 0 0 10px #7aa2f770;
+}
+
+.runningDot {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #9ece6a;
+  border: 1.5px solid #0f0f1a;
+  animation: pulseDot 2.4s ease-in-out infinite;
+}
+
+.pausedDot {
+  composes: runningDot;
+  background-color: #e0af68;
+  animation: none;
+  box-shadow: none;
+}
