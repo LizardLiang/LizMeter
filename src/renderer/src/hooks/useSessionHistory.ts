@@ -9,9 +9,11 @@ export interface UseSessionHistoryReturn {
   total: number;
   isLoading: boolean;
   error: string | null;
+  activeTagFilter: number | undefined;
   refresh: () => void;
   deleteSession: (id: string) => void;
   loadMore: () => void;
+  setTagFilter: (tagId: number | undefined) => void;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -23,14 +25,16 @@ export function useSessionHistory(): UseSessionHistoryReturn {
   const [error, setError] = useState<string | null>(null);
   const [offset, setOffset] = useState(0);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [activeTagFilter, setActiveTagFilter] = useState<number | undefined>(undefined);
 
-  const fetchSessions = useCallback(async (currentOffset: number) => {
+  const fetchSessions = useCallback(async (currentOffset: number, tagId?: number) => {
     setIsLoading(true);
     setError(null);
     try {
       const result = await window.electronAPI.session.list({
         limit: DEFAULT_LIMIT,
         offset: currentOffset,
+        tagId,
       });
       if (currentOffset === 0) {
         setSessions(result.sessions);
@@ -50,8 +54,8 @@ export function useSessionHistory(): UseSessionHistoryReturn {
   // Initial load and refresh
   useEffect(() => {
     setOffset(0);
-    void fetchSessions(0);
-  }, [fetchSessions, refreshToken]);
+    void fetchSessions(0, activeTagFilter);
+  }, [fetchSessions, refreshToken, activeTagFilter]);
 
   const refresh = useCallback(() => {
     setRefreshToken((t) => t + 1);
@@ -74,16 +78,24 @@ export function useSessionHistory(): UseSessionHistoryReturn {
   const loadMore = useCallback(() => {
     const newOffset = offset + DEFAULT_LIMIT;
     setOffset(newOffset);
-    void fetchSessions(newOffset);
-  }, [offset, fetchSessions]);
+    void fetchSessions(newOffset, activeTagFilter);
+  }, [offset, fetchSessions, activeTagFilter]);
+
+  const setTagFilter = useCallback((tagId: number | undefined) => {
+    setActiveTagFilter(tagId);
+    setOffset(0);
+    setRefreshToken((t) => t + 1);
+  }, []);
 
   return {
     sessions,
     total,
     isLoading,
     error,
+    activeTagFilter,
     refresh,
     deleteSession,
     loadMore,
+    setTagFilter,
   };
 }

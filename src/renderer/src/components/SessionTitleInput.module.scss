@@ -1,0 +1,38 @@
+@use "../styles/mixins" as *;
+
+.wrapper {
+  padding: 6px 0;
+}
+
+.label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.625rem;
+  font-weight: 700;
+  color: #3b4261;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.input {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 0.9375rem;
+  border-radius: 5px;
+  border: 1px solid #292e4230;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  letter-spacing: 0.01em;
+
+  &:hover:not(:focus):not(:disabled) {
+    border-color: #292e4258;
+  }
+
+  &:focus {
+    border-color: #7aa2f745;
+    box-shadow: 0 0 0 3px #7aa2f712;
+  }
+
+  // background-color, color, cursor set inline (dynamic: disabled)
+}

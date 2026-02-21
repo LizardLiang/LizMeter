@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { TimerStatus } from "../../../shared/types.ts";
+import styles from "./TimerDisplay.module.scss";
 
 interface TimerDisplayProps {
   remainingSeconds: number;
@@ -25,46 +26,7 @@ export function TimerDisplay({ remainingSeconds, status, onRemainingChange }: Ti
   const displayMinutes = String(mins).padStart(2, "0");
   const displaySeconds = String(secs).padStart(2, "0");
 
-  const fontStyles: React.CSSProperties = {
-    fontSize: "5rem",
-    fontWeight: "bold",
-    fontFamily: "'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace",
-    letterSpacing: "0.05em",
-    lineHeight: 1,
-  };
-
-  const containerStyle: React.CSSProperties = {
-    textAlign: "center",
-    padding: "20px 0",
-  };
-
   const displayColor = status === "completed" ? "#9ece6a" : status === "paused" ? "#e0af68" : "#c0caf5";
-
-  const inputStyle: React.CSSProperties = {
-    font: "inherit",
-    letterSpacing: "inherit",
-    lineHeight: "inherit",
-    color: "inherit",
-    background: "transparent",
-    border: "none",
-    outline: "none",
-    textAlign: "center",
-    padding: 0,
-    width: "2.5ch",
-    cursor: "inherit",
-    caretColor: isEditing ? "auto" : "transparent",
-  };
-
-  const editingBorder: React.CSSProperties = isEditing
-    ? { borderBottom: "2px solid #7aa2f7" }
-    : {};
-
-  const hintStyle: React.CSSProperties = {
-    marginTop: "4px",
-    fontSize: "0.75rem",
-    color: "#565f89",
-    height: "1.2em",
-  };
 
   function startEditing() {
     if (!canEdit) return;
@@ -101,15 +63,10 @@ export function TimerDisplay({ remainingSeconds, status, onRemainingChange }: Ti
   }
 
   return (
-    <div style={containerStyle} data-status={status}>
+    <div className={styles.container} data-status={status}>
       <div
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          ...fontStyles,
-          color: displayColor,
-          cursor: canEdit && !isEditing ? "pointer" : "default",
-        }}
+        className={styles.displayRow}
+        style={{ color: displayColor, cursor: canEdit && !isEditing ? "pointer" : "default" }}
         aria-live="polite"
       >
         <input
@@ -128,10 +85,10 @@ export function TimerDisplay({ remainingSeconds, status, onRemainingChange }: Ti
               if (e.relatedTarget !== secondsRef.current) commitEdit();
             }
             : undefined}
-          style={{ ...inputStyle, ...editingBorder }}
+          className={`${styles.input} ${isEditing ? styles.editing : ""}`}
           aria-label="Minutes"
         />
-        <span>:</span>
+        <span className={styles.separator}>:</span>
         <input
           ref={secondsRef}
           type="text"
@@ -148,25 +105,14 @@ export function TimerDisplay({ remainingSeconds, status, onRemainingChange }: Ti
               if (e.relatedTarget !== minutesRef.current) commitEdit();
             }
             : undefined}
-          style={{ ...inputStyle, ...editingBorder }}
+          className={`${styles.input} ${isEditing ? styles.editing : ""}`}
           aria-label="Seconds"
         />
       </div>
-      <div style={hintStyle}>
+      <div className={styles.hint}>
         {isEditing ? "enter to confirm" : canEdit ? "click to edit" : "\u00A0"}
       </div>
-      {status === "completed" && (
-        <div
-          style={{
-            marginTop: "8px",
-            fontSize: "1rem",
-            color: "#9ece6a",
-            fontWeight: "600",
-          }}
-        >
-          Session Complete!
-        </div>
-      )}
+      {status === "completed" && <div className={styles.completedMsg}>Session Complete!</div>}
     </div>
   );
 }

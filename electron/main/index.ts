@@ -13,6 +13,7 @@ function createWindow() {
   const win = new BrowserWindow({
     width: 800,
     height: 600,
+    minWidth: 600,
     frame: false,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.mjs"),

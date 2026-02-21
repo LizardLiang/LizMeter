@@ -1,0 +1,67 @@
+@use "../styles/mixins" as *;
+
+.wrap {
+  position: relative;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-height: 24px;
+  cursor: pointer;
+  align-items: center;
+}
+
+.placeholder {
+  font-size: 11px;
+  color: #565f89;
+  font-style: italic;
+}
+
+.dropdown {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  background-color: #1e2030;
+  border: 1px solid #292e42;
+  border-radius: 8px;
+  padding: 4px 0;
+  z-index: 100;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #c0caf5;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+
+  &:hover {
+    background-color: #292e42;
+  }
+}
+
+.itemDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  // background-color set inline (dynamic: t.color)
+}
+
+.empty {
+  padding: 8px 10px;
+  font-size: 11px;
+  color: #565f89;
+  font-style: italic;
+}

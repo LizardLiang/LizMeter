@@ -1,0 +1,101 @@
+@use "../styles/mixins" as *;
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.createForm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.createRow {
+  display: flex;
+  gap: 6px;
+}
+
+.input {
+  flex: 1;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid #292e42;
+  background-color: #16161e;
+  color: #c0caf5;
+  font-size: 12px;
+  outline: none;
+  min-width: 0;
+
+  &:focus {
+    border-color: #7aa2f7;
+  }
+}
+
+.createBtn {
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: none;
+  background-color: #7aa2f7;
+  color: #1a1b26;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  flex-shrink: 0;
+
+  &:hover {
+    opacity: 0.9;
+  }
+}
+
+.cancelBtn {
+  composes: createBtn;
+  background-color: #292e42;
+  color: #a9b1d6;
+}
+
+.editForm {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.editRow {
+  display: flex;
+  gap: 6px;
+}
+
+.tagRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background-color: #16161e;
+}
+
+.tagBadgeWrap {
+  flex: 1;
+}
+
+.iconBtn {
+  @include icon-btn;
+}
+
+.deleteIconBtn {
+  @include icon-btn;
+  color: #f7768e;
+}
+
+.errorMsg {
+  font-size: 11px;
+  color: #f7768e;
+  padding: 2px 0;
+}
+
+.emptyMsg {
+  font-size: 11px;
+  color: #565f89;
+  font-style: italic;
+}

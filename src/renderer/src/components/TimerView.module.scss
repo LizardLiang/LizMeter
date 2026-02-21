@@ -1,0 +1,36 @@
+@use "../styles/mixins" as *;
+
+.container {
+  background: linear-gradient(145deg, #1e203095 0%, #1a1b2e70 50%, #1f233590 100%);
+  border-radius: 10px;
+  padding: 28px;
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  position: relative;
+  overflow: hidden;
+
+  // Subtle top-edge glass highlight
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 10%;
+    right: 10%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, #ffffff0c 30%, #ffffff0e 50%, #ffffff0c 70%, transparent 100%);
+    pointer-events: none;
+  }
+
+  // border and box-shadow use dynamic accentColor — kept inline
+}
+
+.error {
+  padding: 10px 14px;
+  background: #12121d;
+  border: 1px solid #f7768e28;
+  border-radius: 5px;
+  color: #f7768e;
+  font-size: 0.8125rem;
+  margin-top: 10px;
+  letter-spacing: 0.02em;
+}

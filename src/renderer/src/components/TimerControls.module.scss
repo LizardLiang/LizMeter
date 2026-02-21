@@ -1,0 +1,71 @@
+@use "../styles/mixins" as *;
+
+.container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 14px 0 6px;
+  gap: 8px;
+}
+
+.btnPrimary {
+  @include btn-base;
+  background: linear-gradient(135deg, #7aa2f722 0%, #7aa2f714 100%);
+  border: 1px solid #7aa2f738;
+  color: #7aa2f7;
+  box-shadow: 0 0 20px #7aa2f710;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(135deg, #7aa2f732 0%, #7aa2f722 100%);
+    border-color: #7aa2f758;
+    box-shadow: 0 0 28px #7aa2f722, 0 4px 16px #00000040;
+  }
+}
+
+.btnWarning {
+  @include btn-base;
+  background: linear-gradient(135deg, #e0af6822 0%, #e0af6814 100%);
+  border: 1px solid #e0af6838;
+  color: #e0af68;
+  box-shadow: 0 0 20px #e0af6810;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(135deg, #e0af6832 0%, #e0af6822 100%);
+    border-color: #e0af6858;
+    box-shadow: 0 0 28px #e0af6822, 0 4px 16px #00000040;
+  }
+}
+
+.btnDanger {
+  @include btn-base;
+  padding: 11px 22px;
+  background: transparent;
+  border: 1px solid #f7768e18;
+  color: #f7768e55;
+
+  &:hover:not(:disabled) {
+    border-color: #f7768e35;
+    color: #f7768e99;
+    background: #f7768e08;
+  }
+
+  &:disabled {
+    opacity: 0.18;
+    cursor: not-allowed;
+    transform: none;
+  }
+}
+
+.btnSuccess {
+  @include btn-base;
+  background: linear-gradient(135deg, #9ece6a22 0%, #9ece6a14 100%);
+  border: 1px solid #9ece6a38;
+  color: #9ece6a;
+  box-shadow: 0 0 20px #9ece6a10;
+
+  &:hover:not(:disabled) {
+    background: linear-gradient(135deg, #9ece6a32 0%, #9ece6a22 100%);
+    border-color: #9ece6a58;
+    box-shadow: 0 0 28px #9ece6a22, 0 4px 16px #00000040;
+  }
+}

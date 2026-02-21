@@ -1,0 +1,11 @@
+@use "../styles/mixins" as *;
+
+.page {
+  @include page-container;
+  max-width: 480px;
+}
+
+.heading {
+  @include page-heading;
+  margin-bottom: 20px;
+}

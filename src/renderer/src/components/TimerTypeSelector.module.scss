@@ -1,0 +1,24 @@
+@use "../styles/mixins" as *;
+
+.container {
+  display: flex;
+  justify-content: center;
+  padding: 4px;
+  margin: 4px 0 8px;
+  background: #0c0c1680;
+  border-radius: 7px;
+  gap: 2px;
+  border: 1px solid #1e203060;
+}
+
+.btn {
+  flex: 1;
+  padding: 8px 14px;
+  font-size: 0.8125rem;
+  border-radius: 5px;
+  transition: all 0.22s ease;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  text-align: center;
+  // font-weight, border, background-color, color, opacity, cursor set inline (dynamic per isSelected + disabled)
+}

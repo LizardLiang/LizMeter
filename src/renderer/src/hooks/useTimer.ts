@@ -1,8 +1,8 @@
 // src/renderer/src/hooks/useTimer.ts
 // Timer finite state machine using useReducer with wall-clock accuracy
 
-import { useEffect, useReducer, useState } from "react";
-import type { TimerSettings, TimerStatus, TimerType } from "../../../shared/types.ts";
+import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
+import type { Session, TimerSettings, TimerStatus, TimerType } from "../../../shared/types.ts";
 
 // --- State ---
 
@@ -192,9 +192,16 @@ export interface UseTimerReturn {
   saveError: string | null;
 }
 
-export function useTimer(settings: TimerSettings): UseTimerReturn {
+export function useTimer(
+  settings: TimerSettings,
+  onSaved?: (session: Session) => void,
+): UseTimerReturn {
   const [state, dispatch] = useReducer(timerReducer, settings, getInitialTimerState);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const onSavedRef = useRef(onSaved);
+  useLayoutEffect(() => {
+    onSavedRef.current = onSaved;
+  });
 
   // Update settings when they change externally
   useEffect(() => {
@@ -236,8 +243,9 @@ export function useTimer(settings: TimerSettings): UseTimerReturn {
         plannedDurationSeconds: getDurationForType(state.settings, state.timerType),
         actualDurationSeconds,
       })
-      .then(() => {
+      .then((session) => {
         setSaveError(null);
+        onSavedRef.current?.(session);
       })
       .catch((err: unknown) => {
         setSaveError(err instanceof Error ? err.message : "Session could not be saved");

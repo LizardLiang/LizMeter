@@ -1,0 +1,58 @@
+@mixin page-container {
+  padding: 32px 40px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+@mixin page-heading {
+  font-size: 10px;
+  font-weight: 700;
+  color: #3b4261;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+@mixin btn-base {
+  padding: 11px 28px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: transform 0.12s ease, box-shadow 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+  letter-spacing: 0.04em;
+
+  &:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  &:active:not(:disabled) {
+    transform: translateY(0);
+    transition-duration: 0.06s;
+  }
+}
+
+@mixin icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #565f89;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: #a9b1d6;
+  }
+}
+
+@mixin section-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #3b4261;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}

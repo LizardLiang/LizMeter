@@ -1,0 +1,22 @@
+@use "../styles/mixins" as *;
+
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid #292e42;
+  background-color: transparent;
+  color: #565f89;
+  cursor: pointer;
+  font-size: 12px;
+  transition: color 150ms, background-color 150ms;
+  flex-shrink: 0;
+
+  &:hover {
+    background-color: #1e2030;
+    color: #a9b1d6;
+  }
+}

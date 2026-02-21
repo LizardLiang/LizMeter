@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { ListSessionsInput, SaveSessionInput, TimerSettings } from "../../src/shared/types.ts";
+import type {
+  AssignTagInput,
+  CreateTagInput,
+  ListSessionsInput,
+  SaveSessionInput,
+  TimerSettings,
+  UpdateTagInput,
+} from "../../src/shared/types.ts";
 
 contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
@@ -11,6 +18,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),
     save: (settings: TimerSettings) => ipcRenderer.invoke("settings:save", settings),
+  },
+  tag: {
+    create: (input: CreateTagInput) => ipcRenderer.invoke("tag:create", input),
+    list: () => ipcRenderer.invoke("tag:list"),
+    update: (input: UpdateTagInput) => ipcRenderer.invoke("tag:update", input),
+    delete: (id: number) => ipcRenderer.invoke("tag:delete", id),
+    assign: (input: AssignTagInput) => ipcRenderer.invoke("tag:assign", input),
+    unassign: (input: AssignTagInput) => ipcRenderer.invoke("tag:unassign", input),
+    listForSession: (sessionId: string) => ipcRenderer.invoke("tag:list-for-session", sessionId),
   },
   window: {
     minimize: () => ipcRenderer.send("window:minimize"),

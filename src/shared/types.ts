@@ -16,6 +16,7 @@ export interface Session {
   plannedDurationSeconds: number; // configured duration
   actualDurationSeconds: number; // elapsed active time (excludes pauses)
   completedAt: string; // ISO 8601 timestamp
+  tags: Tag[]; // assigned tags (populated on read)
 }
 
 export interface SaveSessionInput {
@@ -28,6 +29,7 @@ export interface SaveSessionInput {
 export interface ListSessionsInput {
   limit?: number; // default 50
   offset?: number; // default 0
+  tagId?: number; // filter by tag (optional)
 }
 
 export interface ListSessionsResult {
@@ -43,6 +45,31 @@ export interface TimerSettings {
   longBreakDuration: number; // seconds
 }
 
+// --- Tag Types ---
+
+export interface Tag {
+  id: number;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface CreateTagInput {
+  name: string;
+  color: string;
+}
+
+export interface UpdateTagInput {
+  id: number;
+  name: string;
+  color: string;
+}
+
+export interface AssignTagInput {
+  sessionId: string; // UUID
+  tagId: number;
+}
+
 // --- Electron API (exposed via contextBridge) ---
 
 export interface ElectronAPI {
@@ -55,6 +82,15 @@ export interface ElectronAPI {
   settings: {
     get: () => Promise<TimerSettings>;
     save: (settings: TimerSettings) => Promise<void>;
+  };
+  tag: {
+    create: (input: CreateTagInput) => Promise<Tag>;
+    list: () => Promise<Tag[]>;
+    update: (input: UpdateTagInput) => Promise<Tag>;
+    delete: (id: number) => Promise<void>;
+    assign: (input: AssignTagInput) => Promise<void>;
+    unassign: (input: AssignTagInput) => Promise<void>;
+    listForSession: (sessionId: string) => Promise<Tag[]>;
   };
   window: {
     minimize: () => void;

@@ -6,6 +6,7 @@ import { SessionTitleInput } from "./SessionTitleInput.tsx";
 import { TimerControls } from "./TimerControls.tsx";
 import { TimerDisplay } from "./TimerDisplay.tsx";
 import { TimerTypeSelector } from "./TimerTypeSelector.tsx";
+import styles from "./TimerView.module.scss";
 
 interface TimerViewProps {
   status: TimerStatus;
@@ -40,28 +41,18 @@ export function TimerView({
 }: TimerViewProps) {
   // Visual distinction between work and break timer types (FR-023)
   const accentColor = timerType === "work" ? "#7aa2f7" : timerType === "short_break" ? "#9ece6a" : "#bb9af7";
-  const containerStyle: React.CSSProperties = {
-    backgroundColor: "#1f2335",
-    borderRadius: "12px",
-    padding: "24px",
-    border: `1px solid ${accentColor}33`,
-    boxShadow: `0 0 24px ${accentColor}18`,
-  };
 
   const isRunningOrPaused = status === "running" || status === "paused";
 
-  const errorStyle: React.CSSProperties = {
-    padding: "8px 12px",
-    backgroundColor: "#1a1b2e",
-    border: "1px solid #f7768e44",
-    borderRadius: "6px",
-    color: "#f7768e",
-    fontSize: "0.875rem",
-    marginTop: "8px",
-  };
-
   return (
-    <div style={containerStyle} data-timer-type={timerType}>
+    <div
+      className={styles.container}
+      style={{
+        border: `1px solid ${accentColor}25`,
+        boxShadow: `0 0 48px ${accentColor}14, 0 20px 60px #00000055, inset 0 1px 0 ${accentColor}0d`,
+      }}
+      data-timer-type={timerType}
+    >
       <TimerTypeSelector
         value={timerType}
         onChange={onTimerTypeChange}
@@ -85,7 +76,7 @@ export function TimerView({
         onDismiss={onDismiss}
       />
 
-      {saveError && <div style={errorStyle}>{saveError}</div>}
+      {saveError && <div className={styles.error}>{saveError}</div>}
     </div>
   );
 }

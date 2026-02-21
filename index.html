@@ -20,20 +20,6 @@
         --tn-yellow: #e0af68;
         --tn-red: #f7768e;
       }
-      *, *::before, *::after { box-sizing: border-box; }
-      html, body, #root {
-        margin: 0;
-        padding: 0;
-        height: 100%;
-        background: var(--tn-bg);
-        color: var(--tn-text);
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-        -webkit-font-smoothing: antialiased;
-      }
-      ::-webkit-scrollbar { width: 6px; }
-      ::-webkit-scrollbar-track { background: var(--tn-surface); }
-      ::-webkit-scrollbar-thumb { background: var(--tn-border); border-radius: 3px; }
-      ::-webkit-scrollbar-thumb:hover { background: var(--tn-muted); }
 
       /* ── Custom Title Bar ── */
       #titlebar {
@@ -89,9 +75,6 @@
       #titlebar-controls button svg {
         width: 10px;
         height: 10px;
-      }
-      #root {
-        margin-top: 32px;
       }
     </style>
   </head>

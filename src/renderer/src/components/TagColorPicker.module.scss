@@ -1,0 +1,21 @@
+@use "../styles/mixins" as *;
+
+.container {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  cursor: pointer;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  // background-color, border, outline set inline (dynamic per color + isSelected)
+
+  &:hover {
+    opacity: 0.85;
+  }
+}
