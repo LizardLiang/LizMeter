@@ -10,6 +10,10 @@ const mockSession: Session = {
   plannedDurationSeconds: 1500,
   actualDurationSeconds: 1498,
   completedAt: "2026-02-19T10:00:00.000Z",
+  tags: [],
+  issueNumber: null,
+  issueTitle: null,
+  issueUrl: null,
 };
 
 describe("TC-323: SessionHistoryItem shows delete button and calls onDelete", () => {

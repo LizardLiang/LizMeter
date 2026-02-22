@@ -1,5 +1,5 @@
-import { useState } from "react";
-import type { TimerSettings } from "../../../shared/types.ts";
+import { useEffect, useState } from "react";
+import type { IssueProviderStatus, TimerSettings } from "../../../shared/types.ts";
 import styles from "./SettingsPage.module.scss";
 
 interface Props {
@@ -14,6 +14,45 @@ export function SettingsPage({ settings, onSave }: Props) {
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenStatus, setTokenStatus] = useState<IssueProviderStatus>({ configured: false, provider: null });
+  const [tokenSaving, setTokenSaving] = useState(false);
+  const [tokenSaved, setTokenSaved] = useState(false);
+  const [tokenError, setTokenError] = useState<string | null>(null);
+
+  useEffect(() => {
+    void window.electronAPI.issues.providerStatus().then(setTokenStatus);
+  }, []);
+
+  async function handleSaveToken() {
+    const t = tokenInput.trim();
+    if (!t) {
+      setTokenError("Token cannot be empty.");
+      return;
+    }
+    setTokenSaving(true);
+    setTokenError(null);
+    setTokenSaved(false);
+    try {
+      await window.electronAPI.issues.setToken({ token: t, provider: "github" });
+      const status = await window.electronAPI.issues.providerStatus();
+      setTokenStatus(status);
+      setTokenInput("");
+      setTokenSaved(true);
+      setTimeout(() => setTokenSaved(false), 2000);
+    } catch (err) {
+      setTokenError(err instanceof Error ? err.message : "Failed to save token.");
+    } finally {
+      setTokenSaving(false);
+    }
+  }
+
+  async function handleRemoveToken() {
+    await window.electronAPI.issues.deleteToken();
+    const status = await window.electronAPI.issues.providerStatus();
+    setTokenStatus(status);
+  }
 
   async function handleSave() {
     const w = parseInt(work, 10);
@@ -95,6 +134,48 @@ export function SettingsPage({ settings, onSave }: Props) {
       <button className={styles.saveBtn} onClick={() => void handleSave()} disabled={isSaving}>
         {isSaving ? "Saving…" : saved ? "Saved ✓" : "Save Settings"}
       </button>
+
+      <div className={styles.sectionDivider} />
+
+      <h2 className={styles.sectionHeading}>Issue Tracker</h2>
+
+      {tokenStatus.configured
+        ? (
+          <div className={styles.tokenConnected}>
+            <span className={styles.tokenStatus}>GitHub — Connected ✓</span>
+            <button className={styles.removeTokenBtn} onClick={() => void handleRemoveToken()}>
+              Remove token
+            </button>
+          </div>
+        )
+        : (
+          <div className={styles.tokenForm}>
+            <label className={styles.label}>GitHub Personal Access Token</label>
+            <p className={styles.tokenHint}>
+              Needs <code>repo</code> scope.{" "}
+              <span
+                className={styles.tokenLink}
+                onClick={() => void window.electronAPI.shell.openExternal("https://github.com/settings/tokens")}
+              >
+                Create token ↗
+              </span>
+            </p>
+            <div className={styles.inputRow}>
+              <input
+                type="password"
+                className={styles.tokenInput}
+                placeholder="ghp_…"
+                value={tokenInput}
+                onChange={(e) => setTokenInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void handleSaveToken()}
+              />
+            </div>
+            {tokenError && <div className={styles.errorMsg}>{tokenError}</div>}
+            <button className={styles.saveBtn} onClick={() => void handleSaveToken()} disabled={tokenSaving}>
+              {tokenSaving ? "Saving…" : tokenSaved ? "Saved ✓" : "Save Token"}
+            </button>
+          </div>
+        )}
     </div>
   );
 }

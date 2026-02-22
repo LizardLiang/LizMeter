@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { closeDatabase, initDatabase } from "./database.ts";
 import { registerIpcHandlers } from "./ipc-handlers.ts";
+import { initProviderFromDisk } from "./issue-providers/index.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
@@ -55,6 +56,7 @@ app.whenReady().then(() => {
   }
 
   registerIpcHandlers();
+  initProviderFromDisk();
   createWindow();
 
   app.on("activate", () => {

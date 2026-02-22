@@ -46,7 +46,7 @@ function formatDate(iso: string): string {
 }
 
 function formatDuration(seconds: number): string {
-  const m = Math.round(seconds / 60);
+  const m = Math.floor(seconds / 60);
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 }
 

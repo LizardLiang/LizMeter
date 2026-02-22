@@ -1,0 +1,172 @@
+@use "../styles/mixins" as *;
+
+.page {
+  @include page-container;
+  max-width: 600px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.heading {
+  @include page-heading;
+}
+
+.refreshBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 6px;
+  border: 1px solid #292e42;
+  background: transparent;
+  color: #565f89;
+  font-size: 12px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+
+  &:hover:not(:disabled) {
+    color: #a9b1d6;
+    border-color: #3b4261;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+}
+
+.stateMsg {
+  color: #565f89;
+  font-size: 13px;
+  padding: 24px 0;
+  text-align: center;
+}
+
+.errorState {
+  padding: 24px 0;
+  text-align: center;
+}
+
+.errorMsg {
+  color: #f7768e;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+
+.retryBtn {
+  padding: 6px 16px;
+  border-radius: 6px;
+  border: 1px solid #f7768e40;
+  background: #f7768e10;
+  color: #f7768e;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover {
+    background: #f7768e20;
+  }
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48px 0;
+  text-align: center;
+  gap: 8px;
+}
+
+.emptyIcon {
+  color: #3b4261;
+  margin-bottom: 8px;
+}
+
+.emptyTitle {
+  color: #a9b1d6;
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0;
+}
+
+.emptyDesc {
+  color: #565f89;
+  font-size: 12px;
+  margin: 0;
+}
+
+.ctaBtn {
+  margin-top: 12px;
+  padding: 7px 18px;
+  border-radius: 6px;
+  border: none;
+  background: #7aa2f7;
+  color: #1a1b26;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+
+  &:hover {
+    background: #89b4fa;
+  }
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.card {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #1f2335;
+  background: #1f2335;
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: #292e42;
+  }
+}
+
+.cardTop {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.issueNum {
+  color: #7aa2f7;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.issueRepo {
+  color: #3b4261;
+  font-size: 11px;
+}
+
+.issueTitle {
+  color: #c0caf5;
+  font-size: 13px;
+  margin: 0 0 8px;
+  line-height: 1.4;
+}
+
+.labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.labelChip {
+  padding: 1px 7px;
+  border-radius: 10px;
+  font-size: 10px;
+  font-weight: 600;
+}

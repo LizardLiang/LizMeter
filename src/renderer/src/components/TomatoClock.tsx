@@ -2,15 +2,17 @@
 // Root container for the Tomato Clock feature
 
 import { useCallback, useState } from "react";
-import type { Session, TimerSettings } from "../../../shared/types.ts";
+import type { Issue, Session, TimerSettings } from "../../../shared/types.ts";
 import { useSessionHistory } from "../hooks/useSessionHistory.ts";
 import { useSettings } from "../hooks/useSettings.ts";
 import { useTagManager } from "../hooks/useTagManager.ts";
 import { useTimer } from "../hooks/useTimer.ts";
 import { HistoryPage } from "./HistoryPage.tsx";
+import { IssuesPage } from "./IssuesPage.tsx";
 import type { NavPage } from "./NavSidebar.tsx";
 import { NavSidebar } from "./NavSidebar.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
+import { StatsPage } from "./StatsPage.tsx";
 import { TagPicker } from "./TagPicker.tsx";
 import { TagsPage } from "./TagsPage.tsx";
 import { TimerView } from "./TimerView.tsx";
@@ -42,6 +44,7 @@ export function TomatoClock() {
 
   const [activePage, setActivePage] = useState<NavPage>("timer");
   const [pendingTagIds, setPendingTagIds] = useState<number[]>([]);
+  const [pendingIssue, setPendingIssue] = useState<Issue | null>(null);
 
   const handleSessionSaved = useCallback(
     (session: Session) => {
@@ -49,10 +52,12 @@ export function TomatoClock() {
       Promise.all(assigns)
         .then(() => {
           setPendingTagIds([]);
+          setPendingIssue(null);
           refresh();
         })
         .catch(() => {
           setPendingTagIds([]);
+          setPendingIssue(null);
           refresh();
         });
     },
@@ -60,7 +65,22 @@ export function TomatoClock() {
   );
 
   const { state, start, pause, resume, reset, setTimerType, setTitle, setRemaining, dismissCompletion, saveError } =
-    useTimer(effectiveSettings, handleSessionSaved);
+    useTimer(effectiveSettings, handleSessionSaved, pendingIssue);
+
+  const handleReset = useCallback(() => {
+    reset();
+    setPendingIssue(null);
+  }, [reset]);
+
+  const handleIssueSelect = useCallback(
+    (issue: Issue | null) => {
+      setPendingIssue(issue);
+      if (issue && state.title === "") {
+        setTitle(issue.title);
+      }
+    },
+    [state.title, setTitle],
+  );
 
   const handlePendingTagAdd = useCallback((tagId: number) => {
     setPendingTagIds((prev) => (prev.includes(tagId) ? prev : [...prev, tagId]));
@@ -87,21 +107,22 @@ export function TomatoClock() {
       <div className={styles.main}>
         {activePage === "timer" && (
           <div className={styles.timerPage}>
-            <h1 className={styles.timerHeading}>Tomato Clock</h1>
             <TimerView
               status={state.status}
               timerType={state.timerType}
               remainingSeconds={state.remainingSeconds}
               title={state.title}
               saveError={saveError}
+              selectedIssue={pendingIssue}
               onStart={start}
               onPause={pause}
               onResume={resume}
-              onReset={reset}
+              onReset={handleReset}
               onDismiss={dismissCompletion}
               onTimerTypeChange={setTimerType}
               onTitleChange={setTitle}
               onRemainingChange={setRemaining}
+              onIssueSelect={handleIssueSelect}
             />
 
             {isTimerActive && (
@@ -112,6 +133,7 @@ export function TomatoClock() {
                   selectedTagIds={pendingTagIds}
                   onAdd={handlePendingTagAdd}
                   onRemove={handlePendingTagRemove}
+                  onCreateTag={tagManager.createTag}
                 />
               </div>
             )}
@@ -131,8 +153,11 @@ export function TomatoClock() {
             onLoadMore={loadMore}
             onAssignTag={tagManager.assignTag}
             onUnassignTag={tagManager.unassignTag}
+            onCreateTag={tagManager.createTag}
           />
         )}
+
+        {activePage === "stats" && <StatsPage />}
 
         {activePage === "tags" && (
           <TagsPage
@@ -142,6 +167,8 @@ export function TomatoClock() {
             onDeleteTag={tagManager.deleteTag}
           />
         )}
+
+        {activePage === "issues" && <IssuesPage onNavigate={setActivePage} />}
 
         {activePage === "settings" && <SettingsPage settings={effectiveSettings} onSave={saveSettings} />}
       </div>

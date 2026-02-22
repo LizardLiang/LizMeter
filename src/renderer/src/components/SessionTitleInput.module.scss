@@ -16,23 +16,31 @@
 
 .input {
   width: 100%;
-  padding: 10px 14px;
+  padding: 9px 0;
   font-size: 0.9375rem;
-  border-radius: 5px;
-  border: 1px solid #292e4230;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #1e2030;
   outline: none;
   box-sizing: border-box;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  color: var(--tn-text);
   letter-spacing: 0.01em;
+  transition: border-color 0.2s ease;
+
+  &::placeholder {
+    color: #3b4261;
+  }
 
   &:hover:not(:focus):not(:disabled) {
-    border-color: #292e4258;
+    border-bottom-color: #292e42;
   }
 
   &:focus {
-    border-color: #7aa2f745;
-    box-shadow: 0 0 0 3px #7aa2f712;
+    border-bottom-color: #7aa2f750;
   }
 
-  // background-color, color, cursor set inline (dynamic: disabled)
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
 }

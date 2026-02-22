@@ -80,6 +80,14 @@ export function initDatabase(dbPath?: string): void {
       PRIMARY KEY (session_id, tag_id)
     );
   `);
+
+  // Idempotent migration: add issue columns if they don't exist yet
+  const cols = (db.prepare("PRAGMA table_info(sessions)").all() as Array<{ name: string }>).map((c) => c.name);
+  if (!cols.includes("issue_number")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN issue_number INTEGER");
+    db.exec("ALTER TABLE sessions ADD COLUMN issue_title TEXT");
+    db.exec("ALTER TABLE sessions ADD COLUMN issue_url TEXT");
+  }
 }
 
 function getDefaultDbPath(): string {
@@ -145,11 +153,21 @@ export function saveSession(input: SaveSessionInput): Session {
   const completedAt = new Date().toISOString();
 
   const stmt = database.prepare(`
-    INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  stmt.run(id, title, input.timerType, input.plannedDurationSeconds, input.actualDurationSeconds, completedAt);
+  stmt.run(
+    id,
+    title,
+    input.timerType,
+    input.plannedDurationSeconds,
+    input.actualDurationSeconds,
+    completedAt,
+    input.issueNumber ?? null,
+    input.issueTitle ?? null,
+    input.issueUrl ?? null,
+  );
 
   return {
     id,
@@ -159,6 +177,9 @@ export function saveSession(input: SaveSessionInput): Session {
     actualDurationSeconds: input.actualDurationSeconds,
     completedAt,
     tags: [],
+    issueNumber: input.issueNumber ?? null,
+    issueTitle: input.issueTitle ?? null,
+    issueUrl: input.issueUrl ?? null,
   };
 }
 
@@ -169,6 +190,9 @@ interface SessionRow {
   plannedDurationSeconds: number;
   actualDurationSeconds: number;
   completedAt: string;
+  issueNumber: number | null;
+  issueTitle: string | null;
+  issueUrl: string | null;
 }
 
 interface TagRow {
@@ -198,7 +222,10 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
         `SELECT s.id, s.title, s.timer_type as timerType,
                 s.planned_duration_seconds as plannedDurationSeconds,
                 s.actual_duration_seconds as actualDurationSeconds,
-                s.completed_at as completedAt
+                s.completed_at as completedAt,
+                s.issue_number as issueNumber,
+                s.issue_title as issueTitle,
+                s.issue_url as issueUrl
          FROM sessions s
          INNER JOIN session_tags st ON st.session_id = s.id AND st.tag_id = ?
          ORDER BY s.completed_at DESC
@@ -218,7 +245,10 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
         `SELECT id, title, timer_type as timerType,
                 planned_duration_seconds as plannedDurationSeconds,
                 actual_duration_seconds as actualDurationSeconds,
-                completed_at as completedAt
+                completed_at as completedAt,
+                issue_number as issueNumber,
+                issue_title as issueTitle,
+                issue_url as issueUrl
          FROM sessions
          ORDER BY completed_at DESC
          LIMIT ? OFFSET ?`,
@@ -246,6 +276,9 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
     actualDurationSeconds: row.actualDurationSeconds,
     completedAt: row.completedAt,
     tags: (getTagsStmt.all(row.id) as TagRow[]).map(rowToTag),
+    issueNumber: row.issueNumber ?? null,
+    issueTitle: row.issueTitle ?? null,
+    issueUrl: row.issueUrl ?? null,
   }));
 
   return { sessions, total };

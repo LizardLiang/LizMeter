@@ -10,6 +10,10 @@ const mockSession: Session = {
   plannedDurationSeconds: 1500,
   actualDurationSeconds: 1498,
   completedAt: "2026-02-19T10:00:00.000Z",
+  tags: [],
+  issueNumber: null,
+  issueTitle: null,
+  issueUrl: null,
 };
 
 const mockElectronAPI = {
@@ -22,6 +26,15 @@ const mockElectronAPI = {
   settings: {
     get: vi.fn().mockResolvedValue({ workDuration: 1500, shortBreakDuration: 300, longBreakDuration: 900 }),
     save: vi.fn().mockResolvedValue(undefined),
+  },
+  issues: {
+    list: vi.fn().mockResolvedValue({ issues: [] }),
+    providerStatus: vi.fn().mockResolvedValue({ configured: false, provider: null }),
+    setToken: vi.fn().mockResolvedValue(undefined),
+    deleteToken: vi.fn().mockResolvedValue(undefined),
+  },
+  shell: {
+    openExternal: vi.fn().mockResolvedValue(undefined),
   },
 };
 

@@ -11,6 +11,10 @@ const mockSessions: Session[] = [
     plannedDurationSeconds: 1500,
     actualDurationSeconds: 1498,
     completedAt: "2026-02-19T10:00:00.000Z",
+    tags: [],
+    issueNumber: null,
+    issueTitle: null,
+    issueUrl: null,
   },
   {
     id: "2",
@@ -19,6 +23,10 @@ const mockSessions: Session[] = [
     plannedDurationSeconds: 300,
     actualDurationSeconds: 298,
     completedAt: "2026-02-19T10:30:00.000Z",
+    tags: [],
+    issueNumber: null,
+    issueTitle: null,
+    issueUrl: null,
   },
   {
     id: "3",
@@ -27,6 +35,10 @@ const mockSessions: Session[] = [
     plannedDurationSeconds: 900,
     actualDurationSeconds: 900,
     completedAt: "2026-02-19T11:00:00.000Z",
+    tags: [],
+    issueNumber: null,
+    issueTitle: null,
+    issueUrl: null,
   },
 ];
 

@@ -109,19 +109,18 @@ describe("TC-105: RESET from paused returns to idle", () => {
 
 describe("TC-106: COMPLETE transitions running to completed", () => {
   it("sets status to completed, remainingSeconds to 0, accumulates active time", () => {
-    const startTime = Date.now() - 1500000;
     const stateAboutToComplete: TimerState = {
       ...runningState,
       accumulatedActiveMs: 0,
-      startedAtWallClock: startTime,
+      remainingSeconds: 1500,
     };
 
-    const result = timerReducer(stateAboutToComplete, { type: "COMPLETE" });
+    const result = timerReducer(stateAboutToComplete, { type: "COMPLETE", payload: 1500000 });
 
     expect(result.status).toBe("completed");
     expect(result.remainingSeconds).toBe(0);
     expect(result.startedAtWallClock).toBeNull();
-    expect(result.accumulatedActiveMs).toBeGreaterThan(0);
+    expect(result.accumulatedActiveMs).toBe(1500000);
   });
 });
 

@@ -52,6 +52,7 @@
     "vitest": "^4.0.18"
   },
   "dependencies": {
+    "@octokit/rest": "^20",
     "better-sqlite3": "^12.6.2",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"

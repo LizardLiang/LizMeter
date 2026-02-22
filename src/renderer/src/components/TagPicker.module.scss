@@ -23,13 +23,13 @@
   position: absolute;
   bottom: calc(100% + 4px);
   left: 0;
-  right: 0;
+  min-width: 160px;
   background-color: #1e2030;
   border: 1px solid #292e42;
   border-radius: 8px;
   padding: 4px 0;
   z-index: 100;
-  max-height: 180px;
+  max-height: 280px;
   overflow-y: auto;
 }
 
@@ -64,4 +64,140 @@
   font-size: 11px;
   color: #565f89;
   font-style: italic;
+}
+
+// ── Inline create form ──────────────────────────────
+
+.divider {
+  height: 1px;
+  background: #292e42;
+  margin: 3px 0;
+}
+
+.newTagBtn {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  text-align: left;
+  background: none;
+  border: none;
+  font-size: 11px;
+  color: #3b4261;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: #a9b1d6;
+  }
+}
+
+.createForm {
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.createHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.createTitle {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #565f89;
+}
+
+.cancelBtn {
+  background: none;
+  border: none;
+  color: #565f89;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+  transition: color 0.15s ease;
+
+  &:hover {
+    color: #a9b1d6;
+  }
+}
+
+.nameInput {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 8px;
+  font-size: 12px;
+  background: #16161e;
+  border: 1px solid #292e42;
+  border-radius: 4px;
+  color: #c0caf5;
+  outline: none;
+  transition: border-color 0.15s ease;
+
+  &::placeholder {
+    color: #3b4261;
+  }
+
+  &:focus {
+    border-color: #7aa2f750;
+  }
+}
+
+.swatchRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  flex-shrink: 0;
+  transition: transform 0.1s ease, border-color 0.1s ease;
+
+  &:hover {
+    transform: scale(1.15);
+  }
+}
+
+.swatchActive {
+  border-color: #c0caf5;
+}
+
+.createError {
+  font-size: 10px;
+  color: #f7768e;
+  margin-top: -2px;
+}
+
+.createBtn {
+  width: 100%;
+  padding: 5px 0;
+  font-size: 12px;
+  font-weight: 600;
+  background: #7aa2f7;
+  color: #1a1b26;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s ease, opacity 0.15s ease;
+
+  &:hover:not(:disabled) {
+    background: #89b4f8;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
 }

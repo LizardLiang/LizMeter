@@ -1,0 +1,235 @@
+@use "../styles/mixins" as *;
+
+.page {
+  @include page-container;
+  max-width: 600px;
+}
+
+.heading {
+  @include page-heading;
+  margin-bottom: 16px;
+}
+
+// --- Date range chips ---
+.rangeRow {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 20px;
+}
+
+.range {
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  background: transparent;
+  border: 1px solid #292e42;
+  border-radius: 4px;
+  color: #565f89;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: #1e2030;
+    color: #a9b1d6;
+  }
+}
+
+.rangeActive {
+  composes: range;
+  background: #1e2030;
+  border-color: #7aa2f750;
+  color: #7aa2f7;
+}
+
+// --- Summary metric cards ---
+.summaryRow {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+}
+
+.summaryCard {
+  flex: 1;
+  padding: 12px 14px;
+  border: 1px solid #1e2030;
+  border-radius: 4px;
+  background: #1e203028;
+}
+
+.summaryLabel {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #3b4261;
+  margin-bottom: 6px;
+}
+
+.summaryValue {
+  font-size: 1.375rem;
+  font-weight: 700;
+  color: #c0caf5;
+  font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+}
+
+// --- Group-by tab row ---
+.tabRow {
+  display: flex;
+  border-bottom: 1px solid #1e2030;
+  margin-bottom: 20px;
+}
+
+.tab {
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 0.8125rem;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  color: #565f89;
+  cursor: pointer;
+  letter-spacing: 0.03em;
+  transition: color 0.15s ease, border-color 0.15s ease;
+
+  &:hover {
+    color: #a9b1d6;
+  }
+}
+
+.tabActive {
+  composes: tab;
+  color: #7aa2f7;
+  border-bottom-color: #7aa2f7;
+}
+
+// --- Section ---
+.section {
+  margin-top: 4px;
+}
+
+.sectionLabel {
+  @include section-label;
+  margin-bottom: 14px;
+}
+
+// --- Vertical bar chart (By Date) ---
+.barChart {
+  display: flex;
+  gap: 3px;
+  height: 180px;
+}
+
+.barCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+}
+
+.barDuration {
+  height: 14px;
+  font-size: 8px;
+  color: #565f89;
+  line-height: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-align: center;
+}
+
+.barTrack {
+  flex: 1;
+  width: 100%;
+  position: relative;
+  border-bottom: 1px solid #1e2030;
+  padding: 0 15%;
+  box-sizing: border-box;
+}
+
+.barFill {
+  position: absolute;
+  bottom: 0;
+  left: 15%;
+  right: 15%;
+  border-radius: 2px 2px 0 0;
+  transition: height 0.45s ease;
+  min-height: 0;
+}
+
+.barLabel {
+  height: 20px;
+  font-size: 9px;
+  font-weight: 600;
+  color: #3b4261;
+  line-height: 20px;
+  letter-spacing: 0.04em;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+// --- Horizontal bar list (By Tag / By Type) ---
+.hBarList {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.hBarRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.hBarName {
+  width: 88px;
+  font-size: 12px;
+  color: #a9b1d6;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hBarTrack {
+  flex: 1;
+  height: 5px;
+  background: #1e2030;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.hBarFill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.45s ease;
+  min-width: 2px;
+}
+
+.hBarMeta {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.hBarPct {
+  width: 30px;
+  font-size: 11px;
+  color: #565f89;
+  text-align: right;
+}
+
+.hBarDuration {
+  width: 52px;
+  font-size: 11px;
+  color: #a9b1d6;
+  text-align: right;
+  font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
+}
+
+// --- State messages ---
+.stateMsg {
+  color: #565f89;
+  font-size: 13px;
+}

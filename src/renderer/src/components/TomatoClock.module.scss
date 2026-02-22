@@ -16,18 +16,13 @@
 }
 
 .timerPage {
-  max-width: 520px;
+  max-width: 480px;
   margin: 0 auto;
-  padding: 28px 24px;
+  padding: 32px 24px 24px;
   width: 100%;
   animation: fade-in-up 0.28s ease both;
 }
 
-.timerHeading {
-  @include page-heading;
-  text-align: center;
-  margin-bottom: 20px;
-}
 
 .loading {
   display: flex;
@@ -46,13 +41,9 @@
 }
 
 .tagSection {
-  margin-top: 14px;
-  padding: 14px 16px;
-  background: linear-gradient(135deg, #1e203055 0%, #1a1b2e35 100%);
-  border-radius: 6px;
-  border: 1px solid #292e4230;
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  margin-top: 0;
+  padding: 16px 0 6px;
+  border-top: 1px solid #1e2030;
 }
 
 .tagSectionLabel {

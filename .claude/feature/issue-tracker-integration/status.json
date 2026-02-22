@@ -1,0 +1,76 @@
+{
+  "feature": "issue-tracker-integration",
+  "description": "Fetch and display issue lists from GitHub and Linear in LizMeter, link Pomodoro sessions to issues",
+  "priority": "P1",
+  "created": "2026-02-22T11:01:26.449Z",
+  "updated": "2026-02-22T13:10:26.000Z",
+  "stage": "complete",
+  "completedAt": "2026-02-22T13:16:29.113Z",
+  "pipeline": {
+    "0-research": {
+      "status": "complete",
+      "assignee": "metis",
+      "completed": "2026-02-22T11:05:00.000Z"
+    },
+    "1-prd": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "prd.md",
+      "completed": "2026-02-22T11:25:00.000Z"
+    },
+    "2-prd-review": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "prd-review.md",
+      "verdict": "approved-with-notes",
+      "completed": "2026-02-22T11:40:00.000Z"
+    },
+    "3-tech-spec": {
+      "status": "complete",
+      "assignee": "hephaestus",
+      "document": "tech-spec.md",
+      "completed": "2026-02-22T12:15:00.000Z"
+    },
+    "4-spec-review-pm": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "spec-review-pm.md",
+      "verdict": "approved-with-notes",
+      "completed": "2026-02-22T12:30:00.000Z"
+    },
+    "5-spec-review-sa": {
+      "status": "complete",
+      "assignee": "apollo",
+      "document": "spec-review-sa.md",
+      "verdict": "approved-with-notes",
+      "criticalIssues": 4,
+      "majorIssues": 1,
+      "minorIssues": 3,
+      "completed": "2026-02-22T12:40:00.000Z"
+    },
+    "6-test-plan": {
+      "status": "complete",
+      "assignee": "artemis",
+      "document": "test-plan.md",
+      "completed": "2026-02-22T13:00:00.000Z"
+    },
+    "7-implementation": {
+      "status": "complete",
+      "assignee": "ares",
+      "mode": "ares",
+      "document": "implementation-notes.md",
+      "testsPass": 92,
+      "completed": "2026-02-22T13:10:26.000Z"
+    },
+    "8-code-review": {
+      "status": "complete",
+      "assignee": "hermes",
+      "document": "code-review.md",
+      "verdict": "approved",
+      "criticalIssues": 0,
+      "majorIssues": 2,
+      "minorIssues": 5,
+      "completed": "2026-02-22T13:16:29.113Z"
+    }
+  }
+}

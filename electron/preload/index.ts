@@ -2,6 +2,8 @@ import { contextBridge, ipcRenderer } from "electron";
 import type {
   AssignTagInput,
   CreateTagInput,
+  IssuesListInput,
+  IssuesSetTokenInput,
   ListSessionsInput,
   SaveSessionInput,
   TimerSettings,
@@ -32,5 +34,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
     minimize: () => ipcRenderer.send("window:minimize"),
     maximize: () => ipcRenderer.send("window:maximize"),
     close: () => ipcRenderer.send("window:close"),
+  },
+  issues: {
+    list: (input: IssuesListInput) => ipcRenderer.invoke("issues:list", input),
+    providerStatus: () => ipcRenderer.invoke("issues:provider-status"),
+    setToken: (input: IssuesSetTokenInput) => ipcRenderer.invoke("issues:set-token", input),
+    deleteToken: () => ipcRenderer.invoke("issues:delete-token"),
+  },
+  shell: {
+    openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   },
 });

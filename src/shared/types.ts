@@ -17,6 +17,9 @@ export interface Session {
   actualDurationSeconds: number; // elapsed active time (excludes pauses)
   completedAt: string; // ISO 8601 timestamp
   tags: Tag[]; // assigned tags (populated on read)
+  issueNumber: number | null;
+  issueTitle: string | null;
+  issueUrl: string | null;
 }
 
 export interface SaveSessionInput {
@@ -24,6 +27,9 @@ export interface SaveSessionInput {
   timerType: TimerType;
   plannedDurationSeconds: number;
   actualDurationSeconds: number;
+  issueNumber?: number;
+  issueTitle?: string;
+  issueUrl?: string;
 }
 
 export interface ListSessionsInput {
@@ -70,6 +76,42 @@ export interface AssignTagInput {
   tagId: number;
 }
 
+// --- Issue Tracker Types ---
+
+export interface Issue {
+  number: number;
+  title: string;
+  url: string; // html_url
+  repo: string; // "owner/repo"
+  state: "open" | "closed";
+  labels: IssueLabel[];
+  updatedAt: string; // ISO 8601
+}
+
+export interface IssueLabel {
+  name: string;
+  color: string; // hex without #, e.g. "7aa2f7"
+}
+
+export interface IssueProviderStatus {
+  configured: boolean;
+  provider: "github" | null;
+}
+
+export interface IssuesListInput {
+  repo?: string; // optional "owner/repo" filter
+  forceRefresh?: boolean; // if true, clears cache before fetching
+}
+
+export interface IssuesListResult {
+  issues: Issue[];
+}
+
+export interface IssuesSetTokenInput {
+  token: string;
+  provider: "github";
+}
+
 // --- Electron API (exposed via contextBridge) ---
 
 export interface ElectronAPI {
@@ -96,5 +138,14 @@ export interface ElectronAPI {
     minimize: () => void;
     maximize: () => void;
     close: () => void;
+  };
+  issues: {
+    list: (input: IssuesListInput) => Promise<IssuesListResult>;
+    providerStatus: () => Promise<IssueProviderStatus>;
+    setToken: (input: IssuesSetTokenInput) => Promise<void>;
+    deleteToken: () => Promise<void>;
+  };
+  shell: {
+    openExternal: (url: string) => Promise<void>;
   };
 }

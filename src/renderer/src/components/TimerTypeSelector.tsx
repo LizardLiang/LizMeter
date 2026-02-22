@@ -34,11 +34,10 @@ export function TimerTypeSelector({ value, onChange, disabled }: TimerTypeSelect
             key={option.value}
             className={styles.btn}
             style={{
-              fontWeight: isSelected ? 700 : 500,
-              border: `1px solid ${isSelected ? accent : "#292e42"}`,
-              backgroundColor: isSelected ? `${accent}22` : "transparent",
+              fontWeight: isSelected ? 600 : 400,
+              borderBottom: `2px solid ${isSelected ? accent : "transparent"}`,
               color: isSelected ? accent : "#565f89",
-              opacity: disabled && !isSelected ? 0.4 : 1,
+              opacity: disabled && !isSelected ? 0.35 : 1,
               cursor: disabled ? "not-allowed" : "pointer",
             }}
             onClick={() => {

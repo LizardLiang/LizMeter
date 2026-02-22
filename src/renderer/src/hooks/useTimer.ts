@@ -2,7 +2,7 @@
 // Timer finite state machine using useReducer with wall-clock accuracy
 
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
-import type { Session, TimerSettings, TimerStatus, TimerType } from "../../../shared/types.ts";
+import type { Issue, Session, TimerSettings, TimerStatus, TimerType } from "../../../shared/types.ts";
 
 // --- State ---
 
@@ -28,7 +28,7 @@ type TimerAction =
   | { type: "RESUME"; }
   | { type: "RESET"; }
   | { type: "TICK"; payload: number; } // payload = remaining seconds
-  | { type: "COMPLETE"; }
+  | { type: "COMPLETE"; payload: number; } // payload = elapsed ms for this run segment
   | { type: "UPDATE_SETTINGS"; payload: TimerSettings; }
   | { type: "CLEAR_COMPLETION"; };
 
@@ -140,13 +140,15 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
     case "COMPLETE": {
       // Only valid when running
       if (state.status !== "running") return state;
-      const elapsed = state.startedAtWallClock ? Date.now() - state.startedAtWallClock : 0;
+      // action.payload is the elapsed ms for this run segment, computed in the tick effect
+      // using `state.remainingSeconds * 1000` captured at effect-start time. This avoids
+      // the timing gap between reducer execution and effect start that caused +1 min drift.
       return {
         ...state,
         status: "completed",
         remainingSeconds: 0,
         startedAtWallClock: null,
-        accumulatedActiveMs: state.accumulatedActiveMs + elapsed,
+        accumulatedActiveMs: state.accumulatedActiveMs + action.payload,
       };
     }
 
@@ -195,12 +197,17 @@ export interface UseTimerReturn {
 export function useTimer(
   settings: TimerSettings,
   onSaved?: (session: Session) => void,
+  pendingIssue?: Issue | null,
 ): UseTimerReturn {
   const [state, dispatch] = useReducer(timerReducer, settings, getInitialTimerState);
   const [saveError, setSaveError] = useState<string | null>(null);
   const onSavedRef = useRef(onSaved);
+  const pendingIssueRef = useRef(pendingIssue);
   useLayoutEffect(() => {
     onSavedRef.current = onSaved;
+  });
+  useLayoutEffect(() => {
+    pendingIssueRef.current = pendingIssue;
   });
 
   // Update settings when they change externally
@@ -212,14 +219,18 @@ export function useTimer(
   useEffect(() => {
     if (state.status !== "running") return;
 
-    const endTime = Date.now() + state.remainingSeconds * 1000;
+    // Capture elapsed ms for this run segment at effect-start time.
+    // Using remainingSeconds (not wall-clock subtraction) makes COMPLETE exact:
+    // the elapsed equals precisely the duration this segment was supposed to run.
+    const runElapsedMs = state.remainingSeconds * 1000;
+    const endTime = Date.now() + runElapsedMs;
 
     const intervalId = setInterval(() => {
       const now = Date.now();
       const remaining = Math.max(0, Math.round((endTime - now) / 1000));
 
       if (remaining <= 0) {
-        dispatch({ type: "COMPLETE" });
+        dispatch({ type: "COMPLETE", payload: runElapsedMs });
         clearInterval(intervalId);
       } else {
         dispatch({ type: "TICK", payload: remaining });
@@ -236,12 +247,14 @@ export function useTimer(
 
     const actualDurationSeconds = Math.round(state.accumulatedActiveMs / 1000);
 
+    const issue = pendingIssueRef.current;
     window.electronAPI.session
       .save({
         title: state.title,
         timerType: state.timerType,
         plannedDurationSeconds: getDurationForType(state.settings, state.timerType),
         actualDurationSeconds,
+        ...(issue ? { issueNumber: issue.number, issueTitle: issue.title, issueUrl: issue.url } : {}),
       })
       .then((session) => {
         setSaveError(null);

@@ -1,4 +1,4 @@
-import type { Session, Tag } from "../../../shared/types.ts";
+import type { CreateTagInput, Session, Tag } from "../../../shared/types.ts";
 import styles from "./HistoryPage.module.scss";
 import { TagBadge } from "./TagBadge.tsx";
 import { TagPicker } from "./TagPicker.tsx";
@@ -15,6 +15,7 @@ interface Props {
   onLoadMore: () => void;
   onAssignTag: (sessionId: string, tagId: number) => Promise<void>;
   onUnassignTag: (sessionId: string, tagId: number) => Promise<void>;
+  onCreateTag: (input: CreateTagInput) => Promise<Tag>;
 }
 
 function formatDate(iso: string): string {
@@ -28,7 +29,7 @@ function formatTime(iso: string): string {
 }
 
 function formatDuration(seconds: number): string {
-  const m = Math.round(seconds / 60);
+  const m = Math.floor(seconds / 60);
   return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 }
 
@@ -38,9 +39,10 @@ interface SessionCardProps {
   onDelete: (id: string) => void;
   onAssign: (sessionId: string, tagId: number) => Promise<void>;
   onUnassign: (sessionId: string, tagId: number) => Promise<void>;
+  onCreateTag: (input: CreateTagInput) => Promise<Tag>;
 }
 
-function SessionCard({ session, allTags, onDelete, onAssign, onUnassign }: SessionCardProps) {
+function SessionCard({ session, allTags, onDelete, onAssign, onUnassign, onCreateTag }: SessionCardProps) {
   const assignedTagIds = session.tags.map((t) => t.id);
 
   const typeColor = session.timerType === "work"
@@ -71,12 +73,22 @@ function SessionCard({ session, allTags, onDelete, onAssign, onUnassign }: Sessi
       </div>
       {session.title && <div className={styles.cardTitle}>{session.title}</div>}
       <div className={styles.cardTags}>
+        {session.issueNumber && (
+          <button
+            className={styles.issueLink}
+            onClick={() => void window.electronAPI.shell.openExternal(session.issueUrl!)}
+            title={session.issueTitle ?? ""}
+          >
+            #{session.issueNumber}
+          </button>
+        )}
         {session.tags.map((t) => <TagBadge key={t.id} tag={t} onRemove={(id) => void onUnassign(session.id, id)} />)}
         <TagPicker
           allTags={allTags}
           selectedTagIds={assignedTagIds}
           onAdd={(tagId) => void onAssign(session.id, tagId)}
           onRemove={(tagId) => void onUnassign(session.id, tagId)}
+          onCreateTag={onCreateTag}
         />
       </div>
     </div>
@@ -95,6 +107,7 @@ export function HistoryPage({
   onLoadMore,
   onAssignTag,
   onUnassignTag,
+  onCreateTag,
 }: Props) {
   const activeFilterTag = allTags.find((t) => t.id === activeTagFilter);
 
@@ -142,6 +155,7 @@ export function HistoryPage({
             onDelete={onDeleteSession}
             onAssign={onAssignTag}
             onUnassign={onUnassignTag}
+            onCreateTag={onCreateTag}
           />
         ))}
       </div>

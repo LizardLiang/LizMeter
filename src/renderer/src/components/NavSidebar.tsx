@@ -1,7 +1,7 @@
 import type { TimerStatus } from "../../../shared/types.ts";
 import styles from "./NavSidebar.module.scss";
 
-export type NavPage = "timer" | "history" | "tags" | "settings";
+export type NavPage = "timer" | "history" | "stats" | "tags" | "settings" | "issues";
 
 interface Props {
   activePage: NavPage;
@@ -67,6 +67,26 @@ function TagIcon() {
   );
 }
 
+function ChartIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <line x1="18" y1="20" x2="18" y2="10" />
+      <line x1="12" y1="20" x2="12" y2="4" />
+      <line x1="6" y1="20" x2="6" y2="14" />
+      <line x1="2" y1="20" x2="22" y2="20" />
+    </svg>
+  );
+}
+
 function GearIcon() {
   return (
     <svg
@@ -85,9 +105,29 @@ function GearIcon() {
   );
 }
 
+function IssuesIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
 const NAV_ITEMS: Array<{ id: NavPage; label: string; Icon: () => React.JSX.Element; }> = [
   { id: "timer", label: "Timer", Icon: ClockIcon },
   { id: "history", label: "History", Icon: ListIcon },
+  { id: "issues", label: "Issues", Icon: IssuesIcon },
+  { id: "stats", label: "Stats", Icon: ChartIcon },
   { id: "tags", label: "Tags", Icon: TagIcon },
   { id: "settings", label: "Settings", Icon: GearIcon },
 ];

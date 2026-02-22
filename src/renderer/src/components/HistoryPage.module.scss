@@ -152,3 +152,21 @@
   gap: 4px;
   align-items: center;
 }
+
+.issueLink {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 10px;
+  border: 1px solid #7aa2f740;
+  background: #7aa2f710;
+  color: #7aa2f7;
+  font-size: 10px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s;
+
+  &:hover {
+    background: #7aa2f720;
+  }
+}
