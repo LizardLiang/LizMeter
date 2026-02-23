@@ -10,6 +10,64 @@ interface SessionHistoryItemProps {
   onDelete: (id: string) => void;
 }
 
+function IssueBadge({ session }: { session: Session; }) {
+  // Determine which provider/id to display
+  const provider = session.issueProvider;
+  const issueId = session.issueId;
+  const issueNumber = session.issueNumber;
+  const issueTitle = session.issueTitle;
+  const issueUrl = session.issueUrl;
+
+  // Linear issue (new field)
+  if (provider === "linear" && issueId) {
+    return (
+      <span
+        className={styles.issueBadge}
+        style={{ cursor: issueUrl ? "pointer" : "default" }}
+        onClick={issueUrl ? () => void window.electronAPI.shell.openExternal(issueUrl) : undefined}
+        title={issueTitle ?? issueId}
+      >
+        <span className={styles.issueBadgeId}>{issueId}</span>
+        {issueTitle && <span className={styles.issueBadgeTitle}>{issueTitle}</span>}
+      </span>
+    );
+  }
+
+  // GitHub issue (new field with issueProvider: "github")
+  if (provider === "github" && issueId) {
+    const displayNum = `#${issueId}`;
+    return (
+      <span
+        className={styles.issueBadge}
+        style={{ cursor: issueUrl ? "pointer" : "default" }}
+        onClick={issueUrl ? () => void window.electronAPI.shell.openExternal(issueUrl) : undefined}
+        title={issueTitle ?? displayNum}
+      >
+        <span className={styles.issueBadgeId}>{displayNum}</span>
+        {issueTitle && <span className={styles.issueBadgeTitle}>{issueTitle}</span>}
+      </span>
+    );
+  }
+
+  // Legacy GitHub issue (issueProvider is null but issueNumber is set)
+  if (provider === null && issueNumber !== null) {
+    const displayNum = `#${issueNumber}`;
+    return (
+      <span
+        className={styles.issueBadge}
+        style={{ cursor: issueUrl ? "pointer" : "default" }}
+        onClick={issueUrl ? () => void window.electronAPI.shell.openExternal(issueUrl) : undefined}
+        title={issueTitle ?? displayNum}
+      >
+        <span className={styles.issueBadgeId}>{displayNum}</span>
+        {issueTitle && <span className={styles.issueBadgeTitle}>{issueTitle}</span>}
+      </span>
+    );
+  }
+
+  return null;
+}
+
 export function SessionHistoryItem({ session, onDelete }: SessionHistoryItemProps) {
   const typeAccent = session.timerType === "work"
     ? "#7aa2f7"
@@ -24,6 +82,7 @@ export function SessionHistoryItem({ session, onDelete }: SessionHistoryItemProp
       <span className={styles.title} title={session.title || undefined}>
         {displayTitle}
       </span>
+      <IssueBadge session={session} />
       <span
         className={styles.typeBadge}
         style={{

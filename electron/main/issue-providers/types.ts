@@ -14,7 +14,7 @@ export interface IssueProvider {
 export class IssueProviderError extends Error {
   constructor(
     message: string,
-    public readonly code: "NO_TOKEN" | "AUTH_FAILED" | "NETWORK_ERROR" | "RATE_LIMITED",
+    public readonly code: "NO_TOKEN" | "AUTH_FAILED" | "NETWORK_ERROR" | "RATE_LIMITED" | "QUERY_ERROR",
   ) {
     super(message);
     this.name = "IssueProviderError";

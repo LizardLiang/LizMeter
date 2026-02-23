@@ -14,7 +14,12 @@ export interface UseIssuesReturn {
 
 export function useIssues(input?: IssuesListInput): UseIssuesReturn {
   const [issues, setIssues] = useState<Issue[]>([]);
-  const [status, setStatus] = useState<IssueProviderStatus>({ configured: false, provider: null });
+  const [status, setStatus] = useState<IssueProviderStatus>({
+    configured: false,
+    provider: null,
+    linearConfigured: false,
+    linearTeamSelected: false,
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);

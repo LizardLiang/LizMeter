@@ -17,9 +17,13 @@ export interface Session {
   actualDurationSeconds: number; // elapsed active time (excludes pauses)
   completedAt: string; // ISO 8601 timestamp
   tags: Tag[]; // assigned tags (populated on read)
+  // Legacy GitHub fields (preserved for backward compat)
   issueNumber: number | null;
   issueTitle: string | null;
   issueUrl: string | null;
+  // New generic provider fields
+  issueProvider: "github" | "linear" | null;
+  issueId: string | null;
 }
 
 export interface SaveSessionInput {
@@ -27,9 +31,13 @@ export interface SaveSessionInput {
   timerType: TimerType;
   plannedDurationSeconds: number;
   actualDurationSeconds: number;
+  // Legacy (still used for GitHub backward compat)
   issueNumber?: number;
   issueTitle?: string;
   issueUrl?: string;
+  // New generic provider fields
+  issueProvider?: "github" | "linear";
+  issueId?: string;
 }
 
 export interface ListSessionsInput {
@@ -96,7 +104,45 @@ export interface IssueLabel {
 export interface IssueProviderStatus {
   configured: boolean;
   provider: "github" | null;
+  // Linear provider status (new fields, additive)
+  linearConfigured: boolean;
+  linearTeamSelected: boolean;
 }
+
+// --- Linear Issue Types ---
+
+export interface LinearIssueState {
+  name: string; // e.g., "In Progress"
+  type: string; // "backlog" | "unstarted" | "started" | "completed" | "cancelled"
+}
+
+export interface LinearIssue {
+  id: string; // Linear UUID
+  identifier: string; // e.g., "LIN-42"
+  title: string;
+  url: string;
+  priority: number; // 0=No priority, 1=Urgent, 2=High, 3=Medium, 4=Low
+  state: LinearIssueState;
+  updatedAt: string; // ISO 8601
+}
+
+export interface LinearTeam {
+  id: string;
+  name: string;
+  key: string; // e.g., "LIN" (prefix for issue identifiers)
+}
+
+export interface LinearProviderStatus {
+  configured: boolean; // API key exists
+  teamSelected: boolean; // Team has been chosen
+  teamName: string | null; // Display name of selected team
+}
+
+// --- Issue Reference (discriminated union for session linking) ---
+
+export type IssueRef =
+  | { provider: "github"; number: number; title: string; url: string; }
+  | { provider: "linear"; identifier: string; title: string; url: string; };
 
 export interface IssuesListInput {
   repo?: string; // optional "owner/repo" filter
@@ -145,6 +191,16 @@ export interface ElectronAPI {
     setToken: (input: IssuesSetTokenInput) => Promise<void>;
     deleteToken: () => Promise<void>;
     testToken: () => Promise<{ username: string; }>;
+  };
+  linear: {
+    setToken: (input: { token: string; }) => Promise<void>;
+    deleteToken: () => Promise<void>;
+    testConnection: () => Promise<{ displayName: string; }>;
+    listTeams: () => Promise<LinearTeam[]>;
+    setTeam: (input: { teamId: string; teamName: string; }) => Promise<void>;
+    getTeam: () => Promise<{ teamId: string; teamName: string; } | null>;
+    fetchIssues: (input: { forceRefresh?: boolean; }) => Promise<LinearIssue[]>;
+    providerStatus: () => Promise<LinearProviderStatus>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

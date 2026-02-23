@@ -1,22 +1,25 @@
 // electron/main/issue-providers/token-storage.ts
-// Encrypted GitHub PAT storage using Electron safeStorage (OS keychain-backed)
+// Encrypted token storage using Electron safeStorage (OS keychain-backed)
+// Supports multiple providers via parameterized file names.
 
 import { app, safeStorage } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
-function tokenPath(): string {
-  return path.join(app.getPath("userData"), ".github-token");
+type Provider = "github" | "linear";
+
+function tokenPath(provider: Provider = "github"): string {
+  return path.join(app.getPath("userData"), `.${provider}-token`);
 }
 
-export function saveToken(token: string): void {
+export function saveToken(token: string, provider: Provider = "github"): void {
   const encrypted = safeStorage.encryptString(token);
-  fs.writeFileSync(tokenPath(), encrypted);
+  fs.writeFileSync(tokenPath(provider), encrypted);
 }
 
-export function loadToken(): string | null {
+export function loadToken(provider: Provider = "github"): string | null {
   try {
-    const buf = fs.readFileSync(tokenPath());
+    const buf = fs.readFileSync(tokenPath(provider));
     return safeStorage.decryptString(buf);
   } catch {
     // keyring unavailable, file corrupt, or file does not exist
@@ -24,14 +27,14 @@ export function loadToken(): string | null {
   }
 }
 
-export function deleteToken(): void {
+export function deleteToken(provider: Provider = "github"): void {
   try {
-    fs.unlinkSync(tokenPath());
+    fs.unlinkSync(tokenPath(provider));
   } catch {
     // no-op if file does not exist
   }
 }
 
-export function hasToken(): boolean {
-  return fs.existsSync(tokenPath());
+export function hasToken(provider: Provider = "github"): boolean {
+  return fs.existsSync(tokenPath(provider));
 }

@@ -193,3 +193,53 @@
     color: #565f89;
   }
 }
+
+// --- Linear-specific styles ---
+
+.linearTeamLabel {
+  color: #9ece6a;
+  font-weight: 400;
+}
+
+.linearTeamSection {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.linearTeamSelect {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.teamOption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #292e42;
+  background: transparent;
+  color: #c0caf5;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+
+  &:hover {
+    background: #1f2335;
+    border-color: #3b4261;
+  }
+}
+
+.teamKey {
+  color: #565f89;
+  font-size: 11px;
+  font-weight: 600;
+  background: #292e42;
+  padding: 2px 6px;
+  border-radius: 3px;
+}

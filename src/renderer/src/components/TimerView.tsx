@@ -1,7 +1,7 @@
 // src/renderer/src/components/TimerView.tsx
 // Timer section: type selector, display, title input, controls
 
-import type { Issue, TimerStatus, TimerType } from "../../../shared/types.ts";
+import type { IssueRef, TimerStatus, TimerType } from "../../../shared/types.ts";
 import { IssuePickerDropdown } from "./IssuePickerDropdown.tsx";
 import { SessionTitleInput } from "./SessionTitleInput.tsx";
 import { TimerControls } from "./TimerControls.tsx";
@@ -15,7 +15,7 @@ interface TimerViewProps {
   remainingSeconds: number;
   title: string;
   saveError: string | null;
-  selectedIssue: Issue | null;
+  selectedIssue: IssueRef | null;
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -24,7 +24,7 @@ interface TimerViewProps {
   onTimerTypeChange: (type: TimerType) => void;
   onTitleChange: (title: string) => void;
   onRemainingChange: (seconds: number) => void;
-  onIssueSelect: (issue: Issue | null) => void;
+  onIssueSelect: (issue: IssueRef | null) => void;
 }
 
 export function TimerView({

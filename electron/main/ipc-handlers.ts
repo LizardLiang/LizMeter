@@ -8,6 +8,7 @@ import type {
   IssueProviderStatus,
   IssuesListInput,
   IssuesSetTokenInput,
+  LinearProviderStatus,
   ListSessionsInput,
   SaveSessionInput,
   TimerSettings,
@@ -17,18 +18,22 @@ import {
   assignTag,
   createTag,
   deleteSession,
+  deleteSettingValue,
   deleteTag,
+  getSettingValue,
   getSettings,
   listSessions,
   listTags,
   listTagsForSession,
   saveSession,
   saveSettings,
+  setSettingValue,
   unassignTag,
   updateTag,
 } from "./database.ts";
-import { getProvider, setProvider } from "./issue-providers/index.ts";
+import { getGitHubProvider, getLinearProvider, setLinearProvider, setProvider } from "./issue-providers/index.ts";
 import { GitHubProvider } from "./issue-providers/github-provider.ts";
+import { LinearProvider } from "./issue-providers/linear-provider.ts";
 import { IssueProviderError } from "./issue-providers/types.ts";
 import { deleteToken, hasToken, saveToken } from "./issue-providers/token-storage.ts";
 
@@ -82,36 +87,103 @@ export function registerIpcHandlers(): void {
     return listTagsForSession(sessionId);
   });
 
-  // Issue tracker handlers
+  // Issue tracker handlers (GitHub)
   ipcMain.handle("issues:list", async (_event, input: IssuesListInput) => {
-    const provider = getProvider();
+    const provider = getGitHubProvider();
     if (!provider) throw new IssueProviderError("No token configured", "NO_TOKEN");
     return { issues: await provider.listIssues(input) };
   });
 
-  ipcMain.handle("issues:provider-status", (): IssueProviderStatus => ({
-    configured: hasToken(),
-    provider: hasToken() ? "github" : null,
-  }));
+  ipcMain.handle("issues:provider-status", (): IssueProviderStatus => {
+    const linearConfigured = hasToken("linear");
+    const linearTeamId = getSettingValue("linear_team_id");
+    return {
+      configured: hasToken("github"),
+      provider: hasToken("github") ? "github" : null,
+      linearConfigured,
+      linearTeamSelected: linearConfigured && linearTeamId !== null,
+    };
+  });
 
   ipcMain.handle("issues:set-token", (_event, input: IssuesSetTokenInput) => {
     if (!input.token || input.token.trim().length === 0) {
       throw new Error("Token cannot be empty");
     }
-    saveToken(input.token.trim());
+    saveToken(input.token.trim(), "github");
     setProvider(new GitHubProvider(input.token.trim()));
   });
 
   ipcMain.handle("issues:test-token", async () => {
-    const provider = getProvider();
+    const provider = getGitHubProvider();
     if (!provider) throw new IssueProviderError("No token configured", "NO_TOKEN");
     return provider.testConnection();
   });
 
   ipcMain.handle("issues:delete-token", () => {
-    getProvider()?.destroy();
+    getGitHubProvider()?.destroy();
     setProvider(null);
-    deleteToken();
+    deleteToken("github");
+  });
+
+  // Linear IPC handlers
+  ipcMain.handle("linear:set-token", (_event, input: { token: string }) => {
+    if (!input.token || input.token.trim().length === 0) {
+      throw new Error("Token cannot be empty");
+    }
+    const trimmed = input.token.trim();
+    saveToken(trimmed, "linear");
+    setLinearProvider(new LinearProvider(trimmed));
+  });
+
+  ipcMain.handle("linear:delete-token", () => {
+    getLinearProvider()?.destroy();
+    setLinearProvider(null);
+    deleteToken("linear");
+    deleteSettingValue("linear_team_id");
+    deleteSettingValue("linear_team_name");
+  });
+
+  ipcMain.handle("linear:test-connection", async () => {
+    const provider = getLinearProvider();
+    if (!provider) throw new IssueProviderError("No Linear API key configured", "NO_TOKEN");
+    return provider.testConnection();
+  });
+
+  ipcMain.handle("linear:list-teams", async () => {
+    const provider = getLinearProvider();
+    if (!provider) throw new IssueProviderError("No Linear API key configured", "NO_TOKEN");
+    return provider.listTeams();
+  });
+
+  ipcMain.handle("linear:set-team", (_event, input: { teamId: string; teamName: string }) => {
+    setSettingValue("linear_team_id", input.teamId);
+    setSettingValue("linear_team_name", input.teamName);
+  });
+
+  ipcMain.handle("linear:get-team", (): { teamId: string; teamName: string } | null => {
+    const teamId = getSettingValue("linear_team_id");
+    const teamName = getSettingValue("linear_team_name");
+    if (!teamId || !teamName) return null;
+    return { teamId, teamName };
+  });
+
+  ipcMain.handle("linear:fetch-issues", async (_event, input: { forceRefresh?: boolean }) => {
+    const provider = getLinearProvider();
+    if (!provider) throw new IssueProviderError("No Linear API key configured", "NO_TOKEN");
+    const teamId = getSettingValue("linear_team_id");
+    if (!teamId) throw new IssueProviderError("No Linear team selected", "NO_TOKEN");
+    return provider.fetchIssues(teamId, input?.forceRefresh ?? false);
+  });
+
+  ipcMain.handle("linear:provider-status", (): LinearProviderStatus => {
+    const configured = hasToken("linear");
+    const teamId = getSettingValue("linear_team_id");
+    const teamName = getSettingValue("linear_team_name");
+    return {
+      configured,
+      teamSelected: configured && teamId !== null,
+      teamName: configured && teamName ? teamName : null,
+    };
   });
 
   ipcMain.handle("shell:open-external", (_event, url: string) => {

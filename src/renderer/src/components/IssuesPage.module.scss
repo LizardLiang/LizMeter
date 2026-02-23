@@ -156,6 +156,13 @@
   border-radius: 4px;
 }
 
+.cardMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
 .issueTitle {
   color: #c0caf5;
   font-size: 15px;
@@ -175,4 +182,92 @@
   border-radius: 10px;
   font-size: 11px;
   font-weight: 600;
+}
+
+// --- Linear-specific styles ---
+
+.searchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.searchInput {
+  flex: 1;
+  padding: 7px 10px;
+  border-radius: 6px;
+  border: 1px solid #292e42;
+  background: #16161e;
+  color: #c0caf5;
+  font-size: 13px;
+  outline: none;
+
+  &:focus {
+    border-color: #7aa2f7;
+  }
+
+  &::placeholder {
+    color: #565f89;
+  }
+}
+
+.issueState {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  margin-left: auto;
+}
+
+.stateStarted {
+  color: #7aa2f7;
+  background: #7aa2f718;
+  border: 1px solid #7aa2f740;
+}
+
+.stateUnstarted {
+  color: #a9b1d6;
+  background: #a9b1d618;
+  border: 1px solid #a9b1d640;
+}
+
+.stateBacklog {
+  color: #565f89;
+  background: #565f8918;
+  border: 1px solid #565f8940;
+}
+
+.priorityBadge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  color: #e0af68;
+  background: #e0af6818;
+  border: 1px solid #e0af6840;
+
+  &[data-priority="1"] {
+    color: #f7768e;
+    background: #f7768e18;
+    border-color: #f7768e40;
+  }
+
+  &[data-priority="2"] {
+    color: #ff9e64;
+    background: #ff9e6418;
+    border-color: #ff9e6440;
+  }
+
+  &[data-priority="3"] {
+    color: #e0af68;
+    background: #e0af6818;
+    border-color: #e0af6840;
+  }
+
+  &[data-priority="4"] {
+    color: #565f89;
+    background: #565f8918;
+    border-color: #565f8940;
+  }
 }

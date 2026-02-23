@@ -1,23 +1,42 @@
 // src/renderer/src/components/IssuePickerDropdown.tsx
 // Issue picker for the Timer page — select an issue to link before starting
+// Supports both GitHub Issues and Linear Issues via provider tabs
 
 import { useEffect, useRef, useState } from "react";
-import type { Issue } from "../../../shared/types.ts";
+import type { Issue, IssueRef, LinearIssue } from "../../../shared/types.ts";
 import { useIssues } from "../hooks/useIssues.ts";
+import { useLinearIssues } from "../hooks/useLinearIssues.ts";
 import styles from "./IssuePickerDropdown.module.scss";
+import { ProviderTabs } from "./ProviderTabs.tsx";
+import type { ProviderTabId } from "./ProviderTabs.tsx";
 
 interface Props {
-  selectedIssue: Issue | null;
-  onSelect: (issue: Issue | null) => void;
+  selectedIssue: IssueRef | null;
+  onSelect: (issue: IssueRef | null) => void;
 }
 
 export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
-  const { issues, status, isLoading } = useIssues();
+  const { issues: githubIssues, status, isLoading: githubLoading } = useIssues();
+  const { issues: linearIssues, isLoading: linearLoading } = useLinearIssues();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [focusedIndex, setFocusedIndex] = useState(-1);
+  const [activeTab, setActiveTab] = useState<ProviderTabId>("github");
   const wrapRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  const githubConfigured = status.configured;
+  const linearConfigured = status.linearConfigured && status.linearTeamSelected;
+
+  const availableProviders: ProviderTabId[] = [];
+  if (githubConfigured) availableProviders.push("github");
+  if (linearConfigured) availableProviders.push("linear");
+
+  const showTabs = availableProviders.length > 1;
+
+  const effectiveTab = availableProviders.length === 1
+    ? availableProviders[0]!
+    : (availableProviders.includes(activeTab) ? activeTab : availableProviders[0]!);
 
   // Close on outside click
   useEffect(() => {
@@ -32,48 +51,75 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  // Focus search input when dropdown opens (no setState in effect)
+  // Focus search input when dropdown opens
   useEffect(() => {
     if (open) {
       setTimeout(() => searchRef.current?.focus(), 0);
     }
   }, [open]);
 
-  if (!status.configured) return null;
+  // Don't render anything if no providers configured
+  if (availableProviders.length === 0) return null;
 
-  const filtered = issues.filter((issue) => {
+  const isLoading = effectiveTab === "github" ? githubLoading : linearLoading;
+
+  // Filter GitHub issues
+  const filteredGitHub = githubIssues.filter((issue) => {
     if (!search.trim()) return true;
     const s = search.toLowerCase();
     return issue.title.toLowerCase().includes(s) || String(issue.number).includes(s);
   });
 
-  function handleSelect(issue: Issue) {
-    onSelect(issue);
+  // Filter Linear issues
+  const filteredLinear = linearIssues.filter((issue) => {
+    if (!search.trim()) return true;
+    const s = search.toLowerCase();
+    return issue.title.toLowerCase().includes(s) || issue.identifier.toLowerCase().includes(s);
+  });
+
+  function handleSelectGitHub(issue: Issue) {
+    onSelect({ provider: "github", number: issue.number, title: issue.title, url: issue.url });
+    setOpen(false);
+    setSearch("");
+  }
+
+  function handleSelectLinear(issue: LinearIssue) {
+    onSelect({ provider: "linear", identifier: issue.identifier, title: issue.title, url: issue.url });
     setOpen(false);
     setSearch("");
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
+    const activeList = effectiveTab === "github" ? filteredGitHub : filteredLinear;
     if (e.key === "Escape") {
       setOpen(false);
       setSearch("");
     } else if (e.key === "ArrowDown") {
       e.preventDefault();
-      setFocusedIndex((i) => Math.min(i + 1, filtered.length - 1));
+      setFocusedIndex((i) => Math.min(i + 1, activeList.length - 1));
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setFocusedIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === "Enter" && focusedIndex >= 0) {
-      const issue = filtered[focusedIndex];
-      if (issue) handleSelect(issue);
+      if (effectiveTab === "github") {
+        const issue = filteredGitHub[focusedIndex];
+        if (issue) handleSelectGitHub(issue);
+      } else {
+        const issue = filteredLinear[focusedIndex];
+        if (issue) handleSelectLinear(issue);
+      }
     }
   }
 
+  // Show selected issue trigger
   if (selectedIssue) {
+    const displayId = selectedIssue.provider === "linear"
+      ? selectedIssue.identifier
+      : `#${selectedIssue.number}`;
     return (
       <div className={styles.selected}>
         <span className={styles.selectedLabel}>
-          <span className={styles.selectedNum}>#{selectedIssue.number}</span>
+          <span className={styles.selectedNum}>{displayId}</span>
           {selectedIssue.title}
         </span>
         <button
@@ -118,23 +164,62 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
               setFocusedIndex(-1);
             }}
           />
+
+          {showTabs && (
+            <div className={styles.tabsInDropdown}>
+              <ProviderTabs
+                providers={availableProviders}
+                activeProvider={effectiveTab}
+                onSwitch={(tab) => {
+                  setActiveTab(tab);
+                  setFocusedIndex(-1);
+                }}
+              />
+            </div>
+          )}
+
           <div className={styles.list}>
             {isLoading && <div className={styles.hint}>Loading…</div>}
-            {!isLoading && filtered.length === 0 && (
-              <div className={styles.hint}>{search ? "No matching issues" : "No open issues"}</div>
+
+            {effectiveTab === "github" && !githubLoading && (
+              <>
+                {filteredGitHub.length === 0 && (
+                  <div className={styles.hint}>{search ? "No matching issues" : "No open issues"}</div>
+                )}
+                {filteredGitHub.map((issue, i) => (
+                  <button
+                    key={issue.number}
+                    className={i === focusedIndex ? styles.itemFocused : styles.item}
+                    onClick={() => handleSelectGitHub(issue)}
+                    onMouseEnter={() => setFocusedIndex(i)}
+                  >
+                    <span className={styles.itemNum}>#{issue.number}</span>
+                    <span className={styles.itemTitle}>{issue.title}</span>
+                    <span className={styles.itemRepo}>{issue.repo}</span>
+                  </button>
+                ))}
+              </>
             )}
-            {filtered.map((issue, i) => (
-              <button
-                key={issue.number}
-                className={i === focusedIndex ? styles.itemFocused : styles.item}
-                onClick={() => handleSelect(issue)}
-                onMouseEnter={() => setFocusedIndex(i)}
-              >
-                <span className={styles.itemNum}>#{issue.number}</span>
-                <span className={styles.itemTitle}>{issue.title}</span>
-                <span className={styles.itemRepo}>{issue.repo}</span>
-              </button>
-            ))}
+
+            {effectiveTab === "linear" && !linearLoading && (
+              <>
+                {filteredLinear.length === 0 && (
+                  <div className={styles.hint}>{search ? "No matching issues" : "No open issues"}</div>
+                )}
+                {filteredLinear.map((issue, i) => (
+                  <button
+                    key={issue.id}
+                    className={i === focusedIndex ? styles.itemFocused : styles.item}
+                    onClick={() => handleSelectLinear(issue)}
+                    onMouseEnter={() => setFocusedIndex(i)}
+                  >
+                    <span className={styles.itemNum}>{issue.identifier}</span>
+                    <span className={styles.itemTitle}>{issue.title}</span>
+                    <span className={styles.itemRepo}>{issue.state.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
           </div>
         </div>
       )}

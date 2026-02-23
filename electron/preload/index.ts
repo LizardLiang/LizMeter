@@ -42,6 +42,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
     deleteToken: () => ipcRenderer.invoke("issues:delete-token"),
     testToken: () => ipcRenderer.invoke("issues:test-token"),
   },
+  linear: {
+    setToken: (input: { token: string }) => ipcRenderer.invoke("linear:set-token", input),
+    deleteToken: () => ipcRenderer.invoke("linear:delete-token"),
+    testConnection: () => ipcRenderer.invoke("linear:test-connection"),
+    listTeams: () => ipcRenderer.invoke("linear:list-teams"),
+    setTeam: (input: { teamId: string; teamName: string }) => ipcRenderer.invoke("linear:set-team", input),
+    getTeam: () => ipcRenderer.invoke("linear:get-team"),
+    fetchIssues: (input: { forceRefresh?: boolean }) => ipcRenderer.invoke("linear:fetch-issues", input),
+    providerStatus: () => ipcRenderer.invoke("linear:provider-status"),
+  },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   },

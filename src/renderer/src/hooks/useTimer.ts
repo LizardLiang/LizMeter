@@ -2,7 +2,7 @@
 // Timer finite state machine using useReducer with wall-clock accuracy
 
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
-import type { Issue, Session, TimerSettings, TimerStatus, TimerType } from "../../../shared/types.ts";
+import type { IssueRef, Session, TimerSettings, TimerStatus, TimerType } from "../../../shared/types.ts";
 
 // --- State ---
 
@@ -197,7 +197,7 @@ export interface UseTimerReturn {
 export function useTimer(
   settings: TimerSettings,
   onSaved?: (session: Session) => void,
-  pendingIssue?: Issue | null,
+  pendingIssue?: IssueRef | null,
 ): UseTimerReturn {
   const [state, dispatch] = useReducer(timerReducer, settings, getInitialTimerState);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -248,13 +248,29 @@ export function useTimer(
     const actualDurationSeconds = Math.round(state.accumulatedActiveMs / 1000);
 
     const issue = pendingIssueRef.current;
+    const issueFields = issue
+      ? issue.provider === "github"
+        ? {
+          issueNumber: issue.number,
+          issueTitle: issue.title,
+          issueUrl: issue.url,
+          issueProvider: "github" as const,
+          issueId: String(issue.number),
+        }
+        : {
+          issueTitle: issue.title,
+          issueUrl: issue.url,
+          issueProvider: "linear" as const,
+          issueId: issue.identifier,
+        }
+      : {};
     window.electronAPI.session
       .save({
         title: state.title,
         timerType: state.timerType,
         plannedDurationSeconds: getDurationForType(state.settings, state.timerType),
         actualDurationSeconds,
-        ...(issue ? { issueNumber: issue.number, issueTitle: issue.title, issueUrl: issue.url } : {}),
+        ...issueFields,
       })
       .then((session) => {
         setSaveError(null);

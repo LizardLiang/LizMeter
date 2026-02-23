@@ -2,7 +2,7 @@
 // Root container for the Tomato Clock feature
 
 import { useCallback, useState } from "react";
-import type { Issue, Session, TimerSettings } from "../../../shared/types.ts";
+import type { IssueRef, Session, TimerSettings } from "../../../shared/types.ts";
 import { useSessionHistory } from "../hooks/useSessionHistory.ts";
 import { useSettings } from "../hooks/useSettings.ts";
 import { useTagManager } from "../hooks/useTagManager.ts";
@@ -44,7 +44,7 @@ export function TomatoClock() {
 
   const [activePage, setActivePage] = useState<NavPage>("timer");
   const [pendingTagIds, setPendingTagIds] = useState<number[]>([]);
-  const [pendingIssue, setPendingIssue] = useState<Issue | null>(null);
+  const [pendingIssue, setPendingIssue] = useState<IssueRef | null>(null);
 
   const handleSessionSaved = useCallback(
     (session: Session) => {
@@ -73,7 +73,7 @@ export function TomatoClock() {
   }, [reset]);
 
   const handleIssueSelect = useCallback(
-    (issue: Issue | null) => {
+    (issue: IssueRef | null) => {
       setPendingIssue(issue);
       if (issue && state.title === "") {
         setTitle(issue.title);

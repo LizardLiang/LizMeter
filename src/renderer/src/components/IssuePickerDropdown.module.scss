@@ -95,6 +95,17 @@
   }
 }
 
+.tabsInDropdown {
+  padding: 4px 8px 0;
+  border-bottom: 1px solid #292e42;
+
+  // Override ProviderTabs margin inside dropdown
+  > div {
+    margin-bottom: 0;
+    border-bottom: none;
+  }
+}
+
 .list {
   max-height: 220px;
   overflow-y: auto;

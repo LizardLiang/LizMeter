@@ -33,9 +33,25 @@ const mockElectronAPI = {
   },
   issues: {
     list: vi.fn().mockResolvedValue({ issues: [] }),
-    providerStatus: vi.fn().mockResolvedValue({ configured: false, provider: null }),
+    providerStatus: vi.fn().mockResolvedValue({
+      configured: false,
+      provider: null,
+      linearConfigured: false,
+      linearTeamSelected: false,
+    }),
     setToken: vi.fn().mockResolvedValue(undefined),
     deleteToken: vi.fn().mockResolvedValue(undefined),
+    testToken: vi.fn().mockResolvedValue({ username: "testuser" }),
+  },
+  linear: {
+    setToken: vi.fn().mockResolvedValue(undefined),
+    deleteToken: vi.fn().mockResolvedValue(undefined),
+    testConnection: vi.fn().mockResolvedValue({ displayName: "Test User" }),
+    listTeams: vi.fn().mockResolvedValue([]),
+    setTeam: vi.fn().mockResolvedValue(undefined),
+    getTeam: vi.fn().mockResolvedValue(null),
+    fetchIssues: vi.fn().mockResolvedValue([]),
+    providerStatus: vi.fn().mockResolvedValue({ configured: false, teamSelected: false, teamName: null }),
   },
   shell: {
     openExternal: vi.fn().mockResolvedValue(undefined),

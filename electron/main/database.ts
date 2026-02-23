@@ -21,6 +21,7 @@ import type {
 let db: Database.Database | null = null;
 
 const VALID_TIMER_TYPES: readonly TimerType[] = ["work", "short_break", "long_break"];
+const VALID_ISSUE_PROVIDERS = new Set(["github", "linear"]);
 
 const DEFAULT_SETTINGS: TimerSettings = {
   workDuration: 1500,
@@ -88,6 +89,11 @@ export function initDatabase(dbPath?: string): void {
     db.exec("ALTER TABLE sessions ADD COLUMN issue_title TEXT");
     db.exec("ALTER TABLE sessions ADD COLUMN issue_url TEXT");
   }
+  // Idempotent migration: add generic provider columns for multi-provider support
+  if (!cols.includes("issue_provider")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN issue_provider TEXT");
+    db.exec("ALTER TABLE sessions ADD COLUMN issue_id TEXT");
+  }
 }
 
 function getDefaultDbPath(): string {
@@ -116,6 +122,15 @@ function validateTimerType(timerType: unknown): asserts timerType is TimerType {
   }
 }
 
+function validateIssueProvider(provider: unknown): void {
+  if (provider === undefined || provider === null) return;
+  if (!VALID_ISSUE_PROVIDERS.has(provider as string)) {
+    throw new Error(
+      `Invalid issueProvider: "${String(provider)}". Must be one of: ${[...VALID_ISSUE_PROVIDERS].join(", ")}`,
+    );
+  }
+}
+
 function validateDuration(value: unknown, fieldName: string): asserts value is number {
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw new Error(`Invalid ${fieldName}: must be an integer, got ${String(value)}`);
@@ -140,6 +155,7 @@ export function saveSession(input: SaveSessionInput): Session {
 
   // Input validation (trust boundary — main process validates all inputs)
   validateTimerType(input.timerType);
+  validateIssueProvider(input.issueProvider);
   const title = sanitizeTitle(input.title);
 
   if (typeof input.plannedDurationSeconds !== "number" || input.plannedDurationSeconds <= 0) {
@@ -152,9 +168,12 @@ export function saveSession(input: SaveSessionInput): Session {
   const id = crypto.randomUUID();
   const completedAt = new Date().toISOString();
 
+  const issueProvider = input.issueProvider ?? null;
+  const issueId = input.issueId ?? null;
+
   const stmt = database.prepare(`
-    INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url, issue_provider, issue_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -167,6 +186,8 @@ export function saveSession(input: SaveSessionInput): Session {
     input.issueNumber ?? null,
     input.issueTitle ?? null,
     input.issueUrl ?? null,
+    issueProvider,
+    issueId,
   );
 
   return {
@@ -180,6 +201,8 @@ export function saveSession(input: SaveSessionInput): Session {
     issueNumber: input.issueNumber ?? null,
     issueTitle: input.issueTitle ?? null,
     issueUrl: input.issueUrl ?? null,
+    issueProvider,
+    issueId,
   };
 }
 
@@ -193,6 +216,8 @@ interface SessionRow {
   issueNumber: number | null;
   issueTitle: string | null;
   issueUrl: string | null;
+  issueProvider: string | null;
+  issueId: string | null;
 }
 
 interface TagRow {
@@ -225,7 +250,9 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
                 s.completed_at as completedAt,
                 s.issue_number as issueNumber,
                 s.issue_title as issueTitle,
-                s.issue_url as issueUrl
+                s.issue_url as issueUrl,
+                s.issue_provider as issueProvider,
+                s.issue_id as issueId
          FROM sessions s
          INNER JOIN session_tags st ON st.session_id = s.id AND st.tag_id = ?
          ORDER BY s.completed_at DESC
@@ -248,7 +275,9 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
                 completed_at as completedAt,
                 issue_number as issueNumber,
                 issue_title as issueTitle,
-                issue_url as issueUrl
+                issue_url as issueUrl,
+                issue_provider as issueProvider,
+                issue_id as issueId
          FROM sessions
          ORDER BY completed_at DESC
          LIMIT ? OFFSET ?`,
@@ -279,6 +308,8 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
     issueNumber: row.issueNumber ?? null,
     issueTitle: row.issueTitle ?? null,
     issueUrl: row.issueUrl ?? null,
+    issueProvider: (row.issueProvider as "github" | "linear" | null) ?? null,
+    issueId: row.issueId ?? null,
   }));
 
   return { sessions, total };
@@ -418,6 +449,29 @@ export function listTagsForSession(sessionId: string): Tag[] {
     )
     .all(sessionId) as TagRow[];
   return rows.map(rowToTag);
+}
+
+// --- Generic Key-Value Settings Helpers ---
+// Used for arbitrary configuration (e.g., Linear team selection)
+
+export function getSettingValue(key: string): string | null {
+  const database = getDb();
+  const row = database.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+export function setSettingValue(key: string, value: string): void {
+  const database = getDb();
+  database
+    .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+    .run(key, value);
+}
+
+export function deleteSettingValue(key: string): void {
+  const database = getDb();
+  database.prepare("DELETE FROM settings WHERE key = ?").run(key);
 }
 
 export function saveSettings(settings: TimerSettings): void {
