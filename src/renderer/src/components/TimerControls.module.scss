@@ -59,11 +59,11 @@
   cursor: pointer;
   letter-spacing: 0.04em;
   background: transparent;
-  color: #3b4261;
+  color: #565f89;
   transition: color 0.15s ease;
 
   &:hover:not(:disabled) {
-    color: #f7768e88;
+    color: #f7768e;
   }
 
   &:disabled {

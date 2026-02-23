@@ -50,23 +50,23 @@
 
 .summaryCard {
   flex: 1;
-  padding: 12px 14px;
-  border: 1px solid #1e2030;
-  border-radius: 4px;
-  background: #1e203028;
+  padding: 16px 18px;
+  border: 1px solid #292e42;
+  border-radius: 8px;
+  background: #1e2030;
 }
 
 .summaryLabel {
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #3b4261;
-  margin-bottom: 6px;
+  color: #565f89;
+  margin-bottom: 8px;
 }
 
 .summaryValue {
-  font-size: 1.375rem;
+  font-size: 1.5rem;
   font-weight: 700;
   color: #c0caf5;
   font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;
@@ -129,10 +129,10 @@
 }
 
 .barDuration {
-  height: 14px;
-  font-size: 8px;
+  height: 16px;
+  font-size: 10px;
   color: #565f89;
-  line-height: 14px;
+  line-height: 16px;
   white-space: nowrap;
   overflow: hidden;
   text-align: center;
@@ -158,11 +158,11 @@
 }
 
 .barLabel {
-  height: 20px;
-  font-size: 9px;
+  height: 22px;
+  font-size: 10px;
   font-weight: 600;
-  color: #3b4261;
-  line-height: 20px;
+  color: #565f89;
+  line-height: 22px;
   letter-spacing: 0.04em;
   text-align: center;
   white-space: nowrap;
@@ -183,8 +183,8 @@
 }
 
 .hBarName {
-  width: 88px;
-  font-size: 12px;
+  width: 96px;
+  font-size: 13px;
   color: #a9b1d6;
   flex-shrink: 0;
   overflow: hidden;
@@ -194,7 +194,7 @@
 
 .hBarTrack {
   flex: 1;
-  height: 5px;
+  height: 6px;
   background: #1e2030;
   border-radius: 3px;
   overflow: hidden;
@@ -214,15 +214,15 @@
 }
 
 .hBarPct {
-  width: 30px;
-  font-size: 11px;
+  width: 36px;
+  font-size: 12px;
   color: #565f89;
   text-align: right;
 }
 
 .hBarDuration {
-  width: 52px;
-  font-size: 11px;
+  width: 60px;
+  font-size: 12px;
   color: #a9b1d6;
   text-align: right;
   font-family: "SF Mono", "Cascadia Code", "JetBrains Mono", monospace;

@@ -7,9 +7,9 @@
 .label {
   display: block;
   margin-bottom: 6px;
-  font-size: 0.625rem;
+  font-size: 0.6875rem;
   font-weight: 700;
-  color: #3b4261;
+  color: #565f89;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
@@ -28,7 +28,7 @@
   transition: border-color 0.2s ease;
 
   &::placeholder {
-    color: #3b4261;
+    color: #565f89;
   }
 
   &:hover:not(:focus):not(:disabled) {
