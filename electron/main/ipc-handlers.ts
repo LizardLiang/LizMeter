@@ -8,6 +8,7 @@ import type {
   IssueProviderStatus,
   IssuesListInput,
   IssuesSetTokenInput,
+  JiraProviderStatus,
   LinearProviderStatus,
   ListSessionsInput,
   SaveSessionInput,
@@ -31,11 +32,19 @@ import {
   unassignTag,
   updateTag,
 } from "./database.ts";
-import { getGitHubProvider, getLinearProvider, setLinearProvider, setProvider } from "./issue-providers/index.ts";
+import {
+  getGitHubProvider,
+  getJiraProvider,
+  getLinearProvider,
+  setJiraProvider,
+  setLinearProvider,
+  setProvider,
+} from "./issue-providers/index.ts";
 import { GitHubProvider } from "./issue-providers/github-provider.ts";
+import { JiraProvider } from "./issue-providers/jira-provider.ts";
 import { LinearProvider } from "./issue-providers/linear-provider.ts";
 import { IssueProviderError } from "./issue-providers/types.ts";
-import { deleteToken, hasToken, saveToken } from "./issue-providers/token-storage.ts";
+import { deleteToken, hasToken, loadToken, saveToken } from "./issue-providers/token-storage.ts";
 
 export function registerIpcHandlers(): void {
   ipcMain.handle("session:save", (_event, input: SaveSessionInput) => {
@@ -97,11 +106,14 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("issues:provider-status", (): IssueProviderStatus => {
     const linearConfigured = hasToken("linear");
     const linearTeamId = getSettingValue("linear_team_id");
+    const jiraConfigured = hasToken("jira");
     return {
       configured: hasToken("github"),
       provider: hasToken("github") ? "github" : null,
       linearConfigured,
       linearTeamSelected: linearConfigured && linearTeamId !== null,
+      jiraConfigured,
+      jiraDomainSet: jiraConfigured && getSettingValue("jira_domain") !== null,
     };
   });
 
@@ -184,6 +196,92 @@ export function registerIpcHandlers(): void {
       teamSelected: configured && teamId !== null,
       teamName: configured && teamName ? teamName : null,
     };
+  });
+
+  // Jira IPC handlers
+
+  function reconstructJiraProvider(): void {
+    const token = loadToken("jira");
+    const domain = getSettingValue("jira_domain");
+    const email = getSettingValue("jira_email");
+    if (token && domain && email) {
+      getJiraProvider()?.destroy();
+      setJiraProvider(new JiraProvider(domain, email, token));
+    }
+  }
+
+  ipcMain.handle("jira:set-token", (_event, input: { token: string }) => {
+    if (!input.token || input.token.trim().length === 0) {
+      throw new Error("Token cannot be empty");
+    }
+    const trimmed = input.token.trim();
+    saveToken(trimmed, "jira");
+    const domain = getSettingValue("jira_domain");
+    const email = getSettingValue("jira_email");
+    if (domain && email) {
+      setJiraProvider(new JiraProvider(domain, email, trimmed));
+    }
+  });
+
+  ipcMain.handle("jira:delete-token", () => {
+    getJiraProvider()?.destroy();
+    setJiraProvider(null);
+    deleteToken("jira");
+    deleteSettingValue("jira_domain");
+    deleteSettingValue("jira_email");
+    deleteSettingValue("jira_project_key");
+    deleteSettingValue("jira_jql_filter");
+  });
+
+  ipcMain.handle("jira:test-connection", async () => {
+    const provider = getJiraProvider();
+    if (!provider) throw new IssueProviderError("No Jira credentials configured", "NO_TOKEN");
+    return provider.testConnection();
+  });
+
+  ipcMain.handle("jira:fetch-issues", async (_event, input: { forceRefresh?: boolean }) => {
+    const provider = getJiraProvider();
+    if (!provider) throw new IssueProviderError("No Jira credentials configured", "NO_TOKEN");
+    const projectKey = getSettingValue("jira_project_key");
+    const jqlFilter = getSettingValue("jira_jql_filter");
+    return provider.fetchIssues(projectKey, jqlFilter, input?.forceRefresh ?? false);
+  });
+
+  ipcMain.handle("jira:provider-status", (): JiraProviderStatus => {
+    const configured = hasToken("jira");
+    const domain = getSettingValue("jira_domain");
+    const projectKey = getSettingValue("jira_project_key");
+    return {
+      configured,
+      domainSet: configured && domain !== null,
+      projectKeySet: configured && projectKey !== null,
+    };
+  });
+
+  ipcMain.handle("jira:set-domain", (_event, input: { domain: string }) => {
+    setSettingValue("jira_domain", input.domain.trim().replace(/^https?:\/\//, "").replace(/\/+$/, ""));
+    reconstructJiraProvider();
+  });
+
+  ipcMain.handle("jira:set-email", (_event, input: { email: string }) => {
+    setSettingValue("jira_email", input.email.trim());
+    reconstructJiraProvider();
+  });
+
+  ipcMain.handle("jira:set-project-key", (_event, input: { projectKey: string }) => {
+    if (input.projectKey.trim()) {
+      setSettingValue("jira_project_key", input.projectKey.trim());
+    } else {
+      deleteSettingValue("jira_project_key");
+    }
+  });
+
+  ipcMain.handle("jira:set-jql-filter", (_event, input: { jql: string }) => {
+    if (input.jql.trim()) {
+      setSettingValue("jira_jql_filter", input.jql.trim());
+    } else {
+      deleteSettingValue("jira_jql_filter");
+    }
   });
 
   ipcMain.handle("shell:open-external", (_event, url: string) => {

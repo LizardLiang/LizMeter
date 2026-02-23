@@ -22,7 +22,7 @@ export interface Session {
   issueTitle: string | null;
   issueUrl: string | null;
   // New generic provider fields
-  issueProvider: "github" | "linear" | null;
+  issueProvider: "github" | "linear" | "jira" | null;
   issueId: string | null;
 }
 
@@ -36,7 +36,7 @@ export interface SaveSessionInput {
   issueTitle?: string;
   issueUrl?: string;
   // New generic provider fields
-  issueProvider?: "github" | "linear";
+  issueProvider?: "github" | "linear" | "jira";
   issueId?: string;
 }
 
@@ -107,6 +107,9 @@ export interface IssueProviderStatus {
   // Linear provider status (new fields, additive)
   linearConfigured: boolean;
   linearTeamSelected: boolean;
+  // Jira provider status
+  jiraConfigured: boolean;
+  jiraDomainSet: boolean;
 }
 
 // --- Linear Issue Types ---
@@ -138,11 +141,32 @@ export interface LinearProviderStatus {
   teamName: string | null; // Display name of selected team
 }
 
+// --- Jira Issue Types ---
+
+export interface JiraIssue {
+  id: string;
+  key: string;
+  title: string;
+  url: string;
+  status: string;
+  priority: string | null;
+  assignee: string | null;
+  issueType: string | null;
+  labels: string[];
+}
+
+export interface JiraProviderStatus {
+  configured: boolean;
+  domainSet: boolean;
+  projectKeySet: boolean;
+}
+
 // --- Issue Reference (discriminated union for session linking) ---
 
 export type IssueRef =
   | { provider: "github"; number: number; title: string; url: string; }
-  | { provider: "linear"; identifier: string; title: string; url: string; };
+  | { provider: "linear"; identifier: string; title: string; url: string; }
+  | { provider: "jira"; key: string; title: string; url: string; };
 
 export interface IssuesListInput {
   repo?: string; // optional "owner/repo" filter
@@ -201,6 +225,17 @@ export interface ElectronAPI {
     getTeam: () => Promise<{ teamId: string; teamName: string; } | null>;
     fetchIssues: (input: { forceRefresh?: boolean; }) => Promise<LinearIssue[]>;
     providerStatus: () => Promise<LinearProviderStatus>;
+  };
+  jira: {
+    setToken: (input: { token: string; }) => Promise<void>;
+    deleteToken: () => Promise<void>;
+    testConnection: () => Promise<{ displayName: string; }>;
+    fetchIssues: (input: { forceRefresh?: boolean; }) => Promise<JiraIssue[]>;
+    providerStatus: () => Promise<JiraProviderStatus>;
+    setDomain: (input: { domain: string; }) => Promise<void>;
+    setEmail: (input: { email: string; }) => Promise<void>;
+    setProjectKey: (input: { projectKey: string; }) => Promise<void>;
+    setJqlFilter: (input: { jql: string; }) => Promise<void>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

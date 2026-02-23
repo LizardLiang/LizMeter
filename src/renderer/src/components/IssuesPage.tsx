@@ -2,8 +2,9 @@
 // Browse GitHub and/or Linear issues
 
 import { useState } from "react";
-import type { LinearIssue } from "../../../shared/types.ts";
+import type { JiraIssue, LinearIssue } from "../../../shared/types.ts";
 import { useIssues } from "../hooks/useIssues.ts";
+import { useJiraIssues } from "../hooks/useJiraIssues.ts";
 import { useLinearIssues } from "../hooks/useLinearIssues.ts";
 import styles from "./IssuesPage.module.scss";
 import type { NavPage } from "./NavSidebar.tsx";
@@ -116,6 +117,101 @@ function LinearIssueCard({ issue }: { issue: LinearIssue; }) {
           </span>
         </div>
       )}
+    </div>
+  );
+}
+
+function JiraIssueList() {
+  const { issues, isLoading, error, refresh } = useJiraIssues();
+  const [search, setSearch] = useState("");
+
+  const filtered = issues.filter((issue) => {
+    if (!search.trim()) return true;
+    const q = search.toLowerCase();
+    return issue.title.toLowerCase().includes(q) || issue.key.toLowerCase().includes(q);
+  });
+
+  if (isLoading) {
+    return <div className={styles.stateMsg}>Loading issues…</div>;
+  }
+
+  if (error) {
+    return (
+      <div className={styles.errorState}>
+        <p className={styles.errorMsg}>{error}</p>
+        <button className={styles.retryBtn} onClick={refresh}>Retry</button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className={styles.searchRow}>
+        <input
+          className={styles.searchInput}
+          type="text"
+          placeholder="Search issues…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <button className={styles.refreshBtn} onClick={refresh} title="Refresh">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
+          Refresh
+        </button>
+      </div>
+
+      {issues.length === 0 && (
+        <div className={styles.emptyState}>
+          <p className={styles.emptyTitle}>No issues found</p>
+          <p className={styles.emptyDesc}>Check your project key or JQL filter in Settings.</p>
+        </div>
+      )}
+
+      {issues.length > 0 && filtered.length === 0 && (
+        <div className={styles.emptyState}>
+          <p className={styles.emptyTitle}>No issues match "{search}"</p>
+        </div>
+      )}
+
+      {filtered.length > 0 && (
+        <div className={styles.list}>
+          {filtered.map((issue) => <JiraIssueCard key={issue.id} issue={issue} />)}
+        </div>
+      )}
+    </>
+  );
+}
+
+function JiraIssueCard({ issue }: { issue: JiraIssue; }) {
+  return (
+    <div
+      className={styles.card}
+      onClick={() => void window.electronAPI.shell.openExternal(issue.url)}
+      style={{ cursor: "pointer" }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => e.key === "Enter" && void window.electronAPI.shell.openExternal(issue.url)}
+    >
+      <div className={styles.cardTop}>
+        <span className={styles.issueNum}>{issue.key}</span>
+        <span className={`${styles.issueState} ${styles.stateStarted}`}>{issue.status}</span>
+      </div>
+      <p className={styles.issueTitle}>{issue.title}</p>
+      <div className={styles.labels}>
+        {issue.priority && <span className={styles.priorityBadge}>{issue.priority}</span>}
+        {issue.assignee && (
+          <span
+            className={styles.labelChip}
+            style={{ color: "#7aa2f7", backgroundColor: "#7aa2f718", border: "1px solid #7aa2f740" }}
+          >
+            {issue.assignee}
+          </span>
+        )}
+      </div>
     </div>
   );
 }
@@ -238,16 +334,18 @@ export function IssuesPage({ onNavigate }: Props) {
 
   const githubConfigured = status.configured;
   const linearConfigured = status.linearConfigured && status.linearTeamSelected;
+  const jiraConfigured = status.jiraConfigured && status.jiraDomainSet;
 
   // Determine which tabs to show
   const availableProviders: ProviderTabId[] = [];
   if (githubConfigured) availableProviders.push("github");
   if (linearConfigured) availableProviders.push("linear");
+  if (jiraConfigured) availableProviders.push("jira");
 
   const [activeTab, setActiveTab] = useState<ProviderTabId>("github");
 
-  // When neither is configured
-  if (!githubConfigured && !linearConfigured) {
+  // When none is configured
+  if (!githubConfigured && !linearConfigured && !jiraConfigured) {
     return (
       <div className={styles.page}>
         <h1 className={styles.heading}>Issues</h1>
@@ -260,7 +358,7 @@ export function IssuesPage({ onNavigate }: Props) {
           </div>
           <p className={styles.emptyTitle}>No issue tracker configured</p>
           <p className={styles.emptyDesc}>
-            Connect GitHub or Linear in Settings to browse and link issues to sessions.
+            Connect GitHub, Linear, or Jira in Settings to browse and link issues to sessions.
           </p>
           <button className={styles.ctaBtn} onClick={() => onNavigate("settings")}>
             Configure in Settings
@@ -301,6 +399,8 @@ export function IssuesPage({ onNavigate }: Props) {
       )}
 
       {effectiveTab === "linear" && <LinearIssueList />}
+
+      {effectiveTab === "jira" && <JiraIssueList />}
     </div>
   );
 }

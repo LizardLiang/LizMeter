@@ -1,5 +1,11 @@
 import { useEffect, useState } from "react";
-import type { IssueProviderStatus, LinearProviderStatus, LinearTeam, TimerSettings } from "../../../shared/types.ts";
+import type {
+  IssueProviderStatus,
+  JiraProviderStatus,
+  LinearProviderStatus,
+  LinearTeam,
+  TimerSettings,
+} from "../../../shared/types.ts";
 import styles from "./SettingsPage.module.scss";
 
 interface Props {
@@ -22,6 +28,8 @@ export function SettingsPage({ settings, onSave }: Props) {
     provider: null,
     linearConfigured: false,
     linearTeamSelected: false,
+    jiraConfigured: false,
+    jiraDomainSet: false,
   });
   const [tokenSaving, setTokenSaving] = useState(false);
   const [tokenSaved, setTokenSaved] = useState(false);
@@ -44,9 +52,26 @@ export function SettingsPage({ settings, onSave }: Props) {
   const [linearTeamsLoading, setLinearTeamsLoading] = useState(false);
   const [linearTeamsError, setLinearTeamsError] = useState<string | null>(null);
 
+  // Jira state
+  const [jiraStatus, setJiraStatus] = useState<JiraProviderStatus>({
+    configured: false,
+    domainSet: false,
+    projectKeySet: false,
+  });
+  const [jiraDomain, setJiraDomain] = useState("");
+  const [jiraEmail, setJiraEmail] = useState("");
+  const [jiraTokenInput, setJiraTokenInput] = useState("");
+  const [jiraProjectKey, setJiraProjectKey] = useState("");
+  const [jiraJqlFilter, setJiraJqlFilter] = useState("");
+  const [jiraSaving, setJiraSaving] = useState(false);
+  const [jiraError, setJiraError] = useState<string | null>(null);
+  const [jiraTesting, setJiraTesting] = useState(false);
+  const [jiraTestResult, setJiraTestResult] = useState<{ ok: boolean; message: string; } | null>(null);
+
   useEffect(() => {
     void window.electronAPI.issues.providerStatus().then(setTokenStatus);
     void window.electronAPI.linear.providerStatus().then(setLinearStatus);
+    void window.electronAPI.jira.providerStatus().then(setJiraStatus);
   }, []);
 
   async function handleSaveToken() {
@@ -160,6 +185,67 @@ export function SettingsPage({ settings, onSave }: Props) {
     setLinearTestResult(null);
     setLinearTeams([]);
     setLinearTeamsError(null);
+    const providerStatus = await window.electronAPI.issues.providerStatus();
+    setTokenStatus(providerStatus);
+  }
+
+  // Jira handlers
+
+  async function handleSaveJira() {
+    const domain = jiraDomain.trim();
+    const email = jiraEmail.trim();
+    const token = jiraTokenInput.trim();
+    if (!domain || !email || !token) {
+      setJiraError("Domain, email, and API token are all required.");
+      return;
+    }
+    setJiraSaving(true);
+    setJiraError(null);
+    try {
+      await window.electronAPI.jira.setDomain({ domain });
+      await window.electronAPI.jira.setEmail({ email });
+      await window.electronAPI.jira.setToken({ token });
+      if (jiraProjectKey.trim()) {
+        await window.electronAPI.jira.setProjectKey({ projectKey: jiraProjectKey.trim() });
+      }
+      if (jiraJqlFilter.trim()) {
+        await window.electronAPI.jira.setJqlFilter({ jql: jiraJqlFilter.trim() });
+      }
+      const status = await window.electronAPI.jira.providerStatus();
+      setJiraStatus(status);
+      setJiraTokenInput("");
+      // Auto test connection
+      await handleJiraTestConnection();
+      const providerStatus = await window.electronAPI.issues.providerStatus();
+      setTokenStatus(providerStatus);
+    } catch (err) {
+      setJiraError(err instanceof Error ? err.message : "Failed to save Jira credentials.");
+    } finally {
+      setJiraSaving(false);
+    }
+  }
+
+  async function handleJiraTestConnection() {
+    setJiraTesting(true);
+    setJiraTestResult(null);
+    try {
+      const { displayName } = await window.electronAPI.jira.testConnection();
+      setJiraTestResult({ ok: true, message: `Connected as ${displayName}` });
+    } catch (err) {
+      setJiraTestResult({ ok: false, message: err instanceof Error ? err.message : "Connection failed" });
+    } finally {
+      setJiraTesting(false);
+    }
+  }
+
+  async function handleJiraDisconnect() {
+    await window.electronAPI.jira.deleteToken();
+    setJiraStatus({ configured: false, domainSet: false, projectKeySet: false });
+    setJiraTestResult(null);
+    setJiraDomain("");
+    setJiraEmail("");
+    setJiraProjectKey("");
+    setJiraJqlFilter("");
     const providerStatus = await window.electronAPI.issues.providerStatus();
     setTokenStatus(providerStatus);
   }
@@ -400,6 +486,121 @@ export function SettingsPage({ settings, onSave }: Props) {
                     Load Teams
                   </button>
                 )}
+              </div>
+            )}
+          </>
+        )}
+
+      {/* --- Jira Section --- */}
+      <div className={styles.sectionDivider} />
+      <h2 className={styles.sectionHeading}>Jira</h2>
+
+      {!jiraStatus.configured
+        ? (
+          <div className={styles.tokenForm}>
+            <label className={styles.label}>Atlassian Domain</label>
+            <p className={styles.tokenHint}>
+              e.g. <code>mycompany.atlassian.net</code>
+            </p>
+            <div className={styles.inputRow}>
+              <input
+                type="text"
+                className={styles.tokenInput}
+                placeholder="mycompany.atlassian.net"
+                value={jiraDomain}
+                onChange={(e) => setJiraDomain(e.target.value)}
+              />
+            </div>
+
+            <label className={styles.label} style={{ marginTop: 12 }}>Email</label>
+            <div className={styles.inputRow}>
+              <input
+                type="email"
+                className={styles.tokenInput}
+                placeholder="you@company.com"
+                value={jiraEmail}
+                onChange={(e) => setJiraEmail(e.target.value)}
+              />
+            </div>
+
+            <label className={styles.label} style={{ marginTop: 12 }}>API Token</label>
+            <p className={styles.tokenHint}>
+              Generate at{" "}
+              <span
+                className={styles.tokenLink}
+                onClick={() =>
+                  void window.electronAPI.shell.openExternal(
+                    "https://id.atlassian.com/manage-profile/security/api-tokens",
+                  )}
+              >
+                Atlassian API tokens ↗
+              </span>
+            </p>
+            <div className={styles.inputRow}>
+              <input
+                type="password"
+                className={styles.tokenInput}
+                placeholder="API token"
+                value={jiraTokenInput}
+                onChange={(e) => setJiraTokenInput(e.target.value)}
+              />
+            </div>
+
+            <label className={styles.label} style={{ marginTop: 12 }}>Project Key (optional)</label>
+            <p className={styles.tokenHint}>
+              e.g. <code>PROJ</code> — leave empty to show issues assigned to you
+            </p>
+            <div className={styles.inputRow}>
+              <input
+                type="text"
+                className={styles.tokenInput}
+                placeholder="PROJ"
+                value={jiraProjectKey}
+                onChange={(e) => setJiraProjectKey(e.target.value)}
+              />
+            </div>
+
+            <label className={styles.label} style={{ marginTop: 12 }}>JQL Filter (optional)</label>
+            <p className={styles.tokenHint}>
+              Custom JQL overrides the project key filter
+            </p>
+            <div className={styles.inputRow}>
+              <input
+                type="text"
+                className={styles.tokenInput}
+                placeholder="assignee = currentUser() AND status != Done"
+                value={jiraJqlFilter}
+                onChange={(e) => setJiraJqlFilter(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && void handleSaveJira()}
+              />
+            </div>
+
+            {jiraError && <div className={styles.errorMsg}>{jiraError}</div>}
+            <button className={styles.saveBtn} onClick={() => void handleSaveJira()} disabled={jiraSaving}>
+              {jiraSaving ? "Saving…" : "Save & Connect"}
+            </button>
+          </div>
+        )
+        : (
+          <>
+            <div className={styles.tokenConnected}>
+              <span className={styles.tokenStatus}>Jira — Connected ✓</span>
+              <div className={styles.tokenActions}>
+                <button
+                  className={styles.testTokenBtn}
+                  onClick={() => void handleJiraTestConnection()}
+                  disabled={jiraTesting}
+                >
+                  {jiraTesting ? "Testing…" : "Test Connection"}
+                </button>
+                <button className={styles.removeTokenBtn} onClick={() => void handleJiraDisconnect()}>
+                  Disconnect
+                </button>
+              </div>
+            </div>
+            {jiraTestResult && (
+              <div className={jiraTestResult.ok ? styles.testSuccess : styles.errorMsg}>
+                {jiraTestResult.message}
               </div>
             )}
           </>

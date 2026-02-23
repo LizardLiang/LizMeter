@@ -3,8 +3,10 @@
 
 import { loadToken } from "./token-storage.ts";
 import { GitHubProvider } from "./github-provider.ts";
+import { JiraProvider } from "./jira-provider.ts";
 import { LinearProvider } from "./linear-provider.ts";
 import type { IssueProvider } from "./types.ts";
+import { getSettingValue } from "../database.ts";
 
 // GitHub provider (singleton, implements IssueProvider interface)
 let githubProvider: IssueProvider | null = null;
@@ -48,4 +50,25 @@ export function getLinearProvider(): LinearProvider | null {
 
 export function setLinearProvider(provider: LinearProvider | null): void {
   linearProvider = provider;
+}
+
+// --- Jira provider functions ---
+
+let jiraProvider: JiraProvider | null = null;
+
+export function initJiraProviderFromDisk(): void {
+  const token = loadToken("jira");
+  const domain = getSettingValue("jira_domain");
+  const email = getSettingValue("jira_email");
+  if (token && domain && email) {
+    jiraProvider = new JiraProvider(domain, email, token);
+  }
+}
+
+export function getJiraProvider(): JiraProvider | null {
+  return jiraProvider;
+}
+
+export function setJiraProvider(provider: JiraProvider | null): void {
+  jiraProvider = provider;
 }

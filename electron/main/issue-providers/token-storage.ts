@@ -6,7 +6,7 @@ import { app, safeStorage } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 
-type Provider = "github" | "linear";
+type Provider = "github" | "linear" | "jira";
 
 function tokenPath(provider: Provider = "github"): string {
   return path.join(app.getPath("userData"), `.${provider}-token`);

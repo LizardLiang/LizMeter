@@ -52,6 +52,17 @@ contextBridge.exposeInMainWorld("electronAPI", {
     fetchIssues: (input: { forceRefresh?: boolean }) => ipcRenderer.invoke("linear:fetch-issues", input),
     providerStatus: () => ipcRenderer.invoke("linear:provider-status"),
   },
+  jira: {
+    setToken: (input: { token: string }) => ipcRenderer.invoke("jira:set-token", input),
+    deleteToken: () => ipcRenderer.invoke("jira:delete-token"),
+    testConnection: () => ipcRenderer.invoke("jira:test-connection"),
+    fetchIssues: (input: { forceRefresh?: boolean }) => ipcRenderer.invoke("jira:fetch-issues", input),
+    providerStatus: () => ipcRenderer.invoke("jira:provider-status"),
+    setDomain: (input: { domain: string }) => ipcRenderer.invoke("jira:set-domain", input),
+    setEmail: (input: { email: string }) => ipcRenderer.invoke("jira:set-email", input),
+    setProjectKey: (input: { projectKey: string }) => ipcRenderer.invoke("jira:set-project-key", input),
+    setJqlFilter: (input: { jql: string }) => ipcRenderer.invoke("jira:set-jql-filter", input),
+  },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   },

@@ -3,7 +3,7 @@
 
 import styles from "./ProviderTabs.module.scss";
 
-export type ProviderTabId = "github" | "linear";
+export type ProviderTabId = "github" | "linear" | "jira";
 
 interface Props {
   providers: ProviderTabId[];
@@ -14,6 +14,7 @@ interface Props {
 const PROVIDER_LABELS: Record<ProviderTabId, string> = {
   github: "GitHub",
   linear: "Linear",
+  jira: "Jira",
 };
 
 export function ProviderTabs({ providers, activeProvider, onSwitch }: Props) {

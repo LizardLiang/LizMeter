@@ -21,7 +21,7 @@ import type {
 let db: Database.Database | null = null;
 
 const VALID_TIMER_TYPES: readonly TimerType[] = ["work", "short_break", "long_break"];
-const VALID_ISSUE_PROVIDERS = new Set(["github", "linear"]);
+const VALID_ISSUE_PROVIDERS = new Set(["github", "linear", "jira"]);
 
 const DEFAULT_SETTINGS: TimerSettings = {
   workDuration: 1500,
@@ -308,7 +308,7 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
     issueNumber: row.issueNumber ?? null,
     issueTitle: row.issueTitle ?? null,
     issueUrl: row.issueUrl ?? null,
-    issueProvider: (row.issueProvider as "github" | "linear" | null) ?? null,
+    issueProvider: (row.issueProvider as "github" | "linear" | "jira" | null) ?? null,
     issueId: row.issueId ?? null,
   }));
 

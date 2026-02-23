@@ -3,8 +3,9 @@
 // Supports both GitHub Issues and Linear Issues via provider tabs
 
 import { useEffect, useRef, useState } from "react";
-import type { Issue, IssueRef, LinearIssue } from "../../../shared/types.ts";
+import type { Issue, IssueRef, JiraIssue, LinearIssue } from "../../../shared/types.ts";
 import { useIssues } from "../hooks/useIssues.ts";
+import { useJiraIssues } from "../hooks/useJiraIssues.ts";
 import { useLinearIssues } from "../hooks/useLinearIssues.ts";
 import styles from "./IssuePickerDropdown.module.scss";
 import { ProviderTabs } from "./ProviderTabs.tsx";
@@ -18,6 +19,7 @@ interface Props {
 export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
   const { issues: githubIssues, status, isLoading: githubLoading } = useIssues();
   const { issues: linearIssues, isLoading: linearLoading } = useLinearIssues();
+  const { issues: jiraIssues, isLoading: jiraLoading } = useJiraIssues();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [focusedIndex, setFocusedIndex] = useState(-1);
@@ -27,10 +29,12 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
 
   const githubConfigured = status.configured;
   const linearConfigured = status.linearConfigured && status.linearTeamSelected;
+  const jiraConfigured = status.jiraConfigured && status.jiraDomainSet;
 
   const availableProviders: ProviderTabId[] = [];
   if (githubConfigured) availableProviders.push("github");
   if (linearConfigured) availableProviders.push("linear");
+  if (jiraConfigured) availableProviders.push("jira");
 
   const showTabs = availableProviders.length > 1;
 
@@ -61,7 +65,7 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
   // Don't render anything if no providers configured
   if (availableProviders.length === 0) return null;
 
-  const isLoading = effectiveTab === "github" ? githubLoading : linearLoading;
+  const isLoading = effectiveTab === "github" ? githubLoading : effectiveTab === "linear" ? linearLoading : jiraLoading;
 
   // Filter GitHub issues
   const filteredGitHub = githubIssues.filter((issue) => {
@@ -77,6 +81,13 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
     return issue.title.toLowerCase().includes(s) || issue.identifier.toLowerCase().includes(s);
   });
 
+  // Filter Jira issues
+  const filteredJira = jiraIssues.filter((issue) => {
+    if (!search.trim()) return true;
+    const s = search.toLowerCase();
+    return issue.title.toLowerCase().includes(s) || issue.key.toLowerCase().includes(s);
+  });
+
   function handleSelectGitHub(issue: Issue) {
     onSelect({ provider: "github", number: issue.number, title: issue.title, url: issue.url });
     setOpen(false);
@@ -89,8 +100,18 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
     setSearch("");
   }
 
+  function handleSelectJira(issue: JiraIssue) {
+    onSelect({ provider: "jira", key: issue.key, title: issue.title, url: issue.url });
+    setOpen(false);
+    setSearch("");
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
-    const activeList = effectiveTab === "github" ? filteredGitHub : filteredLinear;
+    const activeList = effectiveTab === "github"
+      ? filteredGitHub
+      : effectiveTab === "linear"
+      ? filteredLinear
+      : filteredJira;
     if (e.key === "Escape") {
       setOpen(false);
       setSearch("");
@@ -104,9 +125,12 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
       if (effectiveTab === "github") {
         const issue = filteredGitHub[focusedIndex];
         if (issue) handleSelectGitHub(issue);
-      } else {
+      } else if (effectiveTab === "linear") {
         const issue = filteredLinear[focusedIndex];
         if (issue) handleSelectLinear(issue);
+      } else {
+        const issue = filteredJira[focusedIndex];
+        if (issue) handleSelectJira(issue);
       }
     }
   }
@@ -115,6 +139,8 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
   if (selectedIssue) {
     const displayId = selectedIssue.provider === "linear"
       ? selectedIssue.identifier
+      : selectedIssue.provider === "jira"
+      ? selectedIssue.key
       : `#${selectedIssue.number}`;
     return (
       <div className={styles.selected}>
@@ -216,6 +242,26 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
                     <span className={styles.itemNum}>{issue.identifier}</span>
                     <span className={styles.itemTitle}>{issue.title}</span>
                     <span className={styles.itemRepo}>{issue.state.name}</span>
+                  </button>
+                ))}
+              </>
+            )}
+
+            {effectiveTab === "jira" && !jiraLoading && (
+              <>
+                {filteredJira.length === 0 && (
+                  <div className={styles.hint}>{search ? "No matching issues" : "No issues found"}</div>
+                )}
+                {filteredJira.map((issue, i) => (
+                  <button
+                    key={issue.id}
+                    className={i === focusedIndex ? styles.itemFocused : styles.item}
+                    onClick={() => handleSelectJira(issue)}
+                    onMouseEnter={() => setFocusedIndex(i)}
+                  >
+                    <span className={styles.itemNum}>{issue.key}</span>
+                    <span className={styles.itemTitle}>{issue.title}</span>
+                    <span className={styles.itemRepo}>{issue.status}</span>
                   </button>
                 ))}
               </>

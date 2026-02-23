@@ -343,14 +343,14 @@ describe("TC-152: saveSession with GitHub issue stores both legacy and new colum
 });
 
 describe("TC-153: saveSession rejects invalid issueProvider values", () => {
-  it("throws error for invalid issueProvider 'jira'", () => {
+  it("throws error for invalid issueProvider 'bitbucket'", () => {
     expect(() =>
       saveSession({
         title: "test",
         timerType: "work",
         plannedDurationSeconds: 1500,
         actualDurationSeconds: 1500,
-        issueProvider: "jira" as unknown as "github",
+        issueProvider: "bitbucket" as unknown as "github",
       })
     ).toThrow(/invalid issueProvider/i);
   });
