@@ -5,7 +5,7 @@
   "main": "dist-electron/main/index.js",
   "type": "module",
   "scripts": {
-    "postinstall": "echo 'Run bun run rebuild after installing native deps'",
+    "postinstall": "electron-builder install-app-deps",
     "dev": "vite",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "build:renderer": "vite build",
@@ -17,7 +17,33 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
-    "prepare": "husky"
+    "prepare": "husky",
+    "dist": "vite build && electron-builder",
+    "icons": "node scripts/generate-icons.mjs"
+  },
+  "build": {
+    "appId": "com.lizmeter.app",
+    "productName": "LizMeter",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "assets/icon.png"
+    ],
+    "win": {
+      "icon": "assets/icon.png",
+      "target": "nsis"
+    },
+    "mac": {
+      "icon": "build/icon.icns",
+      "target": "dmg"
+    },
+    "linux": {
+      "icon": "assets/icon.png",
+      "target": "AppImage"
+    }
   },
   "devDependencies": {
     "@electron/rebuild": "^4.0.3",
@@ -41,8 +67,10 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.0",
     "husky": "^9.1.7",
+    "jimp": "^1.6.0",
     "jsdom": "^28.1.0",
     "playwright": "^1.58.2",
+    "png-to-ico": "^3.0.1",
     "sass": "^1.97.3",
     "sql.js": "^1.14.0",
     "typescript": "^5.9.3",

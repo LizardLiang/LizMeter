@@ -11,11 +11,16 @@ const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 function createWindow() {
   Menu.setApplicationMenu(null);
 
+  const iconPath = VITE_DEV_SERVER_URL
+    ? path.join(__dirname, "../../assets/icon.png")
+    : path.join(__dirname, "../../assets/icon.png");
+
   const win = new BrowserWindow({
     width: 800,
     height: 600,
     minWidth: 600,
     frame: false,
+    icon: iconPath,
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.mjs"),
       contextIsolation: true,

@@ -1,0 +1,84 @@
+{
+  "feature": "session-tags-sidebar",
+  "description": "Add tag support to sessions, and a collapsible sidebar for viewing current session, session history, and managing tags",
+  "priority": "P1",
+  "created": "2026-02-20T05:36:15.821Z",
+  "updated": "2026-02-20T07:53:00.000Z",
+  "stage": "8-code-review",
+  "pipeline": {
+    "0-research": {
+      "status": "complete",
+      "assignee": "metis",
+      "started": "2026-02-20T05:36:15.821Z"
+    },
+    "1-prd": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "prd.md",
+      "started": "2026-02-20T05:52:47.377Z",
+      "completed": "2026-02-20T05:52:47.377Z"
+    },
+    "2-prd-review": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "prd-review.md",
+      "verdict": "approved-with-notes",
+      "started": "2026-02-20T05:55:51.633Z",
+      "completed": "2026-02-20T05:55:51.633Z"
+    },
+    "3-tech-spec": {
+      "status": "complete",
+      "assignee": "hephaestus",
+      "document": "tech-spec.md",
+      "started": "2026-02-20T06:04:57.139Z",
+      "completed": "2026-02-20T06:09:22.257Z"
+    },
+    "4-spec-review-pm": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "spec-review-pm.md",
+      "verdict": "approved-with-notes",
+      "started": "2026-02-20T06:10:56.000Z",
+      "completed": "2026-02-20T06:10:56.000Z"
+    },
+    "5-spec-review-sa": {
+      "status": "complete",
+      "assignee": "apollo",
+      "document": "spec-review-sa.md",
+      "verdict": "approved-with-notes",
+      "started": "2026-02-20T06:11:36.004Z",
+      "completed": "2026-02-20T06:11:36.004Z"
+    },
+    "6-test-plan": {
+      "status": "complete",
+      "assignee": "artemis",
+      "document": "test-plan.md",
+      "started": "2026-02-20T06:20:00.000Z",
+      "completed": "2026-02-20T06:20:00.000Z"
+    },
+    "7-implementation": {
+      "status": "complete",
+      "assignee": "ares",
+      "mode": "ares",
+      "document": "implementation-notes.md",
+      "started": "2026-02-20T06:30:00.000Z",
+      "completed": "2026-02-20T07:43:06.521Z",
+      "tests": {
+        "files": 13,
+        "total": 92,
+        "passed": 92
+      }
+    },
+    "8-code-review": {
+      "status": "complete",
+      "assignee": "hermes",
+      "document": "code-review.md",
+      "verdict": "approved",
+      "criticalIssues": 0,
+      "majorIssues": 0,
+      "minorIssues": 5,
+      "started": "2026-02-20T07:43:06.521Z",
+      "completed": "2026-02-20T07:53:00.000Z"
+    }
+  }
+}
