@@ -102,6 +102,12 @@ export function registerIpcHandlers(): void {
     setProvider(new GitHubProvider(input.token.trim()));
   });
 
+  ipcMain.handle("issues:test-token", async () => {
+    const provider = getProvider();
+    if (!provider) throw new IssueProviderError("No token configured", "NO_TOKEN");
+    return provider.testConnection();
+  });
+
   ipcMain.handle("issues:delete-token", () => {
     getProvider()?.destroy();
     setProvider(null);

@@ -6,6 +6,7 @@ import type { Issue, IssuesListInput } from "../../../src/shared/types.ts";
 export interface IssueProvider {
   readonly providerName: string; // "github"
   listIssues(input: IssuesListInput): Promise<Issue[]>;
+  testConnection(): Promise<{ username: string }>;
   clearCache(): void;
   destroy(): void;
 }

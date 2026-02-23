@@ -33,7 +33,7 @@ export function useIssues(input?: IssuesListInput): UseIssuesReturn {
     }
     setIsLoading(true);
     setError(null);
-    const req: IssuesListInput = input ?? {};
+    const req: IssuesListInput = { ...input, forceRefresh: refreshToken > 0 };
     void window.electronAPI.issues
       .list(req)
       .then((res) => {

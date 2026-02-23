@@ -58,6 +58,9 @@ export default defineConfig(({ command }) => {
     ],
     server: {
       port: 5173,
+      watch: {
+        usePolling: true,
+      },
     },
     clearScreen: false,
   };

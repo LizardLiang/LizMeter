@@ -144,6 +144,7 @@ export interface ElectronAPI {
     providerStatus: () => Promise<IssueProviderStatus>;
     setToken: (input: IssuesSetTokenInput) => Promise<void>;
     deleteToken: () => Promise<void>;
+    testToken: () => Promise<{ username: string; }>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

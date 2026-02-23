@@ -20,6 +20,8 @@ export function SettingsPage({ settings, onSave }: Props) {
   const [tokenSaving, setTokenSaving] = useState(false);
   const [tokenSaved, setTokenSaved] = useState(false);
   const [tokenError, setTokenError] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string; } | null>(null);
 
   useEffect(() => {
     void window.electronAPI.issues.providerStatus().then(setTokenStatus);
@@ -45,6 +47,19 @@ export function SettingsPage({ settings, onSave }: Props) {
       setTokenError(err instanceof Error ? err.message : "Failed to save token.");
     } finally {
       setTokenSaving(false);
+    }
+  }
+
+  async function handleTestToken() {
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const { username } = await window.electronAPI.issues.testToken();
+      setTestResult({ ok: true, message: `Connected as ${username}` });
+    } catch (err) {
+      setTestResult({ ok: false, message: err instanceof Error ? err.message : "Connection failed" });
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -95,7 +110,7 @@ export function SettingsPage({ settings, onSave }: Props) {
             value={work}
             onChange={(e) => setWork(e.target.value)}
           />
-          <span className={styles.unit}>minutes</span>
+          <span className={styles.unit}>min</span>
         </div>
       </div>
 
@@ -110,7 +125,7 @@ export function SettingsPage({ settings, onSave }: Props) {
             value={shortBreak}
             onChange={(e) => setShortBreak(e.target.value)}
           />
-          <span className={styles.unit}>minutes</span>
+          <span className={styles.unit}>min</span>
         </div>
       </div>
 
@@ -125,7 +140,7 @@ export function SettingsPage({ settings, onSave }: Props) {
             value={longBreak}
             onChange={(e) => setLongBreak(e.target.value)}
           />
-          <span className={styles.unit}>minutes</span>
+          <span className={styles.unit}>min</span>
         </div>
       </div>
 
@@ -141,12 +156,24 @@ export function SettingsPage({ settings, onSave }: Props) {
 
       {tokenStatus.configured
         ? (
-          <div className={styles.tokenConnected}>
-            <span className={styles.tokenStatus}>GitHub — Connected ✓</span>
-            <button className={styles.removeTokenBtn} onClick={() => void handleRemoveToken()}>
-              Remove token
-            </button>
-          </div>
+          <>
+            <div className={styles.tokenConnected}>
+              <span className={styles.tokenStatus}>GitHub — Connected ✓</span>
+              <div className={styles.tokenActions}>
+                <button className={styles.testTokenBtn} onClick={() => void handleTestToken()} disabled={testing}>
+                  {testing ? "Testing…" : "Test Connection"}
+                </button>
+                <button className={styles.removeTokenBtn} onClick={() => void handleRemoveToken()}>
+                  Remove token
+                </button>
+              </div>
+            </div>
+            {testResult && (
+              <div className={testResult.ok ? styles.testSuccess : styles.errorMsg}>
+                {testResult.message}
+              </div>
+            )}
+          </>
         )
         : (
           <div className={styles.tokenForm}>

@@ -110,6 +110,28 @@ export class GitHubProvider implements IssueProvider {
     return this.authenticatedUsername;
   }
 
+  async testConnection(): Promise<{ username: string }> {
+    try {
+      const username = await this.getUsername();
+      return { username };
+    } catch (err) {
+      if (err instanceof IssueProviderError) throw err;
+      if (err instanceof Error && "status" in err) {
+        const status = (err as { status: number }).status;
+        if (status === 401) {
+          throw new IssueProviderError("GitHub token is invalid or has been revoked", "AUTH_FAILED");
+        }
+        if (status === 403) {
+          throw new IssueProviderError("GitHub API rate limit reached. Try again in a few minutes.", "RATE_LIMITED");
+        }
+      }
+      throw new IssueProviderError(
+        err instanceof Error ? err.message : "Could not reach GitHub. Check your internet connection.",
+        "NETWORK_ERROR",
+      );
+    }
+  }
+
   clearCache(): void {
     this.cache.clear();
   }

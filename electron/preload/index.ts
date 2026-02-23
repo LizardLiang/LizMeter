@@ -40,6 +40,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     providerStatus: () => ipcRenderer.invoke("issues:provider-status"),
     setToken: (input: IssuesSetTokenInput) => ipcRenderer.invoke("issues:set-token", input),
     deleteToken: () => ipcRenderer.invoke("issues:delete-token"),
+    testToken: () => ipcRenderer.invoke("issues:test-token"),
   },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
