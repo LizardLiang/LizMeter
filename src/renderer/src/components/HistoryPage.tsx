@@ -1,6 +1,10 @@
 import type { CreateTagInput, Session, Tag } from "../../../shared/types.ts";
-import { formatTimerType, timerTypeColor } from "../utils/format.ts";
+import { useGroupExpand } from "../hooks/useGroupExpand.ts";
+import { formatDuration, formatTimerType, timerTypeColor } from "../utils/format.ts";
+import { DateSubGroupHeader } from "./DateSubGroupHeader.tsx";
 import styles from "./HistoryPage.module.scss";
+import { IssueBadge } from "./IssueBadge.tsx";
+import { IssueGroupHeader } from "./IssueGroupHeader.tsx";
 import { TagBadge } from "./TagBadge.tsx";
 import { TagPicker } from "./TagPicker.tsx";
 
@@ -24,14 +28,9 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
 
-function formatTime(iso: string): string {
+function formatLocalTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-}
-
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
 }
 
 interface SessionCardProps {
@@ -59,22 +58,16 @@ function SessionCard({ session, allTags, onDelete, onAssign, onUnassign, onCreat
           {typeLabel}
         </span>
         <span className={styles.cardDuration}>{formatDuration(session.actualDurationSeconds)}</span>
-        <span className={styles.cardMeta}>{formatDate(session.completedAt)} · {formatTime(session.completedAt)}</span>
+        <span className={styles.cardMeta}>
+          {formatDate(session.completedAt)} · {formatLocalTime(session.completedAt)}
+        </span>
         <button className={styles.cardDelBtn} onClick={() => onDelete(session.id)} aria-label="Delete session">
           ✕
         </button>
       </div>
       {session.title && <div className={styles.cardTitle}>{session.title}</div>}
       <div className={styles.cardTags}>
-        {session.issueNumber && (
-          <button
-            className={styles.issueLink}
-            onClick={() => void window.electronAPI.shell.openExternal(session.issueUrl!)}
-            title={session.issueTitle ?? ""}
-          >
-            #{session.issueNumber}
-          </button>
-        )}
+        <IssueBadge session={session} />
         {session.tags.map((t) => <TagBadge key={t.id} tag={t} onRemove={(id) => void onUnassign(session.id, id)} />)}
         <TagPicker
           allTags={allTags}
@@ -103,6 +96,10 @@ export function HistoryPage({
   onCreateTag,
 }: Props) {
   const activeFilterTag = allTags.find((t) => t.id === activeTagFilter);
+  const { groupedData, expandedIssueGroups, expandedDateGroups, toggleIssueGroup, toggleDateGroup } = useGroupExpand(
+    sessions,
+    activeTagFilter,
+  );
 
   return (
     <div className={styles.page}>
@@ -140,7 +137,49 @@ export function HistoryPage({
       {!isLoading && sessions.length === 0 && <div className={styles.emptyMsg}>No sessions yet.</div>}
 
       <div className={styles.list}>
-        {sessions.map((session) => (
+        {/* Issue groups */}
+        {groupedData.issueGroups.map((group) => {
+          const issueKey = group.issueKey.key;
+          const isIssueExpanded = expandedIssueGroups.has(issueKey);
+          return (
+            <IssueGroupHeader
+              key={issueKey}
+              group={group}
+              isExpanded={isIssueExpanded}
+              onToggle={() => toggleIssueGroup(issueKey)}
+              compact={false}
+            >
+              {group.dateSubGroups.map((subGroup) => {
+                const dateGroupKey = `${issueKey}::${subGroup.dateKey}`;
+                const isDateExpanded = expandedDateGroups.has(dateGroupKey);
+                return (
+                  <DateSubGroupHeader
+                    key={subGroup.dateKey}
+                    subGroup={subGroup}
+                    isExpanded={isDateExpanded}
+                    onToggle={() => toggleDateGroup(dateGroupKey)}
+                    compact={false}
+                  >
+                    {subGroup.sessions.map((session) => (
+                      <SessionCard
+                        key={session.id}
+                        session={session}
+                        allTags={allTags}
+                        onDelete={onDeleteSession}
+                        onAssign={onAssignTag}
+                        onUnassign={onUnassignTag}
+                        onCreateTag={onCreateTag}
+                      />
+                    ))}
+                  </DateSubGroupHeader>
+                );
+              })}
+            </IssueGroupHeader>
+          );
+        })}
+
+        {/* Ungrouped sessions (no linked issue) */}
+        {groupedData.ungroupedSessions.map((session) => (
           <SessionCard
             key={session.id}
             session={session}

@@ -1,5 +1,8 @@
-import type { CreateTagInput, Session, Tag, UpdateTagInput } from "../../../shared/types.ts";
-import type { TimerStatus } from "../../../shared/types.ts";
+import type { CreateTagInput, Session, Tag, TimerStatus, UpdateTagInput } from "../../../shared/types.ts";
+import { useGroupExpand } from "../hooks/useGroupExpand.ts";
+import { formatDuration } from "../utils/format.ts";
+import { DateSubGroupHeader } from "./DateSubGroupHeader.tsx";
+import { IssueGroupHeader } from "./IssueGroupHeader.tsx";
 import styles from "./Sidebar.module.scss";
 import { SidebarToggle } from "./SidebarToggle.tsx";
 import { TagBadge } from "./TagBadge.tsx";
@@ -45,9 +48,28 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
-function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
+function timerStatusColor(status: TimerStatus): string {
+  switch (status) {
+    case "running":
+      return "#9ece6a";
+    case "paused":
+      return "#e0af68";
+    default:
+      return "#565f89";
+  }
+}
+
+function timerStatusLabel(status: TimerStatus): string {
+  switch (status) {
+    case "running":
+      return "In progress";
+    case "paused":
+      return "Paused";
+    case "completed":
+      return "Completed";
+    default:
+      return "No session";
+  }
 }
 
 export function Sidebar({
@@ -74,8 +96,11 @@ export function Sidebar({
   onUnassignTag,
 }: Props) {
   const isActive = timerStatus === "running" || timerStatus === "paused";
-  const timerStatusColor = timerStatus === "running" ? "#9ece6a" : timerStatus === "paused" ? "#e0af68" : "#565f89";
   const activeFilterTag = allTags.find((t) => t.id === activeTagFilter);
+  const { groupedData, expandedIssueGroups, expandedDateGroups, toggleIssueGroup, toggleDateGroup } = useGroupExpand(
+    sessions,
+    activeTagFilter,
+  );
 
   return (
     <aside
@@ -101,15 +126,9 @@ export function Sidebar({
         <div className={styles.section}>
           <div className={styles.sectionLabel}>CURRENT SESSION</div>
           <div className={styles.statusRow}>
-            <span className={styles.statusDot} style={{ backgroundColor: timerStatusColor }} />
-            <span className={styles.statusText} style={{ color: timerStatusColor }}>
-              {timerStatus === "running"
-                ? "In progress"
-                : timerStatus === "paused"
-                ? "Paused"
-                : timerStatus === "completed"
-                ? "Completed"
-                : "No session"}
+            <span className={styles.statusDot} style={{ backgroundColor: timerStatusColor(timerStatus) }} />
+            <span className={styles.statusText} style={{ color: timerStatusColor(timerStatus) }}>
+              {timerStatusLabel(timerStatus)}
             </span>
             {isActive && <span className={styles.remainingText}>{formatSeconds(remainingSeconds)}</span>}
           </div>
@@ -161,7 +180,48 @@ export function Sidebar({
           {error && <div className={styles.errorMsg}>{error}</div>}
           {!isLoading && sessions.length === 0 && <div className={styles.emptyMsg}>No sessions yet</div>}
 
-          {sessions.map((session) => (
+          {/* Issue groups */}
+          {groupedData.issueGroups.map((group) => {
+            const issueKey = group.issueKey.key;
+            const isIssueExpanded = expandedIssueGroups.has(issueKey);
+            return (
+              <IssueGroupHeader
+                key={issueKey}
+                group={group}
+                isExpanded={isIssueExpanded}
+                onToggle={() => toggleIssueGroup(issueKey)}
+                compact={true}
+              >
+                {group.dateSubGroups.map((subGroup) => {
+                  const dateGroupKey = `${issueKey}::${subGroup.dateKey}`;
+                  const isDateExpanded = expandedDateGroups.has(dateGroupKey);
+                  return (
+                    <DateSubGroupHeader
+                      key={subGroup.dateKey}
+                      subGroup={subGroup}
+                      isExpanded={isDateExpanded}
+                      onToggle={() => toggleDateGroup(dateGroupKey)}
+                      compact={true}
+                    >
+                      {subGroup.sessions.map((session) => (
+                        <SessionRow
+                          key={session.id}
+                          session={session}
+                          allTags={allTags}
+                          onDelete={onDeleteSession}
+                          onAssign={onAssignTag}
+                          onUnassign={onUnassignTag}
+                        />
+                      ))}
+                    </DateSubGroupHeader>
+                  );
+                })}
+              </IssueGroupHeader>
+            );
+          })}
+
+          {/* Ungrouped sessions (no linked issue) */}
+          {groupedData.ungroupedSessions.map((session) => (
             <SessionRow
               key={session.id}
               session={session}

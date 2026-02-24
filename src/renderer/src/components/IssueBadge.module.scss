@@ -1,0 +1,38 @@
+// IssueBadge - shared issue badge component for all providers
+
+.issueBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: #7aa2f710;
+  border: 1px solid #7aa2f740;
+  flex-shrink: 0;
+  max-width: 220px;
+  overflow: hidden;
+  cursor: default;
+
+  &.clickable {
+    cursor: pointer;
+
+    &:hover {
+      background: #7aa2f720;
+    }
+  }
+}
+
+.issueBadgeId {
+  color: #7aa2f7;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.issueBadgeTitle {
+  color: #a9b1d6;
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

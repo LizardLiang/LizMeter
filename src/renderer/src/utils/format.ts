@@ -1,6 +1,3 @@
-// src/renderer/src/utils/format.ts
-// Utility functions for formatting time and dates
-
 /**
  * Formats a duration in seconds to MM:SS string.
  * Minutes can exceed 59 (e.g., 3661 seconds = "61:01").
@@ -68,6 +65,19 @@ export function formatElapsed(seconds: number): string {
   const m = Math.floor((clamped % 3600) / 60);
   const s = clamped % 60;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+/**
+ * Formats a duration in seconds to a compact human-readable string.
+ * Examples: "5m", "1h 23m", "2h 0m", "0m"
+ */
+export function formatDuration(seconds: number): string {
+  const clamped = Math.max(0, seconds);
+  const m = Math.floor(clamped / 60);
+  if (m >= 60) {
+    return `${Math.floor(m / 60)}h ${m % 60}m`;
+  }
+  return `${m}m`;
 }
 
 /**

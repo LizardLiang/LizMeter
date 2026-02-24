@@ -1,0 +1,114 @@
+// IssueGroupHeader - collapsible issue group header
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid #1e2030;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 4px;
+
+  &:hover {
+    background-color: #1e203080;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #7aa2f7;
+    outline-offset: 2px;
+  }
+}
+
+.headerCompact {
+  composes: header;
+  padding: 4px 2px;
+}
+
+.chevron {
+  color: #565f89;
+  font-size: 10px;
+  flex-shrink: 0;
+  transition: transform 150ms ease-out;
+  width: 14px;
+  text-align: center;
+}
+
+.chevronExpanded {
+  composes: chevron;
+  transform: rotate(90deg);
+}
+
+.displayId {
+  color: #7aa2f7;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.displayIdNormal {
+  composes: displayId;
+  font-size: 12px;
+}
+
+.displayIdCompact {
+  composes: displayId;
+  font-size: 11px;
+}
+
+.title {
+  color: #a9b1d6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.titleNormal {
+  composes: title;
+  font-size: 12px;
+}
+
+.titleCompact {
+  composes: title;
+  font-size: 11px;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+  color: #565f89;
+  white-space: nowrap;
+}
+
+.metaNormal {
+  composes: meta;
+  font-size: 11px;
+}
+
+.metaCompact {
+  composes: meta;
+  font-size: 10px;
+}
+
+.totalTime {
+  color: #c0caf5;
+  font-weight: 600;
+}
+
+.sessionCount {
+  color: #565f89;
+}
+
+.content {
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height 150ms ease-out;
+}
+
+.contentExpanded {
+  composes: content;
+  max-height: 2000px;
+}

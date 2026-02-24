@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatTime } from "../format.ts";
+import { formatDuration, formatTime } from "../format.ts";
 
 describe("formatTime", () => {
   it("TC-201: converts seconds to MM:SS", () => {
@@ -17,5 +17,27 @@ describe("formatTime", () => {
   it("TC-202: handles negative input gracefully by returning 00:00", () => {
     expect(formatTime(-1)).toBe("00:00");
     expect(formatTime(-100)).toBe("00:00");
+  });
+});
+
+describe("formatDuration", () => {
+  it("TC-FD-01: returns '5m' for 300 seconds", () => {
+    expect(formatDuration(300)).toBe("5m");
+  });
+
+  it("TC-FD-02: returns '1h 23m' for 4980 seconds", () => {
+    expect(formatDuration(4980)).toBe("1h 23m");
+  });
+
+  it("TC-FD-03: returns '0m' for 0 seconds", () => {
+    expect(formatDuration(0)).toBe("0m");
+  });
+
+  it("TC-FD-04: returns '2h 0m' for 7200 seconds", () => {
+    expect(formatDuration(7200)).toBe("2h 0m");
+  });
+
+  it("TC-FD-05: clamps negative values to 0m", () => {
+    expect(formatDuration(-100)).toBe("0m");
   });
 });

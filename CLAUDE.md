@@ -29,7 +29,7 @@ Renderer (React 19)  →  Preload (contextBridge)  →  Main (ipcMain.handle)  �
 
 - **`electron/main/`** — Main process: app lifecycle, database (better-sqlite3, synchronous), IPC handlers
 - **`electron/preload/`** — Exposes `window.electronAPI` via contextBridge (contextIsolation: true, nodeIntegration: false)
-- **`src/renderer/`** — React UI with inline styles (no CSS files), Tokyo Night dark theme
+- **`src/renderer/`** — React UI with SCSS, Tokyo Night dark theme
 - **`src/shared/types.ts`** — Single source of truth for all types shared between processes
 - **`index.html`** — At project root (Vite entry point), defines CSS variables for Tokyo Night palette
 
@@ -42,6 +42,7 @@ Build output: `dist/` (renderer), `dist-electron/main/` and `dist-electron/prelo
 ### State Management
 
 No external state library. Three hooks composed in `TomatoClock.tsx`:
+
 - **`useTimer`** — FSM via `useReducer` (idle→running→paused→completed). 250ms tick interval with wall-clock arithmetic to avoid drift.
 - **`useSettings`** — Loads/saves timer durations via IPC
 - **`useSessionHistory`** — Paginated session list via IPC, refresh via token counter pattern
