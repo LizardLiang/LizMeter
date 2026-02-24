@@ -42,6 +42,8 @@ function getDurationForType(settings: TimerSettings, timerType: TimerType): numb
       return settings.shortBreakDuration;
     case "long_break":
       return settings.longBreakDuration;
+    case "stopwatch":
+      return 0;
   }
 }
 

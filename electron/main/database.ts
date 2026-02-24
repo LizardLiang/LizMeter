@@ -20,7 +20,7 @@ import type {
 
 let db: Database.Database | null = null;
 
-const VALID_TIMER_TYPES: readonly TimerType[] = ["work", "short_break", "long_break"];
+const VALID_TIMER_TYPES: readonly TimerType[] = ["work", "short_break", "long_break", "stopwatch"];
 const VALID_ISSUE_PROVIDERS = new Set(["github", "linear", "jira"]);
 
 const DEFAULT_SETTINGS: TimerSettings = {
@@ -158,8 +158,14 @@ export function saveSession(input: SaveSessionInput): Session {
   validateIssueProvider(input.issueProvider);
   const title = sanitizeTitle(input.title);
 
-  if (typeof input.plannedDurationSeconds !== "number" || input.plannedDurationSeconds <= 0) {
-    throw new Error(`Invalid plannedDurationSeconds: ${String(input.plannedDurationSeconds)}`);
+  if (input.timerType === "stopwatch") {
+    if (typeof input.plannedDurationSeconds !== "number" || input.plannedDurationSeconds < 0) {
+      throw new Error(`Invalid plannedDurationSeconds: ${String(input.plannedDurationSeconds)}`);
+    }
+  } else {
+    if (typeof input.plannedDurationSeconds !== "number" || input.plannedDurationSeconds <= 0) {
+      throw new Error(`Invalid plannedDurationSeconds: ${String(input.plannedDurationSeconds)}`);
+    }
   }
   if (typeof input.actualDurationSeconds !== "number" || input.actualDurationSeconds < 0) {
     throw new Error(`Invalid actualDurationSeconds: ${String(input.actualDurationSeconds)}`);

@@ -2,7 +2,13 @@
 // Single session row in the history list
 
 import type { Session } from "../../../shared/types.ts";
-import { formatCompletedAt, formatTime, formatTimerType } from "../utils/format.ts";
+import {
+  formatCompletedAt,
+  formatStopwatchDuration,
+  formatTime,
+  formatTimerType,
+  timerTypeColor,
+} from "../utils/format.ts";
 import styles from "./SessionHistoryItem.module.scss";
 
 interface SessionHistoryItemProps {
@@ -69,11 +75,7 @@ function IssueBadge({ session }: { session: Session; }) {
 }
 
 export function SessionHistoryItem({ session, onDelete }: SessionHistoryItemProps) {
-  const typeAccent = session.timerType === "work"
-    ? "#7aa2f7"
-    : session.timerType === "short_break"
-    ? "#9ece6a"
-    : "#bb9af7";
+  const typeAccent = timerTypeColor(session.timerType);
 
   const displayTitle = session.title || "(no title)";
 
@@ -93,7 +95,11 @@ export function SessionHistoryItem({ session, onDelete }: SessionHistoryItemProp
       >
         {formatTimerType(session.timerType)}
       </span>
-      <span className={styles.meta}>{formatTime(session.plannedDurationSeconds)}</span>
+      <span className={styles.meta}>
+        {session.timerType === "stopwatch"
+          ? formatStopwatchDuration(session.actualDurationSeconds)
+          : formatTime(session.plannedDurationSeconds)}
+      </span>
       <span className={styles.meta}>{formatCompletedAt(session.completedAt)}</span>
       <button
         className={styles.deleteBtn}

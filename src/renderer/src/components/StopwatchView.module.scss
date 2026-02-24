@@ -1,0 +1,127 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px;
+  border: 1px solid var(--tokyoNight-blue, #7aa2f7);
+  border-radius: 12px;
+  background: var(--tokyoNight-bg-dark, #1a1b26);
+}
+
+.sectionLabel {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: var(--tokyoNight-comment, #565f89);
+  align-self: flex-start;
+}
+
+.titleInput {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--tokyoNight-comment, #565f89);
+  border-radius: 6px;
+  background: var(--tokyoNight-bg, #1a1b26);
+  color: var(--tokyoNight-fg, #c0caf5);
+  font-size: 14px;
+
+  &::placeholder {
+    color: var(--tokyoNight-comment, #565f89);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &:focus {
+    outline: none;
+    border-color: var(--tokyoNight-blue, #7aa2f7);
+  }
+}
+
+.elapsed {
+  font-size: 56px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--tokyoNight-blue, #7aa2f7);
+  letter-spacing: 2px;
+  line-height: 1;
+  padding: 16px 0;
+}
+
+.issueBadge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: rgba(125, 207, 255, 0.1);
+  border: 1px solid rgba(125, 207, 255, 0.25);
+}
+
+.issueId {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tokyoNight-cyan, #7dcfff);
+}
+
+.issueTitle {
+  font-size: 12px;
+  color: var(--tokyoNight-fg, #c0caf5);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 200px;
+}
+
+.controls {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.startBtn,
+.pauseBtn,
+.resumeBtn,
+.stopBtn {
+  padding: 10px 28px;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s;
+
+  &:hover {
+    opacity: 0.85;
+  }
+}
+
+.startBtn {
+  background: var(--tokyoNight-blue, #7aa2f7);
+  color: var(--tokyoNight-bg, #1a1b26);
+}
+
+.pauseBtn {
+  background: var(--tokyoNight-orange, #ff9e64);
+  color: var(--tokyoNight-bg, #1a1b26);
+}
+
+.resumeBtn {
+  background: var(--tokyoNight-green, #9ece6a);
+  color: var(--tokyoNight-bg, #1a1b26);
+}
+
+.stopBtn {
+  background: var(--tokyoNight-red, #f7768e);
+  color: var(--tokyoNight-bg, #1a1b26);
+}
+
+.error {
+  font-size: 12px;
+  color: var(--tokyoNight-red, #f7768e);
+  text-align: center;
+}

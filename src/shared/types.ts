@@ -3,7 +3,9 @@
 
 // --- Timer Types ---
 
-export type TimerType = "work" | "short_break" | "long_break";
+export type TimerType = "work" | "short_break" | "long_break" | "stopwatch";
+
+export type AppMode = "pomodoro" | "time-tracking";
 
 export type TimerStatus = "idle" | "running" | "paused" | "completed";
 
@@ -57,6 +59,11 @@ export interface TimerSettings {
   workDuration: number; // seconds
   shortBreakDuration: number; // seconds
   longBreakDuration: number; // seconds
+}
+
+export interface StopwatchSettings {
+  maxDurationSeconds: number; // 0 = no limit, default 28800 (8h)
+  promptForIssue: boolean;
 }
 
 // --- Tag Types ---

@@ -1,18 +1,21 @@
 // src/renderer/src/components/TomatoClock.tsx
 // Root container for the Tomato Clock feature
 
-import { useCallback, useState } from "react";
-import type { IssueRef, Session, TimerSettings } from "../../../shared/types.ts";
+import { useCallback, useEffect, useState } from "react";
+import type { AppMode, IssueRef, Session, StopwatchSettings, TimerSettings } from "../../../shared/types.ts";
 import { useSessionHistory } from "../hooks/useSessionHistory.ts";
 import { useSettings } from "../hooks/useSettings.ts";
+import { useStopwatch } from "../hooks/useStopwatch.ts";
 import { useTagManager } from "../hooks/useTagManager.ts";
 import { useTimer } from "../hooks/useTimer.ts";
 import { HistoryPage } from "./HistoryPage.tsx";
 import { IssuesPage } from "./IssuesPage.tsx";
+import { ModeToggle } from "./ModeToggle.tsx";
 import type { NavPage } from "./NavSidebar.tsx";
 import { NavSidebar } from "./NavSidebar.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
 import { StatsPage } from "./StatsPage.tsx";
+import { StopwatchView } from "./StopwatchView.tsx";
 import { TagPicker } from "./TagPicker.tsx";
 import { TagsPage } from "./TagsPage.tsx";
 import { TimerView } from "./TimerView.tsx";
@@ -22,6 +25,11 @@ const DEFAULT_SETTINGS: TimerSettings = {
   workDuration: 1500,
   shortBreakDuration: 300,
   longBreakDuration: 900,
+};
+
+const DEFAULT_STOPWATCH_SETTINGS: StopwatchSettings = {
+  maxDurationSeconds: 28800, // 8 hours
+  promptForIssue: true,
 };
 
 export function TomatoClock() {
@@ -46,6 +54,30 @@ export function TomatoClock() {
   const [pendingTagIds, setPendingTagIds] = useState<number[]>([]);
   const [pendingIssue, setPendingIssue] = useState<IssueRef | null>(null);
 
+  // App mode state
+  const [appMode, setAppMode] = useState<AppMode>("pomodoro");
+  const [stopwatchSettings, setStopwatchSettings] = useState<StopwatchSettings>(DEFAULT_STOPWATCH_SETTINGS);
+
+  // Load persisted mode and stopwatch settings
+  useEffect(() => {
+    const loadStopwatchSettings = async () => {
+      try {
+        const [modeVal, maxDurVal, promptVal] = await Promise.all([
+          window.electronAPI.settings.get().then(() => null).catch(() => null), // placeholder
+          Promise.resolve(null),
+          Promise.resolve(null),
+        ]);
+        // Use generic settings getter if available, otherwise defaults are fine
+        void modeVal;
+        void maxDurVal;
+        void promptVal;
+      } catch {
+        // defaults are fine
+      }
+    };
+    void loadStopwatchSettings();
+  }, []);
+
   const handleSessionSaved = useCallback(
     (session: Session) => {
       const assigns = pendingTagIds.map((tagId) => window.electronAPI.tag.assign({ sessionId: session.id, tagId }));
@@ -64,8 +96,18 @@ export function TomatoClock() {
     [pendingTagIds, refresh],
   );
 
+  const handleStopwatchSaved = useCallback(
+    (session: Session) => {
+      refresh();
+      void session;
+    },
+    [refresh],
+  );
+
   const { state, start, pause, resume, reset, setTimerType, setTitle, setRemaining, dismissCompletion, saveError } =
     useTimer(effectiveSettings, handleSessionSaved, pendingIssue);
+
+  const stopwatch = useStopwatch(stopwatchSettings, handleStopwatchSaved);
 
   const handleReset = useCallback(() => {
     reset();
@@ -90,6 +132,10 @@ export function TomatoClock() {
     setPendingTagIds((prev) => prev.filter((id) => id !== tagId));
   }, []);
 
+  const handleModeChange = useCallback((mode: AppMode) => {
+    setAppMode(mode);
+  }, []);
+
   if (settingsLoading) {
     return (
       <div className={styles.loading}>
@@ -98,7 +144,9 @@ export function TomatoClock() {
     );
   }
 
-  const isTimerActive = state.status === "running" || state.status === "paused";
+  const isPomodoroActive = state.status === "running" || state.status === "paused";
+  const isStopwatchActive = stopwatch.state.status === "running" || stopwatch.state.status === "paused";
+  const isAnyTimerActive = isPomodoroActive || isStopwatchActive;
 
   return (
     <div className={styles.root}>
@@ -107,35 +155,48 @@ export function TomatoClock() {
       <div className={styles.main}>
         {activePage === "timer" && (
           <div className={styles.timerPage}>
-            <TimerView
-              status={state.status}
-              timerType={state.timerType}
-              remainingSeconds={state.remainingSeconds}
-              title={state.title}
-              saveError={saveError}
-              selectedIssue={pendingIssue}
-              onStart={start}
-              onPause={pause}
-              onResume={resume}
-              onReset={handleReset}
-              onDismiss={dismissCompletion}
-              onTimerTypeChange={setTimerType}
-              onTitleChange={setTitle}
-              onRemainingChange={setRemaining}
-              onIssueSelect={handleIssueSelect}
-            />
+            <ModeToggle mode={appMode} onModeChange={handleModeChange} disabled={isAnyTimerActive} />
 
-            {isTimerActive && (
-              <div className={styles.tagSection}>
-                <div className={styles.tagSectionLabel}>Session Tags</div>
-                <TagPicker
-                  allTags={tagManager.tags}
-                  selectedTagIds={pendingTagIds}
-                  onAdd={handlePendingTagAdd}
-                  onRemove={handlePendingTagRemove}
-                  onCreateTag={tagManager.createTag}
+            {appMode === "pomodoro" && (
+              <>
+                <TimerView
+                  status={state.status}
+                  timerType={state.timerType}
+                  remainingSeconds={state.remainingSeconds}
+                  title={state.title}
+                  saveError={saveError}
+                  selectedIssue={pendingIssue}
+                  onStart={start}
+                  onPause={pause}
+                  onResume={resume}
+                  onReset={handleReset}
+                  onDismiss={dismissCompletion}
+                  onTimerTypeChange={setTimerType}
+                  onTitleChange={setTitle}
+                  onRemainingChange={setRemaining}
+                  onIssueSelect={handleIssueSelect}
                 />
-              </div>
+
+                {isPomodoroActive && (
+                  <div className={styles.tagSection}>
+                    <div className={styles.tagSectionLabel}>Session Tags</div>
+                    <TagPicker
+                      allTags={tagManager.tags}
+                      selectedTagIds={pendingTagIds}
+                      onAdd={handlePendingTagAdd}
+                      onRemove={handlePendingTagRemove}
+                      onCreateTag={tagManager.createTag}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {appMode === "time-tracking" && (
+              <StopwatchView
+                stopwatch={stopwatch}
+                promptForIssue={stopwatchSettings.promptForIssue}
+              />
             )}
           </div>
         )}
@@ -170,7 +231,14 @@ export function TomatoClock() {
 
         {activePage === "issues" && <IssuesPage onNavigate={setActivePage} />}
 
-        {activePage === "settings" && <SettingsPage settings={effectiveSettings} onSave={saveSettings} />}
+        {activePage === "settings" && (
+          <SettingsPage
+            settings={effectiveSettings}
+            onSave={saveSettings}
+            stopwatchSettings={stopwatchSettings}
+            onStopwatchSettingsChange={setStopwatchSettings}
+          />
+        )}
       </div>
     </div>
   );

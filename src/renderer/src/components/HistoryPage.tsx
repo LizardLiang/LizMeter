@@ -1,4 +1,5 @@
 import type { CreateTagInput, Session, Tag } from "../../../shared/types.ts";
+import { formatTimerType, timerTypeColor } from "../utils/format.ts";
 import styles from "./HistoryPage.module.scss";
 import { TagBadge } from "./TagBadge.tsx";
 import { TagPicker } from "./TagPicker.tsx";
@@ -45,16 +46,8 @@ interface SessionCardProps {
 function SessionCard({ session, allTags, onDelete, onAssign, onUnassign, onCreateTag }: SessionCardProps) {
   const assignedTagIds = session.tags.map((t) => t.id);
 
-  const typeColor = session.timerType === "work"
-    ? "#7aa2f7"
-    : session.timerType === "short_break"
-    ? "#9ece6a"
-    : "#bb9af7";
-  const typeLabel = session.timerType === "work"
-    ? "Work"
-    : session.timerType === "short_break"
-    ? "Short Break"
-    : "Long Break";
+  const typeColor = timerTypeColor(session.timerType);
+  const typeLabel = formatTimerType(session.timerType);
 
   return (
     <div className={styles.card}>

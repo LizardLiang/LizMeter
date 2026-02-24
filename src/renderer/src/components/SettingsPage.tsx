@@ -5,6 +5,7 @@ import type {
   JiraProviderStatus,
   LinearProviderStatus,
   LinearTeam,
+  StopwatchSettings,
   TimerSettings,
 } from "../../../shared/types.ts";
 import styles from "./SettingsPage.module.scss";
@@ -12,9 +13,11 @@ import styles from "./SettingsPage.module.scss";
 interface Props {
   settings: TimerSettings;
   onSave: (settings: TimerSettings) => Promise<void>;
+  stopwatchSettings?: StopwatchSettings;
+  onStopwatchSettingsChange?: (settings: StopwatchSettings) => void;
 }
 
-export function SettingsPage({ settings, onSave }: Props) {
+export function SettingsPage({ settings, onSave, stopwatchSettings, onStopwatchSettingsChange }: Props) {
   const [work, setWork] = useState(String(settings.workDuration / 60));
   const [shortBreak, setShortBreak] = useState(String(settings.shortBreakDuration / 60));
   const [longBreak, setLongBreak] = useState(String(settings.longBreakDuration / 60));
@@ -675,6 +678,65 @@ export function SettingsPage({ settings, onSave }: Props) {
             )}
           </>
         )}
+
+      {/* --- Time Tracking Section --- */}
+      {stopwatchSettings && onStopwatchSettingsChange && (
+        <>
+          <div className={styles.sectionDivider} />
+          <h2 className={styles.sectionHeading}>Time Tracking</h2>
+
+          <div className={styles.field}>
+            <label className={styles.label}>Max Duration</label>
+            <div className={styles.inputRow}>
+              <input
+                type="number"
+                min={0}
+                max={24}
+                className={styles.input}
+                value={stopwatchSettings.maxDurationSeconds === 0
+                  ? ""
+                  : String(stopwatchSettings.maxDurationSeconds / 3600)}
+                disabled={stopwatchSettings.maxDurationSeconds === 0}
+                onChange={(e) => {
+                  const hours = parseFloat(e.target.value);
+                  if (!isNaN(hours) && hours > 0) {
+                    onStopwatchSettingsChange({ ...stopwatchSettings, maxDurationSeconds: Math.round(hours * 3600) });
+                  }
+                }}
+              />
+              <span className={styles.unit}>hours</span>
+            </div>
+          </div>
+
+          <label className={styles.checkboxRow}>
+            <input
+              type="checkbox"
+              checked={stopwatchSettings.maxDurationSeconds === 0}
+              onChange={(e) => {
+                onStopwatchSettingsChange({
+                  ...stopwatchSettings,
+                  maxDurationSeconds: e.target.checked ? 0 : 28800,
+                });
+              }}
+            />
+            <span className={styles.checkboxLabel}>No limit</span>
+          </label>
+
+          <label className={styles.checkboxRow} style={{ marginTop: 12 }}>
+            <input
+              type="checkbox"
+              checked={stopwatchSettings.promptForIssue}
+              onChange={(e) => {
+                onStopwatchSettingsChange({
+                  ...stopwatchSettings,
+                  promptForIssue: e.target.checked,
+                });
+              }}
+            />
+            <span className={styles.checkboxLabel}>Prompt to link issue when starting</span>
+          </label>
+        </>
+      )}
     </div>
   );
 }

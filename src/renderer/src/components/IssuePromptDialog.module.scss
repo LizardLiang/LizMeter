@@ -1,0 +1,102 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog {
+  width: 420px;
+  max-height: 480px;
+  background: var(--tokyoNight-bg-dark, #1a1b26);
+  border: 1px solid var(--tokyoNight-comment, #565f89);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(86, 95, 137, 0.3);
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tokyoNight-fg, #c0caf5);
+  margin: 0;
+}
+
+.skipBtn {
+  padding: 6px 16px;
+  border: 1px solid var(--tokyoNight-comment, #565f89);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tokyoNight-fg, #c0caf5);
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.1);
+    border-color: var(--tokyoNight-blue, #7aa2f7);
+  }
+}
+
+.issueList {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.issueRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tokyoNight-fg, #c0caf5);
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.1);
+  }
+}
+
+.issueKey {
+  font-weight: 600;
+  color: var(--tokyoNight-cyan, #7dcfff);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.issueRowTitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.status {
+  padding: 24px 20px;
+  text-align: center;
+  color: var(--tokyoNight-comment, #565f89);
+  font-size: 13px;
+}
+
+.error {
+  padding: 12px 20px;
+  color: var(--tokyoNight-red, #f7768e);
+  font-size: 13px;
+  text-align: center;
+}

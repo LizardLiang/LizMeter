@@ -1,0 +1,41 @@
+.container {
+  display: flex;
+  gap: 2px;
+  background: var(--tokyoNight-bg-dark, #1a1b26);
+  border-radius: 8px;
+  padding: 3px;
+  margin-bottom: 16px;
+}
+
+.tab {
+  flex: 1;
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tokyoNight-comment, #565f89);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover:not(:disabled) {
+    color: var(--tokyoNight-fg, #c0caf5);
+    background: rgba(122, 162, 247, 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  &.active {
+    background: var(--tokyoNight-blue, #7aa2f7);
+    color: var(--tokyoNight-bg, #1a1b26);
+    font-weight: 600;
+  }
+
+  &.active:disabled {
+    opacity: 0.7;
+  }
+}
