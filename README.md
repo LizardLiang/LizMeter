@@ -1,26 +1,36 @@
 # LizMeter
 
-A desktop Pomodoro timer app built with Electron, React, and TypeScript. Features a Tokyo Night dark theme, local SQLite session history, and configurable timer durations.
+A desktop time-tracking app built with Electron, React, and TypeScript. Combines Pomodoro timer and stopwatch modes with issue tracker integration (GitHub, Linear, Jira), session tagging, and Jira worklog logging. Tokyo Night dark theme, local SQLite storage.
 
-Electron + React 19 桌面番茄鐘應用程式。採用 Tokyo Night 深色主題，本機 SQLite 記錄工作階段，支援自訂計時時長。
+Electron + React 19 桌面時間追蹤應用程式。整合番茄鐘與碼錶模式，支援 GitHub、Linear、Jira 議題追蹤、工作階段標籤，以及 Jira worklog 記錄功能。採用 Tokyo Night 深色主題，本機 SQLite 儲存。
 
 ---
 
 ## Features / 功能
 
-- **Pomodoro Timer** — Work, Short Break, Long Break modes with start/pause/resume/reset controls
-- **Session History** — Automatically saves completed sessions to a local SQLite database with pagination and delete
-- **Configurable Durations** — Customize work and break durations (1–120 minutes)
-- **Session Titles** — Optionally label each work session
-- **Tokyo Night Theme** — Dark UI with the Tokyo Night color palette
+### Time Tracking / 計時模式
+- **Pomodoro Timer** — Work / Short Break / Long Break modes with start/pause/resume/reset controls
+- **Stopwatch Mode** — Open-ended time tracking with configurable max duration and optional issue prompt on start
+- **Session Titles** — Label each session before or after completing it
 
----
+### Issue Integration / 議題整合
+- **GitHub Issues** — Browse and link assigned issues; view inline comments
+- **Linear Issues** — Browse team-scoped issues with priority; view inline comments
+- **Jira Cloud & Server** — Browse issues by project or custom JQL; view inline comments
 
-- **番茄計時器** — 工作、短休息、長休息模式，支援開始／暫停／繼續／重設
-- **工作階段歷史** — 完成的工作階段自動儲存至本機 SQLite 資料庫，支援分頁與刪除
-- **自訂時長** — 可調整工作與休息時間（1–120 分鐘）
-- **工作階段標題** — 可為每次工作加上標題
-- **Tokyo Night 主題** — 深色 UI，使用 Tokyo Night 配色
+### Work Logging / 工時記錄
+- **Jira Worklog** — Log completed session duration back to linked Jira issues with a comment; tracks logged/failed status
+- **Bulk Log** — Log all sessions for a single issue at once from the History page
+
+### Session Management / 工作階段管理
+- **Session History** — Paginated list of completed sessions with delete support
+- **Session Tags** — Create color-coded tags and assign them to sessions; filter history by tag
+- **Grouping** — History grouped by linked issue, with date sub-groups; collapsible headers
+
+### Settings / 設定
+- **Configurable Durations** — Work (1–120 min), Short Break (1–60 min), Long Break (1–120 min)
+- **Stopwatch Settings** — Max duration (0 = unlimited) and prompt-for-issue toggle
+- **Secure Credential Storage** — API tokens and passwords stored in OS keychain
 
 ---
 
@@ -73,11 +83,10 @@ The app window will open automatically with hot reload enabled.
 | `bun run rebuild` | Recompile native deps for Electron ABI / 重新編譯原生模組 |
 | `bun run test` | Run unit tests / 執行單元測試 |
 | `bun run test:watch` | Run tests in watch mode / 監聽模式測試 |
-| `bun run test:coverage` | Run tests with coverage / 測試覆蓋率 |
-| `bun run test:e2e` | Run Playwright E2E tests / 端對端測試 |
+| `bun run test:e2e` | Run Playwright E2E tests (requires build first) / 端對端測試 |
 | `bun run lint` | Run ESLint / 執行 ESLint |
 | `bun run fmt` | Auto-format with dprint / dprint 自動格式化 |
-| `bun run fmt:check` | Check formatting / 檢查格式 |
+| `bun run fmt:check` | Check formatting (read-only) / 檢查格式 |
 
 ---
 
@@ -86,51 +95,87 @@ The app window will open automatically with hot reload enabled.
 ```
 LizMeter/
 ├── electron/
-│   ├── main/           # Electron main process / 主程序
-│   │   ├── index.ts        # App entry, window creation / 應用程式進入點
-│   │   ├── database.ts     # SQLite operations / SQLite 資料庫操作
-│   │   └── ipc-handlers.ts # IPC channel handlers / IPC 通道處理
-│   └── preload/        # Preload script (contextBridge) / 預載入腳本
+│   ├── main/
+│   │   ├── index.ts                  # App entry, window creation
+│   │   ├── database.ts               # SQLite schema and migrations
+│   │   ├── ipc-handlers.ts           # All IPC channel handlers
+│   │   └── issue-providers/          # GitHub / Linear / Jira API clients
+│   └── preload/
+│       └── index.ts                  # contextBridge → window.electronAPI
 ├── src/
-│   ├── renderer/       # React UI / React 使用者介面
-│   │   └── src/
-│   │       ├── components/  # React components / React 元件
-│   │       ├── hooks/       # Custom hooks (useTimer, useSettings, useSessionHistory)
-│   │       └── utils/       # Utility functions / 工具函式
-│   ├── shared/         # Types shared between processes / 程序間共用型別
-│   └── test/           # Test setup and shims / 測試設定與墊片
-├── e2e/                # Playwright E2E tests / 端對端測試
-├── index.html          # Vite entry HTML
-├── vite.config.ts      # Vite + vite-plugin-electron config
-└── vitest.config.ts    # Vitest config
+│   ├── renderer/src/
+│   │   ├── components/               # React components (+ SCSS modules)
+│   │   │   └── __tests__/
+│   │   ├── hooks/                    # useTimer, useStopwatch, useSessionHistory,
+│   │   │                             #   useIssues, useGroupExpand, ...
+│   │   │   └── __tests__/
+│   │   ├── utils/                    # format, groupSessions, ...
+│   │   │   └── __tests__/
+│   │   └── styles/                   # Global SCSS vars and mixins (Tokyo Night)
+│   ├── shared/
+│   │   └── types.ts                  # Single source of truth for all shared types
+│   └── test/
+│       └── better-sqlite3-shim.ts    # sql.js WASM shim for Vitest
+├── e2e/                              # Playwright E2E tests
+├── index.html                        # Vite entry point
+├── vite.config.ts
+└── vitest.config.ts
 ```
 
 ---
 
 ## Architecture / 架構
 
-The app follows Electron's security best practices with `contextIsolation: true` and `nodeIntegration: false`:
-
-本應用遵循 Electron 安全最佳實踐，啟用 `contextIsolation: true` 並停用 `nodeIntegration: false`：
+The app follows Electron security best practices (`contextIsolation: true`, `nodeIntegration: false`):
 
 ```
-Renderer (React)
+Renderer (React 19)
   ↓ window.electronAPI.*()
 Preload (contextBridge)
   ↓ ipcRenderer.invoke()
 Main Process (ipcMain.handle)
   ↓
-SQLite Database (better-sqlite3)
+SQLite (better-sqlite3, synchronous)
 ```
 
-Timer state is managed by a finite state machine (`useReducer`) with wall-clock arithmetic to prevent drift. No external state management library is used.
+**State management** — No external library. Three core hooks composed in `TomatoClock.tsx`:
+- `useTimer` — FSM via `useReducer` (idle → running → paused → completed); 250ms tick with wall-clock arithmetic to prevent drift
+- `useStopwatch` — FSM via `useReducer` for open-ended count-up
+- `useSettings` / `useSessionHistory` / `useIssues` — IPC-backed hooks with local caching
 
-計時器狀態由有限狀態機（`useReducer`）搭配實際時鐘運算管理，以避免時間漂移。未使用外部狀態管理套件。
+**Styling** — SCSS modules (one per component), Tokyo Night palette via CSS variables in `index.html`. No inline styles, no CSS-in-JS.
+
+---
+
+## Issue Tracker Setup / 議題追蹤設定
+
+Open **Settings** in the sidebar and configure one or more providers:
+
+| Provider | Required Fields |
+|---|---|
+| **GitHub** | Personal Access Token (repo scope) |
+| **Linear** | API key + select team |
+| **Jira Cloud** | Atlassian domain, email, API token |
+| **Jira Server** | Server URL, username, password |
+
+Optional per-provider: project key filter, custom JQL query.
+
+---
+
+## Testing / 測試
+
+```bash
+bun run test           # All unit tests (single run)
+bun run test:watch     # Watch mode
+bun vitest run src/renderer/src/components/__tests__/Sidebar.test.tsx  # Single file
+```
+
+- Renderer tests run in **jsdom** and mock `window.electronAPI` via `vi.stubGlobal`
+- Main-process tests run in **node** environment
+- `better-sqlite3` is aliased to a `sql.js` WASM shim in Vitest to avoid ABI mismatch
 
 ---
 
 ## License / 授權
 
-Private project.
-
-私人專案。
+Private project. / 私人專案。
