@@ -1,8 +1,8 @@
 // src/renderer/src/components/IssuesPage.tsx
 // Browse GitHub and/or Linear issues
 
-import { useState } from "react";
-import type { JiraIssue, LinearIssue } from "../../../shared/types.ts";
+import { useCallback, useState } from "react";
+import type { IssueComment, JiraIssue, LinearIssue } from "../../../shared/types.ts";
 import { useIssues } from "../hooks/useIssues.ts";
 import { useJiraIssues } from "../hooks/useJiraIssues.ts";
 import { useLinearIssues } from "../hooks/useLinearIssues.ts";
@@ -23,9 +23,76 @@ const PRIORITY_LABELS: Record<number, string> = {
   4: "Low",
 };
 
+function formatDate(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+    + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+
+function CommentsSection({ comments, isLoading, error }: {
+  comments: IssueComment[];
+  isLoading: boolean;
+  error: string | null;
+}) {
+  if (isLoading) {
+    return <div className={styles.commentsLoading}>Loading comments…</div>;
+  }
+  if (error) {
+    return <div className={styles.commentsError}>{error}</div>;
+  }
+  if (comments.length === 0) {
+    return <div className={styles.commentsEmpty}>No comments yet</div>;
+  }
+  return (
+    <div className={styles.commentsList}>
+      {comments.map((c) => (
+        <div key={c.id} className={styles.comment}>
+          <div className={styles.commentHeader}>
+            <span className={styles.commentAuthor}>{c.author}</span>
+            <span className={styles.commentDate}>{formatDate(c.createdAt)}</span>
+          </div>
+          <div className={styles.commentBody}>{c.body}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useComments() {
+  const [comments, setComments] = useState<IssueComment[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const toggle = useCallback(async (
+    id: string,
+    fetcher: () => Promise<IssueComment[]>,
+  ) => {
+    if (expandedId === id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(id);
+    setComments([]);
+    setError(null);
+    setIsLoading(true);
+    try {
+      const result = await fetcher();
+      setComments(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load comments");
+    } finally {
+      setIsLoading(false);
+    }
+  }, [expandedId]);
+
+  return { comments, isLoading, error, expandedId, toggle };
+}
+
 function LinearIssueList() {
   const { issues, isLoading, error, refresh } = useLinearIssues();
   const [search, setSearch] = useState("");
+  const cm = useComments();
 
   const filtered = issues.filter((issue) => {
     if (!search.trim()) return true;
@@ -81,14 +148,32 @@ function LinearIssueList() {
 
       {filtered.length > 0 && (
         <div className={styles.list}>
-          {filtered.map((issue) => <LinearIssueCard key={issue.id} issue={issue} />)}
+          {filtered.map((issue) => (
+            <LinearIssueCard
+              key={issue.id}
+              issue={issue}
+              expanded={cm.expandedId === issue.id}
+              onToggle={() =>
+                void cm.toggle(issue.id, () => window.electronAPI.linear.fetchComments({ issueId: issue.id }))}
+              comments={cm.comments}
+              commentsLoading={cm.isLoading}
+              commentsError={cm.error}
+            />
+          ))}
         </div>
       )}
     </>
   );
 }
 
-function LinearIssueCard({ issue }: { issue: LinearIssue; }) {
+function LinearIssueCard({ issue, expanded, onToggle, comments, commentsLoading, commentsError }: {
+  issue: LinearIssue;
+  expanded: boolean;
+  onToggle: () => void;
+  comments: IssueComment[];
+  commentsLoading: boolean;
+  commentsError: string | null;
+}) {
   const priorityLabel = PRIORITY_LABELS[issue.priority] ?? "No priority";
   const stateColorClass = issue.state.type === "started"
     ? styles.stateStarted
@@ -98,12 +183,12 @@ function LinearIssueCard({ issue }: { issue: LinearIssue; }) {
 
   return (
     <div
-      className={styles.card}
-      onClick={() => void window.electronAPI.shell.openExternal(issue.url)}
+      className={`${styles.card} ${expanded ? styles.cardExpanded : ""}`}
+      onClick={onToggle}
       style={{ cursor: "pointer" }}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => e.key === "Enter" && void window.electronAPI.shell.openExternal(issue.url)}
+      onKeyDown={(e) => e.key === "Enter" && onToggle()}
     >
       <div className={styles.cardTop}>
         <span className={styles.issueNum}>{issue.identifier}</span>
@@ -117,6 +202,19 @@ function LinearIssueCard({ issue }: { issue: LinearIssue; }) {
           </span>
         </div>
       )}
+      {expanded && (
+        <div className={styles.expandedSection} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.expandedActions}>
+            <button
+              className={styles.openExternalBtn}
+              onClick={() => void window.electronAPI.shell.openExternal(issue.url)}
+            >
+              Open in browser
+            </button>
+          </div>
+          <CommentsSection comments={comments} isLoading={commentsLoading} error={commentsError} />
+        </div>
+      )}
     </div>
   );
 }
@@ -124,6 +222,7 @@ function LinearIssueCard({ issue }: { issue: LinearIssue; }) {
 function JiraIssueList() {
   const { issues, isLoading, error, refresh } = useJiraIssues();
   const [search, setSearch] = useState("");
+  const cm = useComments();
 
   const filtered = issues.filter((issue) => {
     if (!search.trim()) return true;
@@ -179,22 +278,40 @@ function JiraIssueList() {
 
       {filtered.length > 0 && (
         <div className={styles.list}>
-          {filtered.map((issue) => <JiraIssueCard key={issue.id} issue={issue} />)}
+          {filtered.map((issue) => (
+            <JiraIssueCard
+              key={issue.id}
+              issue={issue}
+              expanded={cm.expandedId === issue.id}
+              onToggle={() =>
+                void cm.toggle(issue.id, () => window.electronAPI.jira.fetchComments({ issueKey: issue.key }))}
+              comments={cm.comments}
+              commentsLoading={cm.isLoading}
+              commentsError={cm.error}
+            />
+          ))}
         </div>
       )}
     </>
   );
 }
 
-function JiraIssueCard({ issue }: { issue: JiraIssue; }) {
+function JiraIssueCard({ issue, expanded, onToggle, comments, commentsLoading, commentsError }: {
+  issue: JiraIssue;
+  expanded: boolean;
+  onToggle: () => void;
+  comments: IssueComment[];
+  commentsLoading: boolean;
+  commentsError: string | null;
+}) {
   return (
     <div
-      className={styles.card}
-      onClick={() => void window.electronAPI.shell.openExternal(issue.url)}
+      className={`${styles.card} ${expanded ? styles.cardExpanded : ""}`}
+      onClick={onToggle}
       style={{ cursor: "pointer" }}
       role="button"
       tabIndex={0}
-      onKeyDown={(e) => e.key === "Enter" && void window.electronAPI.shell.openExternal(issue.url)}
+      onKeyDown={(e) => e.key === "Enter" && onToggle()}
     >
       <div className={styles.cardTop}>
         <span className={styles.issueNum}>{issue.key}</span>
@@ -212,6 +329,19 @@ function JiraIssueCard({ issue }: { issue: JiraIssue; }) {
           </span>
         )}
       </div>
+      {expanded && (
+        <div className={styles.expandedSection} onClick={(e) => e.stopPropagation()}>
+          <div className={styles.expandedActions}>
+            <button
+              className={styles.openExternalBtn}
+              onClick={() => void window.electronAPI.shell.openExternal(issue.url)}
+            >
+              Open in browser
+            </button>
+          </div>
+          <CommentsSection comments={comments} isLoading={commentsLoading} error={commentsError} />
+        </div>
+      )}
     </div>
   );
 }
@@ -223,6 +353,7 @@ function GitHubIssueList({ refreshGitHub, githubLoading, githubError, githubIssu
   githubIssues: import("../../../shared/types.ts").Issue[];
 }) {
   const [search, setSearch] = useState("");
+  const cm = useComments();
 
   const filtered = githubIssues.filter((issue) => {
     if (!search.trim()) return true;
@@ -279,49 +410,78 @@ function GitHubIssueList({ refreshGitHub, githubLoading, githubError, githubIssu
 
       {filtered.length > 0 && (
         <div className={styles.list}>
-          {filtered.map((issue) => (
-            <div
-              key={`${issue.repo}#${issue.number}`}
-              className={styles.card}
-              onClick={() => void window.electronAPI.shell.openExternal(issue.url)}
-              style={{ cursor: "pointer" }}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => e.key === "Enter" && void window.electronAPI.shell.openExternal(issue.url)}
-            >
-              <div className={styles.cardTop}>
-                <span className={styles.issueNum}>#{issue.number}</span>
-                <span
-                  className={`${styles.issueState} ${
-                    issue.state === "open" ? styles.stateStarted : styles.stateBacklog
-                  }`}
-                >
-                  {issue.state}
-                </span>
-              </div>
-              <p className={styles.issueTitle}>{issue.title}</p>
-              <div className={styles.cardMeta}>
-                <span className={styles.issueRepo}>{issue.repo}</span>
-              </div>
-              {issue.labels.length > 0 && (
-                <div className={styles.labels}>
-                  {issue.labels.map((label) => (
-                    <span
-                      key={label.name}
-                      className={styles.labelChip}
-                      style={{
-                        color: `#${label.color}`,
-                        backgroundColor: `#${label.color}18`,
-                        border: `1px solid #${label.color}40`,
-                      }}
-                    >
-                      {label.name}
-                    </span>
-                  ))}
+          {filtered.map((issue) => {
+            const cardId = `${issue.repo}#${issue.number}`;
+            return (
+              <div
+                key={cardId}
+                className={`${styles.card} ${cm.expandedId === cardId ? styles.cardExpanded : ""}`}
+                onClick={() =>
+                  void cm.toggle(cardId, () =>
+                    window.electronAPI.issues.fetchComments({ repo: issue.repo, issueNumber: issue.number }))}
+                style={{ cursor: "pointer" }}
+                role="button"
+                tabIndex={0}
+                onKeyDown={(e) =>
+                  e.key === "Enter"
+                  && void cm.toggle(cardId, () =>
+                    window.electronAPI.issues.fetchComments({ repo: issue.repo, issueNumber: issue.number }))}
+              >
+                <div className={styles.cardTop}>
+                  <span className={styles.issueNum}>#{issue.number}</span>
+                  <span
+                    className={`${styles.issueState} ${
+                      issue.state === "open" ? styles.stateStarted : styles.stateBacklog
+                    }`}
+                  >
+                    {issue.state}
+                  </span>
                 </div>
-              )}
-            </div>
-          ))}
+                <p className={styles.issueTitle}>{issue.title}</p>
+                <div className={styles.cardMeta}>
+                  <span className={styles.issueRepo}>{issue.repo}</span>
+                </div>
+                {issue.labels.length > 0 && (
+                  <div className={styles.labels}>
+                    {issue.labels.map((label) => (
+                      <span
+                        key={label.name}
+                        className={styles.labelChip}
+                        style={{
+                          color: `#${label.color}`,
+                          backgroundColor: `#${label.color}18`,
+                          border: `1px solid #${label.color}40`,
+                        }}
+                      >
+                        {label.name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {cm.expandedId === cardId && (
+                  <div
+                    className={styles.expandedSection}
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <div className={styles.expandedActions}>
+                      <button
+                        className={styles.openExternalBtn}
+                        onClick={() =>
+                          void window.electronAPI.shell.openExternal(issue.url)}
+                      >
+                        Open in browser
+                      </button>
+                    </div>
+                    <CommentsSection
+                      comments={cm.comments}
+                      isLoading={cm.isLoading}
+                      error={cm.error}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </>

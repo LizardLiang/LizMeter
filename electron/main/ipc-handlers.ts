@@ -8,6 +8,7 @@ import type {
   IssueProviderStatus,
   IssuesListInput,
   IssuesSetTokenInput,
+  JiraAuthType,
   JiraProviderStatus,
   LinearProviderStatus,
   ListSessionsInput,
@@ -131,6 +132,12 @@ export function registerIpcHandlers(): void {
     return provider.testConnection();
   });
 
+  ipcMain.handle("issues:fetch-comments", async (_event, input: { repo: string; issueNumber: number }) => {
+    const provider = getGitHubProvider() as import("./issue-providers/github-provider.ts").GitHubProvider | null;
+    if (!provider) throw new IssueProviderError("No token configured", "NO_TOKEN");
+    return provider.fetchComments(input.repo, input.issueNumber);
+  });
+
   ipcMain.handle("issues:delete-token", () => {
     getGitHubProvider()?.destroy();
     setProvider(null);
@@ -187,6 +194,12 @@ export function registerIpcHandlers(): void {
     return provider.fetchIssues(teamId, input?.forceRefresh ?? false);
   });
 
+  ipcMain.handle("linear:fetch-comments", async (_event, input: { issueId: string }) => {
+    const provider = getLinearProvider();
+    if (!provider) throw new IssueProviderError("No Linear API key configured", "NO_TOKEN");
+    return provider.fetchComments(input.issueId);
+  });
+
   ipcMain.handle("linear:provider-status", (): LinearProviderStatus => {
     const configured = hasToken("linear");
     const teamId = getSettingValue("linear_team_id");
@@ -204,9 +217,10 @@ export function registerIpcHandlers(): void {
     const token = loadToken("jira");
     const domain = getSettingValue("jira_domain");
     const email = getSettingValue("jira_email");
+    const authType = (getSettingValue("jira_auth_type") as JiraAuthType) ?? "cloud";
     if (token && domain && email) {
       getJiraProvider()?.destroy();
-      setJiraProvider(new JiraProvider(domain, email, token));
+      setJiraProvider(new JiraProvider(domain, email, token, authType));
     }
   }
 
@@ -218,8 +232,9 @@ export function registerIpcHandlers(): void {
     saveToken(trimmed, "jira");
     const domain = getSettingValue("jira_domain");
     const email = getSettingValue("jira_email");
+    const authType = (getSettingValue("jira_auth_type") as JiraAuthType) ?? "cloud";
     if (domain && email) {
-      setJiraProvider(new JiraProvider(domain, email, trimmed));
+      setJiraProvider(new JiraProvider(domain, email, trimmed, authType));
     }
   });
 
@@ -231,6 +246,7 @@ export function registerIpcHandlers(): void {
     deleteSettingValue("jira_email");
     deleteSettingValue("jira_project_key");
     deleteSettingValue("jira_jql_filter");
+    deleteSettingValue("jira_auth_type");
   });
 
   ipcMain.handle("jira:test-connection", async () => {
@@ -247,15 +263,28 @@ export function registerIpcHandlers(): void {
     return provider.fetchIssues(projectKey, jqlFilter, input?.forceRefresh ?? false);
   });
 
+  ipcMain.handle("jira:fetch-comments", async (_event, input: { issueKey: string }) => {
+    const provider = getJiraProvider();
+    if (!provider) throw new IssueProviderError("No Jira credentials configured", "NO_TOKEN");
+    return provider.fetchComments(input.issueKey);
+  });
+
   ipcMain.handle("jira:provider-status", (): JiraProviderStatus => {
     const configured = hasToken("jira");
     const domain = getSettingValue("jira_domain");
     const projectKey = getSettingValue("jira_project_key");
+    const authType = getSettingValue("jira_auth_type") as JiraAuthType | null;
     return {
       configured,
       domainSet: configured && domain !== null,
       projectKeySet: configured && projectKey !== null,
+      authType,
     };
+  });
+
+  ipcMain.handle("jira:set-auth-type", (_event, input: { authType: JiraAuthType }) => {
+    setSettingValue("jira_auth_type", input.authType);
+    reconstructJiraProvider();
   });
 
   ipcMain.handle("jira:set-domain", (_event, input: { domain: string }) => {

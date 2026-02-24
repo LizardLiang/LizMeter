@@ -271,3 +271,103 @@
     border-color: #565f8940;
   }
 }
+
+// --- Expanded card & comments ---
+
+.cardExpanded {
+  border-color: #7aa2f740;
+  background: #24283b;
+}
+
+.expandedSection {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid #292e42;
+}
+
+.expandedActions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.openExternalBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 5px;
+  border: 1px solid #292e42;
+  background: transparent;
+  color: #7aa2f7;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+
+  &:hover {
+    background: #7aa2f710;
+    border-color: #7aa2f740;
+  }
+}
+
+.commentsLoading {
+  color: #565f89;
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+.commentsError {
+  color: #f7768e;
+  font-size: 12px;
+  padding: 8px 0;
+}
+
+.commentsEmpty {
+  color: #565f89;
+  font-size: 12px;
+  padding: 8px 0;
+  font-style: italic;
+}
+
+.commentsList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.comment {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: #1a1b26;
+  border: 1px solid #292e42;
+}
+
+.commentHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.commentAuthor {
+  color: #7aa2f7;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.commentDate {
+  color: #565f89;
+  font-size: 11px;
+  margin-left: auto;
+}
+
+.commentBody {
+  color: #a9b1d6;
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

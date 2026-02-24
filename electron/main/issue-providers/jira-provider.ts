@@ -1,7 +1,7 @@
 // electron/main/issue-providers/jira-provider.ts
-// Jira Cloud REST API v3 provider — standalone class (follows LinearProvider pattern)
+// Jira REST API provider — supports both Cloud (v3) and Server (v2, basic auth)
 
-import type { JiraIssue } from "../../../src/shared/types.ts";
+import type { IssueComment, JiraAuthType, JiraIssue } from "../../../src/shared/types.ts";
 import { IssueProviderError } from "./types.ts";
 
 interface RawJiraIssue {
@@ -17,33 +17,40 @@ interface RawJiraIssue {
   };
 }
 
-function mapToJiraIssue(raw: RawJiraIssue, domain: string): JiraIssue {
-  return {
-    id: raw.id,
-    key: raw.key,
-    title: raw.fields.summary,
-    url: `https://${domain}/browse/${raw.key}`,
-    status: raw.fields.status.name,
-    priority: raw.fields.priority?.name ?? null,
-    assignee: raw.fields.assignee?.displayName ?? null,
-    issueType: raw.fields.issuetype?.name ?? null,
-    labels: raw.fields.labels ?? [],
-  };
-}
-
 export class JiraProvider {
-  private domain: string;
+  private baseUrl: string;
   private authHeader: string;
+  private authType: JiraAuthType;
   private cache = new Map<string, JiraIssue[]>();
 
-  constructor(domain: string, email: string, apiToken: string) {
-    // Normalize domain: strip protocol and trailing slashes
-    this.domain = domain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
-    this.authHeader = `Basic ${Buffer.from(`${email}:${apiToken}`).toString("base64")}`;
+  constructor(domain: string, email: string, secret: string, authType: JiraAuthType = "cloud") {
+    this.authType = authType;
+
+    if (authType === "server") {
+      // Server: domain is the full hostname (e.g., jira.mycompany.com or jira.mycompany.com:8080)
+      const normalized = domain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+      this.baseUrl = `https://${normalized}`;
+      // Server basic auth: username:password
+      this.authHeader = `Basic ${Buffer.from(`${email}:${secret}`).toString("base64")}`;
+    } else {
+      // Cloud: domain is the Atlassian subdomain (e.g., mycompany.atlassian.net)
+      const normalized = domain.replace(/^https?:\/\//, "").replace(/\/+$/, "");
+      this.baseUrl = `https://${normalized}`;
+      // Cloud basic auth: email:apiToken
+      this.authHeader = `Basic ${Buffer.from(`${email}:${secret}`).toString("base64")}`;
+    }
+  }
+
+  private get apiVersion(): string {
+    return this.authType === "server" ? "2" : "3";
+  }
+
+  private get browseBaseUrl(): string {
+    return this.baseUrl;
   }
 
   async testConnection(): Promise<{ displayName: string }> {
-    const response = await this.request("/rest/api/3/myself");
+    const response = await this.request(`/rest/api/${this.apiVersion}/myself`);
     const data = await response.json();
     return { displayName: data.displayName };
   }
@@ -69,17 +76,31 @@ export class JiraProvider {
       fields: "summary,status,priority,assignee,issuetype,labels",
     });
 
-    const response = await this.request(`/rest/api/3/search?${params}`);
+    const response = await this.request(`/rest/api/${this.apiVersion}/search?${params}`);
     const data = await response.json();
-    const issues = (data.issues ?? []).map((raw: RawJiraIssue) => mapToJiraIssue(raw, this.domain));
+    const issues = (data.issues ?? []).map((raw: RawJiraIssue) => this.mapToJiraIssue(raw));
     this.cache.set(cacheKey, issues);
     return issues;
+  }
+
+  private mapToJiraIssue(raw: RawJiraIssue): JiraIssue {
+    return {
+      id: raw.id,
+      key: raw.key,
+      title: raw.fields.summary,
+      url: `${this.browseBaseUrl}/browse/${raw.key}`,
+      status: raw.fields.status.name,
+      priority: raw.fields.priority?.name ?? null,
+      assignee: raw.fields.assignee?.displayName ?? null,
+      issueType: raw.fields.issuetype?.name ?? null,
+      labels: raw.fields.labels ?? [],
+    };
   }
 
   private async request(path: string): Promise<Response> {
     let response: Response;
     try {
-      response = await fetch(`https://${this.domain}${path}`, {
+      response = await fetch(`${this.baseUrl}${path}`, {
         headers: {
           "Authorization": this.authHeader,
           "Accept": "application/json",
@@ -87,21 +108,21 @@ export class JiraProvider {
       });
     } catch {
       throw new IssueProviderError(
-        `Could not reach ${this.domain}. Check the domain and your internet connection.`,
+        `Could not reach ${this.baseUrl}. Check the domain and your internet connection.`,
         "NETWORK_ERROR",
       );
     }
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new IssueProviderError(
-          "Jira credentials are invalid. Check your email and API token.",
-          "AUTH_FAILED",
-        );
+        const hint = this.authType === "server"
+          ? "Jira credentials are invalid. Check your username and password."
+          : "Jira credentials are invalid. Check your email and API token.";
+        throw new IssueProviderError(hint, "AUTH_FAILED");
       }
       if (response.status === 403) {
         throw new IssueProviderError(
-          "Access denied. Your API token may lack permissions for this resource.",
+          "Access denied. Your account may lack permissions for this resource.",
           "AUTH_FAILED",
         );
       }
@@ -130,6 +151,36 @@ export class JiraProvider {
     }
 
     return response;
+  }
+
+  async fetchComments(issueKey: string): Promise<IssueComment[]> {
+    const response = await this.request(
+      `/rest/api/${this.apiVersion}/issue/${issueKey}/comment?orderBy=created`,
+    );
+    const data = await response.json();
+    return (data.comments ?? []).map((c: { id: string; author?: { displayName?: string }; body: unknown; created: string }) => ({
+      id: c.id,
+      author: c.author?.displayName ?? "Unknown",
+      body: typeof c.body === "string" ? c.body : this.extractJiraBody(c.body),
+      createdAt: c.created,
+    }));
+  }
+
+  private extractJiraBody(body: unknown): string {
+    // Jira Cloud v3 uses ADF (Atlassian Document Format), v2 uses plain string
+    if (typeof body === "string") return body;
+    if (body && typeof body === "object" && "content" in body) {
+      return this.flattenAdf(body as { content: unknown[] });
+    }
+    return "";
+  }
+
+  private flattenAdf(node: { type?: string; text?: string; content?: unknown[] }): string {
+    if (node.text) return node.text;
+    if (!node.content || !Array.isArray(node.content)) return "";
+    return node.content
+      .map((child) => this.flattenAdf(child as { type?: string; text?: string; content?: unknown[] }))
+      .join("");
   }
 
   clearCache(): void {

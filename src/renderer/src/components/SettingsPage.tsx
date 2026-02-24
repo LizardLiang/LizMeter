@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type {
   IssueProviderStatus,
+  JiraAuthType,
   JiraProviderStatus,
   LinearProviderStatus,
   LinearTeam,
@@ -57,7 +58,9 @@ export function SettingsPage({ settings, onSave }: Props) {
     configured: false,
     domainSet: false,
     projectKeySet: false,
+    authType: null,
   });
+  const [jiraAuthType, setJiraAuthType] = useState<JiraAuthType>("cloud");
   const [jiraDomain, setJiraDomain] = useState("");
   const [jiraEmail, setJiraEmail] = useState("");
   const [jiraTokenInput, setJiraTokenInput] = useState("");
@@ -193,18 +196,23 @@ export function SettingsPage({ settings, onSave }: Props) {
 
   async function handleSaveJira() {
     const domain = jiraDomain.trim();
-    const email = jiraEmail.trim();
-    const token = jiraTokenInput.trim();
-    if (!domain || !email || !token) {
-      setJiraError("Domain, email, and API token are all required.");
+    const identity = jiraEmail.trim();
+    const secret = jiraTokenInput.trim();
+    if (!domain || !identity || !secret) {
+      setJiraError(
+        jiraAuthType === "server"
+          ? "Server URL, username, and password are all required."
+          : "Domain, email, and API token are all required.",
+      );
       return;
     }
     setJiraSaving(true);
     setJiraError(null);
     try {
+      await window.electronAPI.jira.setAuthType({ authType: jiraAuthType });
       await window.electronAPI.jira.setDomain({ domain });
-      await window.electronAPI.jira.setEmail({ email });
-      await window.electronAPI.jira.setToken({ token });
+      await window.electronAPI.jira.setEmail({ email: identity });
+      await window.electronAPI.jira.setToken({ token: secret });
       if (jiraProjectKey.trim()) {
         await window.electronAPI.jira.setProjectKey({ projectKey: jiraProjectKey.trim() });
       }
@@ -240,8 +248,9 @@ export function SettingsPage({ settings, onSave }: Props) {
 
   async function handleJiraDisconnect() {
     await window.electronAPI.jira.deleteToken();
-    setJiraStatus({ configured: false, domainSet: false, projectKeySet: false });
+    setJiraStatus({ configured: false, domainSet: false, projectKeySet: false, authType: null });
     setJiraTestResult(null);
+    setJiraAuthType("cloud");
     setJiraDomain("");
     setJiraEmail("");
     setJiraProjectKey("");
@@ -498,53 +507,112 @@ export function SettingsPage({ settings, onSave }: Props) {
       {!jiraStatus.configured
         ? (
           <div className={styles.tokenForm}>
-            <label className={styles.label}>Atlassian Domain</label>
-            <p className={styles.tokenHint}>
-              e.g. <code>mycompany.atlassian.net</code>
-            </p>
-            <div className={styles.inputRow}>
-              <input
-                type="text"
-                className={styles.tokenInput}
-                placeholder="mycompany.atlassian.net"
-                value={jiraDomain}
-                onChange={(e) => setJiraDomain(e.target.value)}
-              />
-            </div>
-
-            <label className={styles.label} style={{ marginTop: 12 }}>Email</label>
-            <div className={styles.inputRow}>
-              <input
-                type="email"
-                className={styles.tokenInput}
-                placeholder="you@company.com"
-                value={jiraEmail}
-                onChange={(e) => setJiraEmail(e.target.value)}
-              />
-            </div>
-
-            <label className={styles.label} style={{ marginTop: 12 }}>API Token</label>
-            <p className={styles.tokenHint}>
-              Generate at{" "}
-              <span
-                className={styles.tokenLink}
-                onClick={() =>
-                  void window.electronAPI.shell.openExternal(
-                    "https://id.atlassian.com/manage-profile/security/api-tokens",
-                  )}
+            <div className={styles.segmentedControl}>
+              <button
+                className={`${styles.segmentBtn} ${jiraAuthType === "cloud" ? styles.segmentBtnActive : ""}`}
+                onClick={() => setJiraAuthType("cloud")}
               >
-                Atlassian API tokens ↗
-              </span>
-            </p>
-            <div className={styles.inputRow}>
-              <input
-                type="password"
-                className={styles.tokenInput}
-                placeholder="API token"
-                value={jiraTokenInput}
-                onChange={(e) => setJiraTokenInput(e.target.value)}
-              />
+                Cloud
+              </button>
+              <button
+                className={`${styles.segmentBtn} ${jiraAuthType === "server" ? styles.segmentBtnActive : ""}`}
+                onClick={() => setJiraAuthType("server")}
+              >
+                Server / Data Center
+              </button>
             </div>
+
+            {jiraAuthType === "cloud"
+              ? (
+                <>
+                  <label className={styles.label}>Atlassian Domain</label>
+                  <p className={styles.tokenHint}>
+                    e.g. <code>mycompany.atlassian.net</code>
+                  </p>
+                  <div className={styles.inputRow}>
+                    <input
+                      type="text"
+                      className={styles.tokenInput}
+                      placeholder="mycompany.atlassian.net"
+                      value={jiraDomain}
+                      onChange={(e) => setJiraDomain(e.target.value)}
+                    />
+                  </div>
+
+                  <label className={styles.label} style={{ marginTop: 12 }}>Email</label>
+                  <div className={styles.inputRow}>
+                    <input
+                      type="email"
+                      className={styles.tokenInput}
+                      placeholder="you@company.com"
+                      value={jiraEmail}
+                      onChange={(e) => setJiraEmail(e.target.value)}
+                    />
+                  </div>
+
+                  <label className={styles.label} style={{ marginTop: 12 }}>API Token</label>
+                  <p className={styles.tokenHint}>
+                    Generate at{" "}
+                    <span
+                      className={styles.tokenLink}
+                      onClick={() =>
+                        void window.electronAPI.shell.openExternal(
+                          "https://id.atlassian.com/manage-profile/security/api-tokens",
+                        )}
+                    >
+                      Atlassian API tokens ↗
+                    </span>
+                  </p>
+                  <div className={styles.inputRow}>
+                    <input
+                      type="password"
+                      className={styles.tokenInput}
+                      placeholder="API token"
+                      value={jiraTokenInput}
+                      onChange={(e) => setJiraTokenInput(e.target.value)}
+                    />
+                  </div>
+                </>
+              )
+              : (
+                <>
+                  <label className={styles.label}>Server URL</label>
+                  <p className={styles.tokenHint}>
+                    e.g. <code>jira.mycompany.com</code> or <code>jira.mycompany.com:8080</code>
+                  </p>
+                  <div className={styles.inputRow}>
+                    <input
+                      type="text"
+                      className={styles.tokenInput}
+                      placeholder="jira.mycompany.com"
+                      value={jiraDomain}
+                      onChange={(e) => setJiraDomain(e.target.value)}
+                    />
+                  </div>
+
+                  <label className={styles.label} style={{ marginTop: 12 }}>Username</label>
+                  <div className={styles.inputRow}>
+                    <input
+                      type="text"
+                      className={styles.tokenInput}
+                      placeholder="your.username"
+                      value={jiraEmail}
+                      onChange={(e) => setJiraEmail(e.target.value)}
+                    />
+                  </div>
+
+                  <label className={styles.label} style={{ marginTop: 12 }}>Password</label>
+                  <div className={styles.inputRow}>
+                    <input
+                      type="password"
+                      className={styles.tokenInput}
+                      placeholder="Password"
+                      value={jiraTokenInput}
+                      onChange={(e) => setJiraTokenInput(e.target.value)}
+                    />
+                  </div>
+                </>
+              )}
 
             <label className={styles.label} style={{ marginTop: 12 }}>Project Key (optional)</label>
             <p className={styles.tokenHint}>
@@ -584,7 +652,9 @@ export function SettingsPage({ settings, onSave }: Props) {
         : (
           <>
             <div className={styles.tokenConnected}>
-              <span className={styles.tokenStatus}>Jira — Connected ✓</span>
+              <span className={styles.tokenStatus}>
+                Jira{jiraStatus.authType === "server" ? " Server" : ""} — Connected ✓
+              </span>
               <div className={styles.tokenActions}>
                 <button
                   className={styles.testTokenBtn}

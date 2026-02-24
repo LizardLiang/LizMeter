@@ -2,7 +2,7 @@
 // Linear GraphQL client — fetches issues, teams, and user info from Linear API.
 // Uses raw fetch instead of @linear/sdk to avoid CJS/ESM issues in Electron main process.
 
-import type { LinearIssue, LinearIssueState, LinearTeam } from "../../../src/shared/types.ts";
+import type { IssueComment, LinearIssue, LinearIssueState, LinearTeam } from "../../../src/shared/types.ts";
 import { IssueProviderError } from "./types.ts";
 
 // --- GraphQL Queries ---
@@ -48,6 +48,23 @@ const TEAM_ISSUES_QUERY = `
             type
           }
           updatedAt
+        }
+      }
+    }
+  }
+`;
+
+const ISSUE_COMMENTS_QUERY = `
+  query IssueComments($issueId: String!) {
+    issue(id: $issueId) {
+      comments(first: 100, orderBy: createdAt) {
+        nodes {
+          id
+          body
+          createdAt
+          user {
+            name
+          }
         }
       }
     }
@@ -150,6 +167,18 @@ export class LinearProvider {
       throw new IssueProviderError(json.errors[0].message, "QUERY_ERROR");
     }
     return json.data as T;
+  }
+
+  async fetchComments(issueId: string): Promise<IssueComment[]> {
+    const data = await this.graphql<{
+      issue: { comments: { nodes: Array<{ id: string; body: string; createdAt: string; user: { name: string } }> } };
+    }>(ISSUE_COMMENTS_QUERY, { issueId });
+    return data.issue.comments.nodes.map((c) => ({
+      id: c.id,
+      author: c.user.name,
+      body: c.body,
+      createdAt: c.createdAt,
+    }));
   }
 
   clearCache(): void {

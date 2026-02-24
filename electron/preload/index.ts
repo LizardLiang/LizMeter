@@ -41,6 +41,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     setToken: (input: IssuesSetTokenInput) => ipcRenderer.invoke("issues:set-token", input),
     deleteToken: () => ipcRenderer.invoke("issues:delete-token"),
     testToken: () => ipcRenderer.invoke("issues:test-token"),
+    fetchComments: (input: { repo: string; issueNumber: number }) =>
+      ipcRenderer.invoke("issues:fetch-comments", input),
   },
   linear: {
     setToken: (input: { token: string }) => ipcRenderer.invoke("linear:set-token", input),
@@ -51,6 +53,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getTeam: () => ipcRenderer.invoke("linear:get-team"),
     fetchIssues: (input: { forceRefresh?: boolean }) => ipcRenderer.invoke("linear:fetch-issues", input),
     providerStatus: () => ipcRenderer.invoke("linear:provider-status"),
+    fetchComments: (input: { issueId: string }) => ipcRenderer.invoke("linear:fetch-comments", input),
   },
   jira: {
     setToken: (input: { token: string }) => ipcRenderer.invoke("jira:set-token", input),
@@ -58,6 +61,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
     testConnection: () => ipcRenderer.invoke("jira:test-connection"),
     fetchIssues: (input: { forceRefresh?: boolean }) => ipcRenderer.invoke("jira:fetch-issues", input),
     providerStatus: () => ipcRenderer.invoke("jira:provider-status"),
+    fetchComments: (input: { issueKey: string }) => ipcRenderer.invoke("jira:fetch-comments", input),
+    setAuthType: (input: { authType: string }) => ipcRenderer.invoke("jira:set-auth-type", input),
     setDomain: (input: { domain: string }) => ipcRenderer.invoke("jira:set-domain", input),
     setEmail: (input: { email: string }) => ipcRenderer.invoke("jira:set-email", input),
     setProjectKey: (input: { projectKey: string }) => ipcRenderer.invoke("jira:set-project-key", input),

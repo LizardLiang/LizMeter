@@ -141,6 +141,10 @@ export interface LinearProviderStatus {
   teamName: string | null; // Display name of selected team
 }
 
+// --- Jira Types ---
+
+export type JiraAuthType = "cloud" | "server";
+
 // --- Jira Issue Types ---
 
 export interface JiraIssue {
@@ -159,6 +163,16 @@ export interface JiraProviderStatus {
   configured: boolean;
   domainSet: boolean;
   projectKeySet: boolean;
+  authType: JiraAuthType | null;
+}
+
+// --- Issue Comment Types ---
+
+export interface IssueComment {
+  id: string;
+  author: string;
+  body: string; // plain text or markdown
+  createdAt: string; // ISO 8601
 }
 
 // --- Issue Reference (discriminated union for session linking) ---
@@ -215,6 +229,7 @@ export interface ElectronAPI {
     setToken: (input: IssuesSetTokenInput) => Promise<void>;
     deleteToken: () => Promise<void>;
     testToken: () => Promise<{ username: string; }>;
+    fetchComments: (input: { repo: string; issueNumber: number; }) => Promise<IssueComment[]>;
   };
   linear: {
     setToken: (input: { token: string; }) => Promise<void>;
@@ -225,6 +240,7 @@ export interface ElectronAPI {
     getTeam: () => Promise<{ teamId: string; teamName: string; } | null>;
     fetchIssues: (input: { forceRefresh?: boolean; }) => Promise<LinearIssue[]>;
     providerStatus: () => Promise<LinearProviderStatus>;
+    fetchComments: (input: { issueId: string; }) => Promise<IssueComment[]>;
   };
   jira: {
     setToken: (input: { token: string; }) => Promise<void>;
@@ -232,6 +248,8 @@ export interface ElectronAPI {
     testConnection: () => Promise<{ displayName: string; }>;
     fetchIssues: (input: { forceRefresh?: boolean; }) => Promise<JiraIssue[]>;
     providerStatus: () => Promise<JiraProviderStatus>;
+    fetchComments: (input: { issueKey: string; }) => Promise<IssueComment[]>;
+    setAuthType: (input: { authType: JiraAuthType; }) => Promise<void>;
     setDomain: (input: { domain: string; }) => Promise<void>;
     setEmail: (input: { email: string; }) => Promise<void>;
     setProjectKey: (input: { projectKey: string; }) => Promise<void>;

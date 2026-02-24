@@ -5,6 +5,7 @@ import { loadToken } from "./token-storage.ts";
 import { GitHubProvider } from "./github-provider.ts";
 import { JiraProvider } from "./jira-provider.ts";
 import { LinearProvider } from "./linear-provider.ts";
+import type { JiraAuthType } from "../../../src/shared/types.ts";
 import type { IssueProvider } from "./types.ts";
 import { getSettingValue } from "../database.ts";
 
@@ -60,8 +61,9 @@ export function initJiraProviderFromDisk(): void {
   const token = loadToken("jira");
   const domain = getSettingValue("jira_domain");
   const email = getSettingValue("jira_email");
+  const authType = (getSettingValue("jira_auth_type") as JiraAuthType) ?? "cloud";
   if (token && domain && email) {
-    jiraProvider = new JiraProvider(domain, email, token);
+    jiraProvider = new JiraProvider(domain, email, token, authType);
   }
 }
 

@@ -194,6 +194,37 @@
   }
 }
 
+// --- Segmented control (Cloud / Server toggle) ---
+
+.segmentedControl {
+  display: flex;
+  border: 1px solid #292e42;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.segmentBtn {
+  flex: 1;
+  padding: 7px 12px;
+  border: none;
+  background: transparent;
+  color: #565f89;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+
+  &:hover {
+    color: #a9b1d6;
+  }
+}
+
+.segmentBtnActive {
+  background: #7aa2f720;
+  color: #7aa2f7;
+}
+
 // --- Linear-specific styles ---
 
 .linearTeamLabel {

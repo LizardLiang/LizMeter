@@ -2,7 +2,7 @@
 // GitHub Issues provider using @octokit/rest v20 (CJS-compatible)
 
 import { Octokit } from "@octokit/rest";
-import type { Issue, IssuesListInput } from "../../../src/shared/types.ts";
+import type { Issue, IssueComment, IssuesListInput } from "../../../src/shared/types.ts";
 import { IssueProviderError } from "./types.ts";
 import type { IssueProvider } from "./types.ts";
 
@@ -108,6 +108,40 @@ export class GitHubProvider implements IssueProvider {
       this.authenticatedUsername = data.login;
     }
     return this.authenticatedUsername;
+  }
+
+  async fetchComments(repo: string, issueNumber: number): Promise<IssueComment[]> {
+    try {
+      const [owner, repoName] = repo.split("/");
+      if (!owner || !repoName) {
+        throw new IssueProviderError(`Invalid repo format: "${repo}". Expected "owner/repo"`, "NETWORK_ERROR");
+      }
+      const response = await this.octokit.rest.issues.listComments({
+        owner,
+        repo: repoName,
+        issue_number: issueNumber,
+        per_page: 100,
+        sort: "created",
+        direction: "asc",
+      });
+      return response.data.map((c) => ({
+        id: String(c.id),
+        author: c.user?.login ?? "unknown",
+        body: c.body ?? "",
+        createdAt: c.created_at,
+      }));
+    } catch (err) {
+      if (err instanceof IssueProviderError) throw err;
+      if (err instanceof Error && "status" in err) {
+        const status = (err as { status: number }).status;
+        if (status === 401) throw new IssueProviderError("GitHub token is invalid or has been revoked", "AUTH_FAILED");
+        if (status === 403) throw new IssueProviderError("GitHub API rate limit reached.", "RATE_LIMITED");
+      }
+      throw new IssueProviderError(
+        err instanceof Error ? err.message : "Could not fetch comments from GitHub.",
+        "NETWORK_ERROR",
+      );
+    }
   }
 
   async testConnection(): Promise<{ username: string }> {
