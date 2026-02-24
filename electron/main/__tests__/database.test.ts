@@ -3,11 +3,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   closeDatabase,
   deleteSession,
+  getSessionById,
   getSettings,
   initDatabase,
   listSessions,
   saveSession,
   saveSettings,
+  updateWorklogStatus,
 } from "../database.ts";
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -408,6 +410,100 @@ describe("TC-156: Simulated legacy database migration", () => {
     const list = listSessions({});
     expect(list.sessions).toHaveLength(0); // :memory: = fresh DB after re-init
     expect(list.total).toBe(0);
+  });
+});
+
+// --- Worklog Integration Tests ---
+
+describe("TC-501: Migration adds worklog_status and worklog_id columns", () => {
+  it("new sessions default to worklog_status not_logged and worklog_id null", () => {
+    const session = saveSession({
+      title: "Worklog test",
+      timerType: "work",
+      plannedDurationSeconds: 1500,
+      actualDurationSeconds: 1500,
+    });
+    expect(session.worklogStatus).toBe("not_logged");
+    expect(session.worklogId).toBeNull();
+  });
+});
+
+describe("TC-502: Migration is idempotent", () => {
+  it("calling initDatabase twice does not error on worklog columns", () => {
+    expect(() => {
+      closeDatabase();
+      initDatabase(":memory:");
+    }).not.toThrow();
+  });
+});
+
+describe("TC-503: getSessionById returns session with worklog fields", () => {
+  it("returns session object with worklogStatus and worklogId", () => {
+    const saved = saveSession({
+      title: "Get by id test",
+      timerType: "work",
+      plannedDurationSeconds: 1500,
+      actualDurationSeconds: 1500,
+    });
+    const found = getSessionById(saved.id);
+    expect(found).not.toBeNull();
+    expect(found!.id).toBe(saved.id);
+    expect(found!.worklogStatus).toBe("not_logged");
+    expect(found!.worklogId).toBeNull();
+  });
+
+  it("returns null for non-existent id", () => {
+    const result = getSessionById("non-existent-uuid");
+    expect(result).toBeNull();
+  });
+});
+
+describe("TC-504: updateWorklogStatus updates status to logged with worklogId", () => {
+  it("sets worklog_status to logged and stores worklog_id", () => {
+    const session = saveSession({
+      title: "Update worklog test",
+      timerType: "work",
+      plannedDurationSeconds: 1500,
+      actualDurationSeconds: 1500,
+    });
+    updateWorklogStatus(session.id, "logged", "10042");
+    const updated = getSessionById(session.id);
+    expect(updated!.worklogStatus).toBe("logged");
+    expect(updated!.worklogId).toBe("10042");
+  });
+});
+
+describe("TC-505: updateWorklogStatus updates status to failed without worklogId", () => {
+  it("sets worklog_status to failed leaving worklog_id null", () => {
+    const session = saveSession({
+      title: "Failed worklog test",
+      timerType: "work",
+      plannedDurationSeconds: 1500,
+      actualDurationSeconds: 1500,
+    });
+    updateWorklogStatus(session.id, "failed");
+    const updated = getSessionById(session.id);
+    expect(updated!.worklogStatus).toBe("failed");
+    expect(updated!.worklogId).toBeNull();
+  });
+});
+
+describe("TC-506: listSessions returns sessions with worklog fields", () => {
+  it("sessions from listSessions include worklogStatus and worklogId", () => {
+    const session = saveSession({
+      title: "List worklog test",
+      timerType: "work",
+      plannedDurationSeconds: 1500,
+      actualDurationSeconds: 1500,
+      issueProvider: "jira",
+      issueId: "PROJ-123",
+    });
+    updateWorklogStatus(session.id, "logged", "10099");
+    const list = listSessions({});
+    const found = list.sessions.find((s) => s.id === session.id);
+    expect(found).toBeDefined();
+    expect(found!.worklogStatus).toBe("logged");
+    expect(found!.worklogId).toBe("10099");
   });
 });
 

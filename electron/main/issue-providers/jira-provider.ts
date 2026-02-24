@@ -97,14 +97,22 @@ export class JiraProvider {
     };
   }
 
-  private async request(path: string): Promise<Response> {
+  private async request(path: string, options?: { method?: string; body?: unknown }): Promise<Response> {
+    const method = options?.method ?? "GET";
+    const headers: Record<string, string> = {
+      "Authorization": this.authHeader,
+      "Accept": "application/json",
+    };
+    if (options?.body !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
+
     let response: Response;
     try {
       response = await fetch(`${this.baseUrl}${path}`, {
-        headers: {
-          "Authorization": this.authHeader,
-          "Accept": "application/json",
-        },
+        method,
+        headers,
+        body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
       });
     } catch {
       throw new IssueProviderError(
@@ -124,6 +132,12 @@ export class JiraProvider {
         throw new IssueProviderError(
           "Access denied. Your account may lack permissions for this resource.",
           "AUTH_FAILED",
+        );
+      }
+      if (response.status === 404) {
+        throw new IssueProviderError(
+          "Resource not found in Jira. The issue may have been deleted.",
+          "NOT_FOUND",
         );
       }
       if (response.status === 429) {
@@ -151,6 +165,50 @@ export class JiraProvider {
     }
 
     return response;
+  }
+
+  async addWorklog(
+    issueKey: string,
+    timeSpentSeconds: number,
+    started: string,
+    comment: string,
+  ): Promise<{ id: string }> {
+    const body: Record<string, unknown> = {
+      timeSpentSeconds,
+      started: this.formatJiraTimestamp(started),
+    };
+
+    if (this.authType === "server") {
+      // Server v2: plain string comment
+      body.comment = comment;
+    } else {
+      // Cloud v3: ADF format
+      body.comment = {
+        type: "doc",
+        version: 1,
+        content: [
+          {
+            type: "paragraph",
+            content: [
+              { type: "text", text: comment },
+            ],
+          },
+        ],
+      };
+    }
+
+    const response = await this.request(
+      `/rest/api/${this.apiVersion}/issue/${issueKey}/worklog`,
+      { method: "POST", body },
+    );
+    const data = await response.json() as { id: string | number };
+    return { id: String(data.id) };
+  }
+
+  private formatJiraTimestamp(isoString: string): string {
+    // Jira expects: "2026-02-24T10:30:00.000+0000"
+    const date = new Date(isoString);
+    return date.toISOString().replace("Z", "+0000");
   }
 
   async fetchComments(issueKey: string): Promise<IssueComment[]> {

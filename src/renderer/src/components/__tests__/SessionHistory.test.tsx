@@ -15,6 +15,10 @@ const mockSessions: Session[] = [
     issueNumber: null,
     issueTitle: null,
     issueUrl: null,
+    issueProvider: null,
+    issueId: null,
+    worklogStatus: "not_logged",
+    worklogId: null,
   },
   {
     id: "2",
@@ -27,6 +31,10 @@ const mockSessions: Session[] = [
     issueNumber: null,
     issueTitle: null,
     issueUrl: null,
+    issueProvider: null,
+    issueId: null,
+    worklogStatus: "not_logged",
+    worklogId: null,
   },
   {
     id: "3",
@@ -39,6 +47,10 @@ const mockSessions: Session[] = [
     issueNumber: null,
     issueTitle: null,
     issueUrl: null,
+    issueProvider: null,
+    issueId: null,
+    worklogStatus: "not_logged",
+    worklogId: null,
   },
 ];
 

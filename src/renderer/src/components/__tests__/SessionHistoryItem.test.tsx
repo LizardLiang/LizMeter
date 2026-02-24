@@ -16,6 +16,8 @@ const baseSession: Session = {
   issueUrl: null,
   issueProvider: null,
   issueId: null,
+  worklogStatus: "not_logged",
+  worklogId: null,
 };
 
 const mockElectronAPI = {
@@ -127,5 +129,105 @@ describe("TC-Linear-325: SessionHistoryItem issue badge opens URL in browser on 
     const badge = within(container).getByText("LIN-42");
     fireEvent.click(badge.closest("[class]")!);
     expect(mockElectronAPI.shell.openExternal).toHaveBeenCalledWith("https://linear.app/team/LIN-42");
+  });
+});
+
+// --- Worklog UI Tests ---
+
+const jiraSession: Session = {
+  id: "jira-session-1",
+  title: "Fix login bug",
+  timerType: "work",
+  plannedDurationSeconds: 1500,
+  actualDurationSeconds: 1500,
+  completedAt: "2026-02-24T10:00:00.000Z",
+  tags: [],
+  issueNumber: null,
+  issueTitle: "Fix login bug",
+  issueUrl: "https://mycompany.atlassian.net/browse/PROJ-123",
+  issueProvider: "jira",
+  issueId: "PROJ-123",
+  worklogStatus: "not_logged",
+  worklogId: null,
+};
+
+describe("TC-501: Log Work button visible for Jira sessions with not_logged status", () => {
+  it("shows Log Work button for Jira-linked sessions with worklogStatus not_logged", () => {
+    const { container } = render(
+      <SessionHistoryItem session={jiraSession} onDelete={vi.fn()} onLogWork={vi.fn()} />,
+    );
+    expect(within(container).getByRole("button", { name: /log work/i })).toBeInTheDocument();
+  });
+});
+
+describe("TC-502: Log Work button hidden for non-Jira sessions", () => {
+  it("does not show Log Work button when issueProvider is null", () => {
+    const { container } = render(<SessionHistoryItem session={baseSession} onDelete={vi.fn()} onLogWork={vi.fn()} />);
+    expect(within(container).queryByRole("button", { name: /log work/i })).not.toBeInTheDocument();
+  });
+
+  it("does not show Log Work button when issueProvider is linear", () => {
+    const session: Session = {
+      ...baseSession,
+      issueProvider: "linear",
+      issueId: "LIN-42",
+    };
+    const { container } = render(<SessionHistoryItem session={session} onDelete={vi.fn()} onLogWork={vi.fn()} />);
+    expect(within(container).queryByRole("button", { name: /log work/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("TC-503: Log Work button hidden for sessions under 60 seconds", () => {
+  it("hides Log Work button when actualDurationSeconds < 60", () => {
+    const shortSession: Session = { ...jiraSession, actualDurationSeconds: 59 };
+    const { container } = render(
+      <SessionHistoryItem session={shortSession} onDelete={vi.fn()} onLogWork={vi.fn()} />,
+    );
+    expect(within(container).queryByRole("button", { name: /log work/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("TC-504: Logged indicator shown for worklogStatus logged", () => {
+  it("shows Logged indicator instead of Log Work button", () => {
+    const loggedSession: Session = { ...jiraSession, worklogStatus: "logged", worklogId: "10042" };
+    const { container } = render(
+      <SessionHistoryItem session={loggedSession} onDelete={vi.fn()} onLogWork={vi.fn()} />,
+    );
+    expect(within(container).getByText("Logged")).toBeInTheDocument();
+    expect(within(container).queryByRole("button", { name: /log work/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("TC-505: Retry button shown for worklogStatus failed", () => {
+  it("shows Retry button when worklogStatus is failed", () => {
+    const failedSession: Session = { ...jiraSession, worklogStatus: "failed" };
+    const { container } = render(
+      <SessionHistoryItem session={failedSession} onDelete={vi.fn()} onLogWork={vi.fn()} />,
+    );
+    expect(within(container).getByRole("button", { name: /retry/i })).toBeInTheDocument();
+    expect(within(container).queryByRole("button", { name: /log work/i })).not.toBeInTheDocument();
+  });
+});
+
+describe("TC-506: Loading state disables Log Work button", () => {
+  it("disables button and shows loading indicator when worklogLoading is true", () => {
+    const { container } = render(
+      <SessionHistoryItem session={jiraSession} onDelete={vi.fn()} onLogWork={vi.fn()} worklogLoading={true} />,
+    );
+    const btn = within(container).getByText("...");
+    expect(btn).toBeInTheDocument();
+    expect(btn).toBeDisabled();
+  });
+});
+
+describe("TC-507: onLogWork callback fires with correct sessionId and issueKey", () => {
+  it("calls onLogWork with sessionId and issueKey when Log Work clicked", () => {
+    const onLogWork = vi.fn();
+    const { container } = render(
+      <SessionHistoryItem session={jiraSession} onDelete={vi.fn()} onLogWork={onLogWork} />,
+    );
+    const btn = within(container).getByRole("button", { name: /log work/i });
+    fireEvent.click(btn);
+    expect(onLogWork).toHaveBeenCalledWith("jira-session-1", "PROJ-123");
   });
 });

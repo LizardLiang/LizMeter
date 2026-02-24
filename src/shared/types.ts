@@ -11,6 +11,8 @@ export type TimerStatus = "idle" | "running" | "paused" | "completed";
 
 // --- Session Types ---
 
+export type WorklogStatus = "not_logged" | "logged" | "failed";
+
 export interface Session {
   id: string; // UUID v4
   title: string; // user-entered title, may be empty string
@@ -26,6 +28,18 @@ export interface Session {
   // New generic provider fields
   issueProvider: "github" | "linear" | "jira" | null;
   issueId: string | null;
+  // Worklog tracking fields (Jira only)
+  worklogStatus: WorklogStatus;
+  worklogId: string | null;
+}
+
+export interface WorklogLogInput {
+  sessionId: string;
+  issueKey: string;
+}
+
+export interface WorklogLogResult {
+  worklogId: string;
 }
 
 export interface SaveSessionInput {
@@ -261,6 +275,9 @@ export interface ElectronAPI {
     setEmail: (input: { email: string; }) => Promise<void>;
     setProjectKey: (input: { projectKey: string; }) => Promise<void>;
     setJqlFilter: (input: { jql: string; }) => Promise<void>;
+  };
+  worklog: {
+    log: (input: WorklogLogInput) => Promise<WorklogLogResult>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

@@ -8,6 +8,7 @@ import type {
   SaveSessionInput,
   TimerSettings,
   UpdateTagInput,
+  WorklogLogInput,
 } from "../../src/shared/types.ts";
 
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -67,6 +68,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     setEmail: (input: { email: string }) => ipcRenderer.invoke("jira:set-email", input),
     setProjectKey: (input: { projectKey: string }) => ipcRenderer.invoke("jira:set-project-key", input),
     setJqlFilter: (input: { jql: string }) => ipcRenderer.invoke("jira:set-jql-filter", input),
+  },
+  worklog: {
+    log: (input: WorklogLogInput) => ipcRenderer.invoke("worklog:log", input),
   },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),

@@ -46,6 +46,8 @@ export function TomatoClock() {
     loadMore,
     activeTagFilter,
     setTagFilter,
+    logWork,
+    worklogLoading,
   } = useSessionHistory();
 
   const tagManager = useTagManager();
@@ -215,6 +217,8 @@ export function TomatoClock() {
             onAssignTag={tagManager.assignTag}
             onUnassignTag={tagManager.unassignTag}
             onCreateTag={tagManager.createTag}
+            onLogWork={logWork}
+            worklogLoading={worklogLoading}
           />
         )}
 

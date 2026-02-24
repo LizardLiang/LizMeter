@@ -22,6 +22,7 @@ import {
   deleteSession,
   deleteSettingValue,
   deleteTag,
+  getSessionById,
   getSettingValue,
   getSettings,
   listSessions,
@@ -32,6 +33,7 @@ import {
   setSettingValue,
   unassignTag,
   updateTag,
+  updateWorklogStatus,
 } from "./database.ts";
 import {
   getGitHubProvider,
@@ -316,6 +318,51 @@ export function registerIpcHandlers(): void {
   ipcMain.handle("shell:open-external", (_event, url: string) => {
     if (url.startsWith("https://") || url.startsWith("http://")) {
       void shell.openExternal(url);
+    }
+  });
+
+  // Worklog IPC handler
+  ipcMain.handle("worklog:log", async (_event, input: { sessionId: string; issueKey: string }) => {
+    const provider = getJiraProvider();
+    if (!provider) throw new IssueProviderError("No Jira credentials configured", "NO_TOKEN");
+
+    // Fetch session from database
+    const session = getSessionById(input.sessionId);
+    if (!session) throw new Error("Session not found");
+
+    // Guard: already logged
+    if (session.worklogStatus === "logged" && session.worklogId) {
+      throw new IssueProviderError("Worklog already logged for this session", "INELIGIBLE");
+    }
+
+    // Guard: duration too short
+    if (session.actualDurationSeconds < 60) {
+      throw new IssueProviderError(
+        "Session duration is less than 60 seconds (Jira minimum)",
+        "INELIGIBLE",
+      );
+    }
+
+    // Calculate started timestamp: completedAt - actualDurationSeconds
+    const completedDate = new Date(session.completedAt);
+    const startedDate = new Date(completedDate.getTime() - session.actualDurationSeconds * 1000);
+    const started = startedDate.toISOString();
+
+    // Build comment
+    const comment = session.title ? `LizMeter: ${session.title}` : "Logged via LizMeter";
+
+    try {
+      const result = await provider.addWorklog(
+        input.issueKey,
+        session.actualDurationSeconds,
+        started,
+        comment,
+      );
+      updateWorklogStatus(input.sessionId, "logged", result.id);
+      return { worklogId: result.id };
+    } catch (err) {
+      updateWorklogStatus(input.sessionId, "failed");
+      throw err;
     }
   });
 }

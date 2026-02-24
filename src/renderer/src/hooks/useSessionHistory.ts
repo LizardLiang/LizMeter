@@ -14,6 +14,8 @@ export interface UseSessionHistoryReturn {
   deleteSession: (id: string) => void;
   loadMore: () => void;
   setTagFilter: (tagId: number | undefined) => void;
+  logWork: (sessionId: string, issueKey: string) => Promise<void>;
+  worklogLoading: Record<string, boolean>;
 }
 
 const DEFAULT_LIMIT = 50;
@@ -26,6 +28,7 @@ export function useSessionHistory(): UseSessionHistoryReturn {
   const [offset, setOffset] = useState(0);
   const [refreshToken, setRefreshToken] = useState(0);
   const [activeTagFilter, setActiveTagFilter] = useState<number | undefined>(undefined);
+  const [worklogLoading, setWorklogLoading] = useState<Record<string, boolean>>({});
 
   const fetchSessions = useCallback(async (currentOffset: number, tagId?: number) => {
     setIsLoading(true);
@@ -87,6 +90,23 @@ export function useSessionHistory(): UseSessionHistoryReturn {
     setRefreshToken((t) => t + 1);
   }, []);
 
+  const logWork = useCallback(
+    async (sessionId: string, issueKey: string): Promise<void> => {
+      setWorklogLoading((prev) => ({ ...prev, [sessionId]: true }));
+      try {
+        await window.electronAPI.worklog.log({ sessionId, issueKey });
+        refresh();
+      } finally {
+        setWorklogLoading((prev) => {
+          const next = { ...prev };
+          delete next[sessionId];
+          return next;
+        });
+      }
+    },
+    [refresh],
+  );
+
   return {
     sessions,
     total,
@@ -97,5 +117,7 @@ export function useSessionHistory(): UseSessionHistoryReturn {
     deleteSession,
     loadMore,
     setTagFilter,
+    logWork,
+    worklogLoading,
   };
 }

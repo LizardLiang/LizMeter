@@ -16,6 +16,7 @@ import type {
   TimerSettings,
   TimerType,
   UpdateTagInput,
+  WorklogStatus,
 } from "../../src/shared/types.ts";
 
 let db: Database.Database | null = null;
@@ -93,6 +94,11 @@ export function initDatabase(dbPath?: string): void {
   if (!cols.includes("issue_provider")) {
     db.exec("ALTER TABLE sessions ADD COLUMN issue_provider TEXT");
     db.exec("ALTER TABLE sessions ADD COLUMN issue_id TEXT");
+  }
+  // Idempotent migration: add worklog tracking columns
+  if (!cols.includes("worklog_status")) {
+    db.exec("ALTER TABLE sessions ADD COLUMN worklog_status TEXT NOT NULL DEFAULT 'not_logged'");
+    db.exec("ALTER TABLE sessions ADD COLUMN worklog_id TEXT");
   }
 }
 
@@ -209,6 +215,8 @@ export function saveSession(input: SaveSessionInput): Session {
     issueUrl: input.issueUrl ?? null,
     issueProvider,
     issueId,
+    worklogStatus: "not_logged" as WorklogStatus,
+    worklogId: null,
   };
 }
 
@@ -224,6 +232,8 @@ interface SessionRow {
   issueUrl: string | null;
   issueProvider: string | null;
   issueId: string | null;
+  worklogStatus: string;
+  worklogId: string | null;
 }
 
 interface TagRow {
@@ -258,7 +268,9 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
                 s.issue_title as issueTitle,
                 s.issue_url as issueUrl,
                 s.issue_provider as issueProvider,
-                s.issue_id as issueId
+                s.issue_id as issueId,
+                s.worklog_status as worklogStatus,
+                s.worklog_id as worklogId
          FROM sessions s
          INNER JOIN session_tags st ON st.session_id = s.id AND st.tag_id = ?
          ORDER BY s.completed_at DESC
@@ -283,7 +295,9 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
                 issue_title as issueTitle,
                 issue_url as issueUrl,
                 issue_provider as issueProvider,
-                issue_id as issueId
+                issue_id as issueId,
+                worklog_status as worklogStatus,
+                worklog_id as worklogId
          FROM sessions
          ORDER BY completed_at DESC
          LIMIT ? OFFSET ?`,
@@ -316,6 +330,8 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
     issueUrl: row.issueUrl ?? null,
     issueProvider: (row.issueProvider as "github" | "linear" | "jira" | null) ?? null,
     issueId: row.issueId ?? null,
+    worklogStatus: (row.worklogStatus ?? "not_logged") as WorklogStatus,
+    worklogId: row.worklogId ?? null,
   }));
 
   return { sessions, total };
@@ -325,6 +341,61 @@ export function deleteSession(id: string): void {
   const database = getDb();
   // No-op if ID doesn't exist — delete is safe to call with any ID
   database.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+}
+
+export function getSessionById(id: string): Session | null {
+  const database = getDb();
+  const row = database
+    .prepare(
+      `SELECT id, title, timer_type as timerType,
+              planned_duration_seconds as plannedDurationSeconds,
+              actual_duration_seconds as actualDurationSeconds,
+              completed_at as completedAt,
+              issue_number as issueNumber,
+              issue_title as issueTitle,
+              issue_url as issueUrl,
+              issue_provider as issueProvider,
+              issue_id as issueId,
+              worklog_status as worklogStatus,
+              worklog_id as worklogId
+       FROM sessions WHERE id = ?`,
+    )
+    .get(id) as SessionRow | undefined;
+  if (!row) return null;
+  const tags = listTagsForSession(id);
+  return {
+    id: row.id,
+    title: row.title,
+    timerType: row.timerType as TimerType,
+    plannedDurationSeconds: row.plannedDurationSeconds,
+    actualDurationSeconds: row.actualDurationSeconds,
+    completedAt: row.completedAt,
+    tags,
+    issueNumber: row.issueNumber ?? null,
+    issueTitle: row.issueTitle ?? null,
+    issueUrl: row.issueUrl ?? null,
+    issueProvider: (row.issueProvider as "github" | "linear" | "jira" | null) ?? null,
+    issueId: row.issueId ?? null,
+    worklogStatus: (row.worklogStatus ?? "not_logged") as WorklogStatus,
+    worklogId: row.worklogId ?? null,
+  };
+}
+
+export function updateWorklogStatus(
+  sessionId: string,
+  status: WorklogStatus,
+  worklogId?: string,
+): void {
+  const database = getDb();
+  if (worklogId !== undefined) {
+    database
+      .prepare("UPDATE sessions SET worklog_status = ?, worklog_id = ? WHERE id = ?")
+      .run(status, worklogId, sessionId);
+  } else {
+    database
+      .prepare("UPDATE sessions SET worklog_status = ? WHERE id = ?")
+      .run(status, sessionId);
+  }
 }
 
 export function getSettings(): TimerSettings {

@@ -14,6 +14,10 @@ const mockSession: Session = {
   issueNumber: null,
   issueTitle: null,
   issueUrl: null,
+  issueProvider: null,
+  issueId: null,
+  worklogStatus: "not_logged",
+  worklogId: null,
 };
 
 const mockElectronAPI = {
@@ -32,6 +36,9 @@ const mockElectronAPI = {
     providerStatus: vi.fn().mockResolvedValue({ configured: false, provider: null }),
     setToken: vi.fn().mockResolvedValue(undefined),
     deleteToken: vi.fn().mockResolvedValue(undefined),
+  },
+  worklog: {
+    log: vi.fn().mockResolvedValue({ worklogId: "10042" }),
   },
   shell: {
     openExternal: vi.fn().mockResolvedValue(undefined),
@@ -92,5 +99,55 @@ describe("TC-405: useSessionHistory handles IPC error gracefully", () => {
 
     expect(result.current.error).toBeTruthy();
     expect(result.current.sessions).toEqual([]);
+  });
+});
+
+describe("TC-510: useSessionHistory.logWork calls worklog IPC and refreshes", () => {
+  it("calls worklog.log IPC and refreshes session list on success", async () => {
+    mockElectronAPI.session.list
+      .mockResolvedValueOnce({ sessions: [mockSession], total: 1 })
+      .mockResolvedValueOnce({ sessions: [{ ...mockSession, worklogStatus: "logged", worklogId: "10042" }], total: 1 });
+
+    const { result } = renderHook(() => useSessionHistory());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    await act(async () => {
+      await result.current.logWork("mock-id", "PROJ-123");
+    });
+
+    expect(mockElectronAPI.worklog.log).toHaveBeenCalledWith({ sessionId: "mock-id", issueKey: "PROJ-123" });
+    expect(mockElectronAPI.session.list).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("TC-511: useSessionHistory.worklogLoading tracks loading state", () => {
+  it("sets worklogLoading[sessionId] to true during logWork call", async () => {
+    let resolveWorklog: ((value: { worklogId: string; }) => void) | null = null;
+    mockElectronAPI.worklog.log.mockReturnValueOnce(
+      new Promise<{ worklogId: string; }>((resolve) => {
+        resolveWorklog = resolve;
+      }),
+    );
+
+    const { result } = renderHook(() => useSessionHistory());
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+
+    // Start logWork without awaiting
+    let logWorkPromise: Promise<void>;
+    act(() => {
+      logWorkPromise = result.current.logWork("mock-id", "PROJ-123");
+    });
+
+    await waitFor(() => expect(result.current.worklogLoading["mock-id"]).toBe(true));
+
+    // Resolve and cleanup
+    act(() => {
+      resolveWorklog!({ worklogId: "10042" });
+    });
+    await act(async () => {
+      await logWorkPromise!;
+    });
+
+    expect(result.current.worklogLoading["mock-id"]).toBeUndefined();
   });
 });

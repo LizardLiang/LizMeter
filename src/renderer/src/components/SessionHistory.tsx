@@ -10,9 +10,13 @@ interface SessionHistoryProps {
   isLoading: boolean;
   error: string | null;
   onDelete: (id: string) => void;
+  onLogWork?: (sessionId: string, issueKey: string) => void;
+  worklogLoading?: Record<string, boolean>;
 }
 
-export function SessionHistory({ sessions, isLoading, error, onDelete }: SessionHistoryProps) {
+export function SessionHistory(
+  { sessions, isLoading, error, onDelete, onLogWork, worklogLoading }: SessionHistoryProps,
+) {
   return (
     <section className={styles.container} aria-label="Session History">
       <h2 className={styles.heading}>Session History</h2>
@@ -29,7 +33,15 @@ export function SessionHistory({ sessions, isLoading, error, onDelete }: Session
 
       {!isLoading && !error && sessions.length > 0 && (
         <ul className={styles.list}>
-          {sessions.map((session) => <SessionHistoryItem key={session.id} session={session} onDelete={onDelete} />)}
+          {sessions.map((session) => (
+            <SessionHistoryItem
+              key={session.id}
+              session={session}
+              onDelete={onDelete}
+              onLogWork={onLogWork}
+              worklogLoading={worklogLoading?.[session.id] ?? false}
+            />
+          ))}
         </ul>
       )}
     </section>

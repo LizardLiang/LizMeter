@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import type { CreateTagInput, Session, Tag } from "../../../shared/types.ts";
 import { useGroupExpand } from "../hooks/useGroupExpand.ts";
 import { formatDuration, formatTimerType, timerTypeColor } from "../utils/format.ts";
@@ -7,6 +8,12 @@ import { IssueBadge } from "./IssueBadge.tsx";
 import { IssueGroupHeader } from "./IssueGroupHeader.tsx";
 import { TagBadge } from "./TagBadge.tsx";
 import { TagPicker } from "./TagPicker.tsx";
+
+interface Toast {
+  id: string;
+  message: string;
+  type: "success" | "error";
+}
 
 interface Props {
   sessions: Session[];
@@ -21,6 +28,8 @@ interface Props {
   onAssignTag: (sessionId: string, tagId: number) => Promise<void>;
   onUnassignTag: (sessionId: string, tagId: number) => Promise<void>;
   onCreateTag: (input: CreateTagInput) => Promise<Tag>;
+  onLogWork?: (sessionId: string, issueKey: string) => Promise<void>;
+  worklogLoading?: Record<string, boolean>;
 }
 
 function formatDate(iso: string): string {
@@ -40,13 +49,27 @@ interface SessionCardProps {
   onAssign: (sessionId: string, tagId: number) => Promise<void>;
   onUnassign: (sessionId: string, tagId: number) => Promise<void>;
   onCreateTag: (input: CreateTagInput) => Promise<Tag>;
+  onLogWork?: (sessionId: string, issueKey: string) => void;
+  worklogLoading?: boolean;
 }
 
-function SessionCard({ session, allTags, onDelete, onAssign, onUnassign, onCreateTag }: SessionCardProps) {
+function SessionCard(
+  { session, allTags, onDelete, onAssign, onUnassign, onCreateTag, onLogWork, worklogLoading }: SessionCardProps,
+) {
   const assignedTagIds = session.tags.map((t) => t.id);
 
   const typeColor = timerTypeColor(session.timerType);
   const typeLabel = formatTimerType(session.timerType);
+
+  const isJiraLinked = session.issueProvider === "jira" && session.issueId;
+  const isEligibleDuration = session.actualDurationSeconds >= 60;
+  const showWorklogUi = isJiraLinked && isEligibleDuration;
+
+  const handleLogWork = () => {
+    if (onLogWork && session.issueId) {
+      onLogWork(session.id, session.issueId);
+    }
+  };
 
   return (
     <div className={styles.card}>
@@ -61,6 +84,35 @@ function SessionCard({ session, allTags, onDelete, onAssign, onUnassign, onCreat
         <span className={styles.cardMeta}>
           {formatDate(session.completedAt)} · {formatLocalTime(session.completedAt)}
         </span>
+        {showWorklogUi && (
+          <>
+            {session.worklogStatus === "logged" && (
+              <span className={styles.worklogLogged} aria-label="Work logged to Jira">
+                Logged
+              </span>
+            )}
+            {session.worklogStatus === "not_logged" && (
+              <button
+                className={styles.logWorkBtn}
+                onClick={handleLogWork}
+                disabled={worklogLoading}
+                aria-label={`Log work to Jira for: ${session.title || "session"}`}
+              >
+                {worklogLoading ? "..." : "Log Work"}
+              </button>
+            )}
+            {session.worklogStatus === "failed" && (
+              <button
+                className={styles.retryBtn}
+                onClick={handleLogWork}
+                disabled={worklogLoading}
+                aria-label={`Retry logging work to Jira for: ${session.title || "session"}`}
+              >
+                {worklogLoading ? "..." : "Retry"}
+              </button>
+            )}
+          </>
+        )}
         <button className={styles.cardDelBtn} onClick={() => onDelete(session.id)} aria-label="Delete session">
           ✕
         </button>
@@ -94,6 +146,8 @@ export function HistoryPage({
   onAssignTag,
   onUnassignTag,
   onCreateTag,
+  onLogWork,
+  worklogLoading,
 }: Props) {
   const activeFilterTag = allTags.find((t) => t.id === activeTagFilter);
   const { groupedData, expandedIssueGroups, expandedDateGroups, toggleIssueGroup, toggleDateGroup } = useGroupExpand(
@@ -101,8 +155,49 @@ export function HistoryPage({
     activeTagFilter,
   );
 
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const handleLogWork = useCallback(
+    async (sessionId: string, issueKey: string) => {
+      if (!onLogWork) return;
+      try {
+        await onLogWork(sessionId, issueKey);
+        const session = sessions.find((s) => s.id === sessionId);
+        const durationMins = session ? Math.round(session.actualDurationSeconds / 60) : 0;
+        const toastId = crypto.randomUUID();
+        const message = `Logged ${durationMins}m to ${issueKey}`;
+        setToasts((prev) => [...prev, { id: toastId, message, type: "success" }]);
+        setTimeout(() => dismissToast(toastId), 4000);
+      } catch (err) {
+        const errMessage = err instanceof Error ? err.message : "Failed to log work";
+        let userMessage = "Failed to log work to Jira.";
+        if (errMessage.includes("authentication") || errMessage.includes("credentials")) {
+          userMessage = "Jira authentication failed. Check your credentials.";
+        } else if (errMessage.includes("not found") || errMessage.includes("NOT_FOUND")) {
+          userMessage = `Issue ${issueKey} not found in Jira.`;
+        } else if (errMessage.includes("rate limit") || errMessage.includes("RATE_LIMITED")) {
+          userMessage = "Jira rate limit reached. Try again later.";
+        } else if (errMessage.includes("reach") || errMessage.includes("NETWORK_ERROR")) {
+          userMessage = "Could not reach Jira. Check your connection.";
+        } else if (errMessage.includes("already logged") || errMessage.includes("INELIGIBLE")) {
+          userMessage = "Worklog already logged for this session.";
+        } else if (errMessage.includes("60 seconds") || errMessage.includes("minimum")) {
+          userMessage = "Session too short (minimum 60 seconds for Jira).";
+        }
+        const toastId = crypto.randomUUID();
+        setToasts((prev) => [...prev, { id: toastId, message: userMessage, type: "error" }]);
+        setTimeout(() => dismissToast(toastId), 4000);
+      }
+    },
+    [onLogWork, sessions, dismissToast],
+  );
+
   return (
-    <div className={styles.page}>
+    <div className={styles.page} style={{ position: "relative" }}>
       <h1 className={styles.heading}>History</h1>
 
       {allTags.length > 0 && (
@@ -169,6 +264,8 @@ export function HistoryPage({
                         onAssign={onAssignTag}
                         onUnassign={onUnassignTag}
                         onCreateTag={onCreateTag}
+                        onLogWork={onLogWork ? (sid, key) => void handleLogWork(sid, key) : undefined}
+                        worklogLoading={worklogLoading?.[session.id] ?? false}
                       />
                     ))}
                   </DateSubGroupHeader>
@@ -188,6 +285,8 @@ export function HistoryPage({
             onAssign={onAssignTag}
             onUnassign={onUnassignTag}
             onCreateTag={onCreateTag}
+            onLogWork={onLogWork ? (sid, key) => void handleLogWork(sid, key) : undefined}
+            worklogLoading={worklogLoading?.[session.id] ?? false}
           />
         ))}
       </div>
@@ -196,6 +295,41 @@ export function HistoryPage({
         <button className={styles.loadMoreBtn} onClick={onLoadMore}>
           Load more ({total - sessions.length} remaining)
         </button>
+      )}
+
+      {toasts.length > 0 && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: "24px",
+            right: "24px",
+            display: "flex",
+            flexDirection: "column",
+            gap: "8px",
+            zIndex: 1000,
+          }}
+        >
+          {toasts.map((toast) => (
+            <div
+              key={toast.id}
+              style={{
+                padding: "10px 16px",
+                borderRadius: "6px",
+                fontSize: "0.875rem",
+                fontWeight: 500,
+                color: toast.type === "success" ? "#9ece6a" : "#f7768e",
+                backgroundColor: toast.type === "success" ? "#9ece6a11" : "#f7768e11",
+                border: `1px solid ${toast.type === "success" ? "#9ece6a44" : "#f7768e44"}`,
+                cursor: "pointer",
+                maxWidth: "320px",
+              }}
+              onClick={() => dismissToast(toast.id)}
+              role="alert"
+            >
+              {toast.message}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
