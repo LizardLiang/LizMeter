@@ -23,6 +23,8 @@ import { IssuesPage } from "./IssuesPage.tsx";
 import { ModeToggle } from "./ModeToggle.tsx";
 import type { NavPage } from "./NavSidebar.tsx";
 import { NavSidebar } from "./NavSidebar.tsx";
+import type { SessionPickerState } from "./SessionPicker.tsx";
+import { SessionPicker } from "./SessionPicker.tsx";
 import { SettingsPage } from "./SettingsPage.tsx";
 import { StatsPage } from "./StatsPage.tsx";
 import { StopwatchView } from "./StopwatchView.tsx";
@@ -171,6 +173,15 @@ export function TomatoClock() {
           // Non-fatal — if stop fails, save without tracking data
           pendingCcSessionsRef.current = null;
         }
+      } else if (claudeTrackerRef.current.pickerState !== "hidden") {
+        // Timer completed while picker was open (user never confirmed)
+        // Stop the tracker to clean up watchers and return empty sessions
+        try {
+          await claudeTrackerRef.current.stopTracking();
+        } catch {
+          // Non-fatal
+        }
+        pendingCcSessionsRef.current = null;
       }
 
       const ccSessions = pendingCcSessionsRef.current;
@@ -198,17 +209,37 @@ export function TomatoClock() {
     saveError,
   } = useTimer(effectiveSettings, handleSessionSaved, pendingIssue, customSaveSession);
 
-  // Wrap start to also start Claude tracking if a project is configured
+  // Wrap start to also scan for Claude sessions if a project is configured
   const start = useCallback(async () => {
     timerStart();
     if (claudeProjectDirName) {
       try {
-        await claudeTracker.startTracking(claudeProjectDirName);
+        await claudeTracker.scan(claudeProjectDirName);
       } catch {
-        // Non-fatal — tracker start failure doesn't block the timer
+        // Non-fatal — scan failure doesn't block the timer
       }
     }
   }, [timerStart, claudeProjectDirName, claudeTracker]);
+
+  // Handle timer pause — pause Claude tracking if active
+  const handlePause = useCallback(() => {
+    pause();
+    if (claudeTrackerRef.current.isTracking) {
+      claudeTrackerRef.current.pauseTracking().catch(() => {
+        // Non-fatal
+      });
+    }
+  }, [pause]);
+
+  // Handle timer resume — resume Claude tracking if it was tracking
+  const handleResume = useCallback(() => {
+    resume();
+    if (claudeTrackerRef.current.isTracking) {
+      claudeTrackerRef.current.resumeTracking().catch(() => {
+        // Non-fatal
+      });
+    }
+  }, [resume]);
 
   const stopwatch = useStopwatch(stopwatchSettings, handleStopwatchSaved);
 
@@ -216,12 +247,12 @@ export function TomatoClock() {
     reset();
     setPendingIssue(null);
     // Stop tracking if active (timer was reset mid-session)
-    if (claudeTracker.isTracking) {
-      claudeTracker.stopTracking().catch(() => {
+    if (claudeTrackerRef.current.isTracking || claudeTrackerRef.current.pickerState !== "hidden") {
+      claudeTrackerRef.current.stopTracking().catch(() => {
         // Non-fatal
       });
     }
-  }, [reset, claudeTracker]);
+  }, [reset]);
 
   const handleIssueSelect = useCallback(
     (issue: IssueRef | null) => {
@@ -241,6 +272,57 @@ export function TomatoClock() {
   const handleModeChange = useCallback((mode: AppMode) => {
     setAppMode(mode);
   }, []);
+
+  // Session picker: user confirmed a selection
+  const handlePickerConfirm = useCallback(
+    (selectedUuids: string[]) => {
+      claudeTracker.trackSelected(selectedUuids).catch(() => {
+        // Non-fatal
+      });
+    },
+    [claudeTracker],
+  );
+
+  // Session picker: user skipped (no tracking)
+  const handlePickerSkip = useCallback(() => {
+    claudeTracker.setPickerState("hidden");
+  }, [claudeTracker]);
+
+  // Toggle picker collapse/expand
+  const handlePickerToggleCollapse = useCallback(() => {
+    const current = claudeTracker.pickerState;
+    if (current === "open") {
+      claudeTracker.setPickerState("collapsed");
+    } else if (current === "collapsed") {
+      claudeTracker.setPickerState("open");
+    }
+  }, [claudeTracker]);
+
+  // "Manage Sessions" button in compact stats — re-open the picker
+  const handleManageSessions = useCallback(() => {
+    claudeTracker.setPickerState("open");
+  }, [claudeTracker]);
+
+  // New session notification: user clicked "Add" — open picker with new session available
+  // The picker re-opens and shows all sessions (including the new one) so the session param is unused
+  const handleAddNewSession = useCallback(() => {
+    claudeTracker.dismissNewSessionNotification();
+    claudeTracker.setPickerState("open");
+  }, [claudeTracker]);
+
+  // Derive picker state for render
+  const pickerState: SessionPickerState = claudeTracker.pickerState;
+  const showPicker = pickerState !== "hidden";
+  const showStats = claudeTracker.isTracking || pickerState === "collapsed";
+
+  // pickerOpenKey: increments each time the picker transitions to "open".
+  // Passed as `key` to SessionPicker to force remount with fresh initial selection.
+  const [pickerOpenKey, setPickerOpenKey] = useState(0);
+  useEffect(() => {
+    if (pickerState === "open") {
+      setPickerOpenKey((k) => k + 1);
+    }
+  }, [pickerState]);
 
   if (settingsLoading) {
     return (
@@ -273,8 +355,8 @@ export function TomatoClock() {
                   saveError={saveError}
                   selectedIssue={pendingIssue}
                   onStart={() => void start()}
-                  onPause={pause}
-                  onResume={resume}
+                  onPause={handlePause}
+                  onResume={handleResume}
                   onReset={handleReset}
                   onDismiss={dismissCompletion}
                   onTimerTypeChange={setTimerType}
@@ -285,11 +367,30 @@ export function TomatoClock() {
 
                 {isPomodoroActive && (
                   <>
-                    <ClaudeCodeStats
-                      liveStats={claudeTracker.liveStats}
-                      isTracking={claudeTracker.isTracking}
-                      idleThresholdMinutes={claudeIdleThresholdMinutes}
-                    />
+                    {showPicker && (
+                      <SessionPicker
+                        key={pickerOpenKey}
+                        sessions={claudeTracker.discoveredSessions}
+                        pickerState={pickerState}
+                        trackedUuids={claudeTracker.trackedUuids}
+                        onConfirm={handlePickerConfirm}
+                        onSkip={handlePickerSkip}
+                        onToggleCollapse={handlePickerToggleCollapse}
+                      />
+                    )}
+
+                    {showStats && (
+                      <ClaudeCodeStats
+                        liveStats={claudeTracker.liveStats}
+                        isTracking={claudeTracker.isTracking || pickerState === "collapsed"}
+                        idleThresholdMinutes={claudeIdleThresholdMinutes}
+                        onManageSessions={claudeTracker.isTracking ? handleManageSessions : undefined}
+                        newSession={claudeTracker.newSessionNotification}
+                        onAddNewSession={handleAddNewSession}
+                        onDismissNewSession={claudeTracker.dismissNewSessionNotification}
+                      />
+                    )}
+
                     <div className={styles.tagSection}>
                       <div className={styles.tagSectionLabel}>Session Tags</div>
                       <TagPicker

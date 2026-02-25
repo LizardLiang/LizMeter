@@ -227,6 +227,20 @@ export interface ClaudeCodeProject {
   displayPath: string; // Best-effort decoded path
 }
 
+// v1.2: Session preview for the session picker (FR-030, FR-035)
+export interface ClaudeCodeSessionPreview {
+  ccSessionUuid: string; // Full UUID (picker displays first 8 chars)
+  lastActivityAt: string; // ISO 8601 timestamp of last JSONL line
+  firstUserMessage: string | null; // Text of first user message, truncated to 60 chars, null if not found
+  filePath: string; // Full path to JSONL file (internal, not displayed)
+}
+
+// Session preview with project context (for cross-project dropdown selection)
+export interface ClaudeCodeSessionPreviewWithProject extends ClaudeCodeSessionPreview {
+  projectDirName: string; // Encoded project directory name
+  projectDisplayPath: string; // Decoded display path
+}
+
 export interface ClaudeCodeIdlePeriod {
   startAt: string;
   endAt: string;
@@ -349,10 +363,26 @@ export interface ElectronAPI {
     openExternal: (url: string) => Promise<void>;
   };
   claudeTracker: {
-    start: (input: { projectDirName: string; }) => Promise<{ started: boolean; error?: string; }>;
+    // Phase 1: Scan (v1.2) -- discover sessions, return previews for picker
+    scan: (input: { projectDirName: string; }) => Promise<{
+      success: boolean;
+      error?: string;
+      sessions: ClaudeCodeSessionPreview[];
+    }>;
+    // Phase 2: Track selected (v1.2) -- start watchers for user-selected sessions
+    trackSelected: (input: { sessionUuids: string[]; }) => Promise<{ tracked: number; }>;
+    // Lifecycle
     stop: () => Promise<{ sessions: ClaudeCodeSessionData[]; }>;
+    pause: () => Promise<void>; // v1.2: pause data collection on timer pause
+    resume: () => Promise<void>; // v1.2: resume data collection on timer resume
+    // Scan all projects for active sessions (lightweight, no watchers)
+    scanAll: () => Promise<{ sessions: ClaudeCodeSessionPreviewWithProject[]; }>;
+    // Configuration
     getProjects: () => Promise<{ projects: ClaudeCodeProject[]; }>;
+    // Historical data
     getForSession: (input: { sessionId: string; }) => Promise<{ sessions: ClaudeCodeSessionSummary[]; } | null>;
-    onUpdate: (callback: (stats: ClaudeCodeLiveStats) => void) => () => void; // Returns unsubscribe fn
+    // Push events (return unsubscribe functions)
+    onUpdate: (callback: (stats: ClaudeCodeLiveStats) => void) => () => void;
+    onNewSession: (callback: (data: { session: ClaudeCodeSessionPreview; }) => void) => () => void; // v1.2
   };
 }

@@ -1,6 +1,6 @@
-import { cleanup, render } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
-import type { ClaudeCodeLiveStats } from "../../../../shared/types.ts";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ClaudeCodeLiveStats, ClaudeCodeSessionPreview } from "../../../../shared/types.ts";
 import { ClaudeCodeStats } from "../ClaudeCodeStats.tsx";
 
 afterEach(() => {
@@ -129,5 +129,90 @@ describe("TC-CC-UI-008: Header always shows Claude Code label", () => {
     // There may be multiple elements (e.g., due to text-transform: uppercase rendering)
     const claudeEls = getAllByText(/claude code/i);
     expect(claudeEls.length).toBeGreaterThan(0);
+  });
+});
+
+// TC-CC-UI-009: v1.2 "Manage Sessions" button
+describe("TC-CC-UI-009 (v1.2): Manage Sessions button", () => {
+  it("shows Manage Sessions button when onManageSessions is provided", () => {
+    render(
+      <ClaudeCodeStats
+        liveStats={makeLiveStats()}
+        isTracking={true}
+        onManageSessions={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Manage Sessions/i })).toBeInTheDocument();
+  });
+
+  it("calls onManageSessions when Manage Sessions is clicked", () => {
+    const onManage = vi.fn();
+    render(
+      <ClaudeCodeStats
+        liveStats={makeLiveStats()}
+        isTracking={true}
+        onManageSessions={onManage}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Manage Sessions/i }));
+    expect(onManage).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not show Manage Sessions button when onManageSessions is not provided", () => {
+    render(
+      <ClaudeCodeStats liveStats={makeLiveStats()} isTracking={true} />,
+    );
+    expect(screen.queryByRole("button", { name: /Manage Sessions/i })).toBeNull();
+  });
+});
+
+// TC-CC-UI-010: v1.2 NewSessionNotification rendering
+describe("TC-CC-UI-010 (v1.2): NewSessionNotification rendering", () => {
+  const mockSession: ClaudeCodeSessionPreview = {
+    ccSessionUuid: "new-session-uuid",
+    lastActivityAt: new Date().toISOString(),
+    firstUserMessage: "Implement new feature",
+    filePath: "/home/user/.claude/projects/MyProject/new.jsonl",
+  };
+
+  it("renders NewSessionNotification when newSession prop is set", () => {
+    render(
+      <ClaudeCodeStats
+        liveStats={makeLiveStats()}
+        isTracking={true}
+        newSession={mockSession}
+        onAddNewSession={vi.fn()}
+        onDismissNewSession={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("New CC session detected")).toBeInTheDocument();
+  });
+
+  it("does not render notification when newSession is null", () => {
+    render(
+      <ClaudeCodeStats
+        liveStats={makeLiveStats()}
+        isTracking={true}
+        newSession={null}
+        onAddNewSession={vi.fn()}
+        onDismissNewSession={vi.fn()}
+      />,
+    );
+    expect(screen.queryByText("New CC session detected")).toBeNull();
+  });
+
+  it("calls onAddNewSession when Add is clicked in notification", () => {
+    const onAdd = vi.fn();
+    render(
+      <ClaudeCodeStats
+        liveStats={makeLiveStats()}
+        isTracking={true}
+        newSession={mockSession}
+        onAddNewSession={onAdd}
+        onDismissNewSession={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Add/i }));
+    expect(onAdd).toHaveBeenCalledTimes(1);
   });
 });

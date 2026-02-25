@@ -4,7 +4,12 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { ClaudeCodeLiveStats, ClaudeCodeProject, ClaudeCodeSessionData } from "../../src/shared/types.ts";
+import type {
+  ClaudeCodeLiveStats,
+  ClaudeCodeProject,
+  ClaudeCodeSessionData,
+  ClaudeCodeSessionPreview,
+} from "../../src/shared/types.ts";
 import type { WebContents } from "electron";
 
 // --- Types ---
@@ -28,15 +33,26 @@ let directoryWatcher: fs.FSWatcher | null = null;
 const fileWatchers: Map<string, fs.FSWatcher> = new Map();
 const debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 let fallbackPollInterval: ReturnType<typeof setInterval> | null = null;
-const sessionState: Map<string, SessionState> = new Map(); // keyed by ccSessionUuid
+const sessionState: Map<string, SessionState> = new Map(); // keyed by ccSessionUuid (active tracked)
+const frozenSessions: Map<string, SessionState> = new Map(); // removed mid-run (preserve data)
+let discoveredSessions: ClaudeCodeSessionPreview[] = []; // scan results (v1.2)
+const trackedUuids: Set<string> = new Set(); // user-selected session UUIDs (v1.2)
 let targetWebContents: WebContents | null = null;
 let idleThresholdMs: number = 5 * 60 * 1000; // default 5 minutes
-let timerStartTime: number = 0;
+// watchedProjectPath is set at scan time and cleared at stop; used as sentinel for active-scan state
+let watchedProjectPath: string | null = null; // resolved path for directory watcher (v1.2)
+let isPaused: boolean = false; // pause/resume state (v1.2)
+// Queue for new-session notifications (emit one at a time with 1s gap)
+const newSessionQueue: ClaudeCodeSessionPreview[] = [];
+let newSessionEmitTimer: ReturnType<typeof setTimeout> | null = null;
 
 const DEBOUNCE_MS = 500;
 const FALLBACK_POLL_MS = 30_000;
 const SESSION_BUFFER_MS = 120_000; // 2-minute buffer
 const MAX_PARTIAL_LINE_BYTES = 1_048_576; // 1MB cap
+const FIRST_USER_MSG_SCAN_LINES = 100;
+const FIRST_USER_MSG_MAX_CHARS = 60;
+const NEW_SESSION_EMIT_GAP_MS = 1_000;
 
 // --- Path Utilities ---
 
@@ -238,6 +254,84 @@ function readLastLineTimestamp(filePath: string): string | null {
   }
 }
 
+// --- First User Message Extractor (v1.2) ---
+
+/**
+ * Reads up to FIRST_USER_MSG_SCAN_LINES lines from the start of a JSONL file,
+ * finds the first type:"user" message, extracts text content truncated to 60 chars.
+ * Returns null if not found or on parse errors.
+ */
+export function extractFirstUserMessage(filePath: string): string | null {
+  let fd: number | null = null;
+  try {
+    fd = fs.openSync(filePath, "r");
+    const stat = fs.fstatSync(fd);
+    const fileSize = stat.size;
+    if (fileSize === 0) {
+      fs.closeSync(fd);
+      return null;
+    }
+
+    // Read up to 16KB from start (should cover 100 lines for typical JSONL)
+    const readSize = Math.min(16384, fileSize);
+    const buffer = Buffer.alloc(readSize);
+    fs.readSync(fd, buffer, 0, readSize, 0);
+    fs.closeSync(fd);
+    fd = null;
+
+    const chunk = buffer.toString("utf8");
+    const rawLines = chunk.split("\n");
+
+    let lineCount = 0;
+    for (const raw of rawLines) {
+      if (lineCount >= FIRST_USER_MSG_SCAN_LINES) break;
+      const trimmed = raw.trim();
+      if (!trimmed) continue;
+      lineCount++;
+
+      const parsed = parseJsonlLine(trimmed);
+      if (!parsed || parsed.type !== "user") continue;
+
+      // Extract text content from the message
+      const content = parsed.message?.content;
+      let text: string | null = null;
+
+      if (typeof content === "string") {
+        text = content;
+      } else if (Array.isArray(content)) {
+        // Content blocks array — find first text block
+        for (const block of content) {
+          if (block && typeof block === "object" && (block as { type?: string }).type === "text") {
+            const textVal = (block as { type: string; text?: unknown }).text;
+            if (typeof textVal === "string") {
+              text = textVal;
+              break;
+            }
+          }
+        }
+      }
+
+      if (text && text.trim().length > 0) {
+        const trimmedText = text.trim();
+        if (trimmedText.length <= FIRST_USER_MSG_MAX_CHARS) {
+          return trimmedText;
+        }
+        return trimmedText.substring(0, FIRST_USER_MSG_MAX_CHARS - 1) + "…";
+      }
+    }
+    return null;
+  } catch {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+    return null;
+  }
+}
+
 // --- Session State Processing ---
 
 export function processLines(state: SessionState, lines: JsonlLine[], idleThresholdMs2: number): void {
@@ -334,13 +428,17 @@ function processFile(ccSessionUuid: string): void {
 }
 
 function scheduleDebounced(ccSessionUuid: string): void {
+  if (isPaused) return; // ignore events while paused
+
   const existing = debounceTimers.get(ccSessionUuid);
   if (existing) clearTimeout(existing);
 
   const timer = setTimeout(() => {
     debounceTimers.delete(ccSessionUuid);
-    processFile(ccSessionUuid);
-    pushUpdate();
+    if (!isPaused) {
+      processFile(ccSessionUuid);
+      pushUpdate();
+    }
   }, DEBOUNCE_MS);
 
   debounceTimers.set(ccSessionUuid, timer);
@@ -362,58 +460,25 @@ function watchFile(state: SessionState): void {
   }
 }
 
-// --- Initial Scan ---
+// --- New Session Notification Queue ---
 
-function scanAndInitialize(projectPath: string): void {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(projectPath, { withFileTypes: true });
-  } catch {
-    console.warn(`[claude-tracker] Cannot read project directory: ${projectPath}`);
+function emitNextNewSession(): void {
+  if (newSessionQueue.length === 0) {
+    newSessionEmitTimer = null;
     return;
   }
+  const session = newSessionQueue.shift()!;
+  if (targetWebContents && !targetWebContents.isDestroyed()) {
+    targetWebContents.send("claude-tracker:new-session", { session });
+  }
+  // Schedule next emission after gap
+  newSessionEmitTimer = setTimeout(emitNextNewSession, NEW_SESSION_EMIT_GAP_MS);
+}
 
-  const now = Date.now();
-  const bufferStart = timerStartTime - SESSION_BUFFER_MS;
-
-  for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
-
-    const filePath = path.join(projectPath, entry.name);
-    const ccSessionUuid = entry.name.replace(/\.jsonl$/, "");
-
-    // Check if this session was active within the 2-minute buffer
-    const lastTs = readLastLineTimestamp(filePath);
-    if (lastTs) {
-      const tsMs = new Date(lastTs).getTime();
-      if (tsMs < bufferStart || tsMs > now) continue; // outside buffer window
-    } else {
-      continue; // no valid timestamp found, skip
-    }
-
-    // Get file size to start incremental reading from current position
-    let fileSize: number;
-    try {
-      const stat = fs.statSync(filePath);
-      fileSize = stat.size;
-    } catch {
-      continue;
-    }
-
-    const state: SessionState = {
-      ccSessionUuid,
-      filesEdited: new Set(),
-      lastMessageTimestamp: null,
-      firstActivityAt: null,
-      lastActivityAt: null,
-      idlePeriods: [],
-      bytesRead: fileSize, // start at current end (only track new activity)
-      filePath,
-      partialLine: "",
-    };
-
-    sessionState.set(ccSessionUuid, state);
-    watchFile(state);
+function queueNewSessionNotification(session: ClaudeCodeSessionPreview): void {
+  newSessionQueue.push(session);
+  if (!newSessionEmitTimer) {
+    emitNextNewSession();
   }
 }
 
@@ -430,7 +495,11 @@ function watchDirectory(projectPath: string): void {
       if (!filename || !filename.endsWith(".jsonl")) return;
 
       const ccSessionUuid = filename.replace(/\.jsonl$/, "");
-      if (sessionState.has(ccSessionUuid)) return; // already tracking
+
+      // Skip if already tracking or already discovered (already in picker)
+      if (trackedUuids.has(ccSessionUuid)) return;
+      if (discoveredSessions.some((s) => s.ccSessionUuid === ccSessionUuid)) return;
+      if (frozenSessions.has(ccSessionUuid)) return;
 
       const filePath = path.join(projectPath, filename);
 
@@ -441,21 +510,24 @@ function watchDirectory(projectPath: string): void {
         return;
       }
 
-      const state: SessionState = {
+      // Extract preview info for notification
+      const lastActivityAt = readLastLineTimestamp(filePath);
+      if (!lastActivityAt) return;
+
+      const firstUserMessage = extractFirstUserMessage(filePath);
+
+      const preview: ClaudeCodeSessionPreview = {
         ccSessionUuid,
-        filesEdited: new Set(),
-        lastMessageTimestamp: null,
-        firstActivityAt: null,
-        lastActivityAt: null,
-        idlePeriods: [],
-        bytesRead: 0,
+        lastActivityAt,
+        firstUserMessage,
         filePath,
-        partialLine: "",
       };
 
-      sessionState.set(ccSessionUuid, state);
-      watchFile(state);
-      scheduleDebounced(ccSessionUuid);
+      // Add to discovered sessions so we don't emit again
+      discoveredSessions.push(preview);
+
+      // Emit notification to renderer
+      queueNewSessionNotification(preview);
     });
 
     directoryWatcher.on("error", (err) => {
@@ -474,6 +546,8 @@ function startFallbackPoll(): void {
   }
 
   fallbackPollInterval = setInterval(() => {
+    if (isPaused) return; // skip poll while paused
+
     let hasChanges = false;
     for (const [uuid, state] of sessionState.entries()) {
       const prevOffset = state.bytesRead;
@@ -485,6 +559,214 @@ function startFallbackPoll(): void {
 }
 
 // --- Public API ---
+
+/**
+ * Phase 1 (v1.2): Scan project directory for active Claude Code sessions.
+ * Returns session previews for display in the picker. Does NOT start tracking.
+ * Also starts the directory watcher for detecting new files during the run.
+ */
+export function scanSessions(
+  projectDirName: string,
+  webContents: WebContents,
+  idleThresholdMinutes?: number,
+): { success: boolean; error?: string; sessions: ClaudeCodeSessionPreview[] } {
+  // If already scanning/tracking, stop first
+  if (
+    watchedProjectPath !== null ||
+    sessionState.size > 0 ||
+    frozenSessions.size > 0 ||
+    directoryWatcher !== null ||
+    fileWatchers.size > 0 ||
+    debounceTimers.size > 0 ||
+    fallbackPollInterval !== null
+  ) {
+    console.warn("[claude-tracker] Tracker already active — stopping previous session");
+    destroyTracker();
+  }
+
+  let resolvedPath: string;
+  try {
+    resolvedPath = validateProjectDirName(projectDirName);
+  } catch (err) {
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Invalid project directory name",
+      sessions: [],
+    };
+  }
+
+  // Check if directory exists
+  try {
+    const stat = fs.statSync(resolvedPath);
+    if (!stat.isDirectory()) {
+      return { success: false, error: "Project not found", sessions: [] };
+    }
+  } catch {
+    return { success: false, error: "Project not found", sessions: [] };
+  }
+
+  targetWebContents = webContents;
+  idleThresholdMs = (idleThresholdMinutes ?? 5) * 60 * 1000;
+  watchedProjectPath = resolvedPath;
+
+  // Scan JSONL files for preview info
+  const sessions = scanAndBuildPreviews(resolvedPath);
+
+  // Store scan results
+  discoveredSessions = sessions;
+
+  // Start directory watcher for new-session notifications (FR-033)
+  watchDirectory(resolvedPath);
+
+  // Return sorted by lastActivityAt descending (most recent first per FR-035)
+  const sorted = sessions.slice().sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+
+  return { success: true, sessions: sorted };
+}
+
+function scanAndBuildPreviews(projectPath: string): ClaudeCodeSessionPreview[] {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(projectPath, { withFileTypes: true });
+  } catch {
+    console.warn(`[claude-tracker] Cannot read project directory: ${projectPath}`);
+    return [];
+  }
+
+  const now = Date.now();
+  // No timerStartTime yet at scan time — use now as reference
+  const bufferStart = now - SESSION_BUFFER_MS;
+  const previews: ClaudeCodeSessionPreview[] = [];
+
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".jsonl")) continue;
+
+    const filePath = path.join(projectPath, entry.name);
+    const ccSessionUuid = entry.name.replace(/\.jsonl$/, "");
+
+    // Check if session was active within 2-minute buffer
+    const lastTs = readLastLineTimestamp(filePath);
+    if (!lastTs) continue;
+
+    const tsMs = new Date(lastTs).getTime();
+    if (tsMs < bufferStart || tsMs > now) continue;
+
+    // Extract first user message for picker preview
+    const firstUserMessage = extractFirstUserMessage(filePath);
+
+    previews.push({
+      ccSessionUuid,
+      lastActivityAt: lastTs,
+      firstUserMessage,
+      filePath,
+    });
+  }
+
+  return previews;
+}
+
+/**
+ * Phase 2 (v1.2): Begin tracking only user-selected Claude Code sessions.
+ * Can be called multiple times mid-run to update the tracked set.
+ * Sessions removed from the set are frozen (data preserved, watcher closed).
+ */
+export function trackSelectedSessions(
+  sessionUuids: string[],
+): { tracked: number } {
+  const newUuidSet = new Set(sessionUuids);
+
+  // Remove sessions no longer in the selected set -> freeze them
+  for (const uuid of Array.from(trackedUuids)) {
+    if (!newUuidSet.has(uuid)) {
+      // Move to frozen: close watcher, preserve state
+      const state = sessionState.get(uuid);
+      if (state) {
+        frozenSessions.set(uuid, state);
+        sessionState.delete(uuid);
+      }
+      // Close file watcher for this session
+      const watcher = fileWatchers.get(uuid);
+      if (watcher) {
+        try {
+          watcher.close();
+        } catch {
+          // ignore
+        }
+        fileWatchers.delete(uuid);
+      }
+      // Cancel any pending debounce for this session
+      const timer = debounceTimers.get(uuid);
+      if (timer) {
+        clearTimeout(timer);
+        debounceTimers.delete(uuid);
+      }
+      trackedUuids.delete(uuid);
+    }
+  }
+
+  // Add newly selected sessions
+  for (const uuid of sessionUuids) {
+    if (trackedUuids.has(uuid)) continue; // already tracking, no change
+
+    // Find preview info from discovered sessions
+    const preview = discoveredSessions.find((s) => s.ccSessionUuid === uuid);
+    if (!preview) {
+      console.warn(`[claude-tracker] UUID not in discovered sessions: ${uuid}`);
+      continue;
+    }
+
+    // Get file size to start incremental reading from current position
+    let fileSize: number;
+    try {
+      const stat = fs.statSync(preview.filePath);
+      fileSize = stat.size;
+    } catch {
+      console.warn(`[claude-tracker] Cannot stat file for tracking: ${preview.filePath}`);
+      continue;
+    }
+
+    const state: SessionState = {
+      ccSessionUuid: uuid,
+      filesEdited: new Set(),
+      lastMessageTimestamp: null,
+      firstActivityAt: null,
+      lastActivityAt: null,
+      idlePeriods: [],
+      bytesRead: fileSize, // start at current end (only track new activity)
+      filePath: preview.filePath,
+      partialLine: "",
+    };
+
+    sessionState.set(uuid, state);
+    trackedUuids.add(uuid);
+    watchFile(state);
+  }
+
+  // Start fallback poll if not already running (only when at least 1 session tracked)
+  if (sessionUuids.length > 0 && !fallbackPollInterval) {
+    startFallbackPoll();
+  }
+
+  // Push initial stats update
+  pushUpdate();
+
+  return { tracked: trackedUuids.size };
+}
+
+/**
+ * v1.2: Pause data collection. Watcher events are ignored while paused.
+ * The directory watcher continues to detect new files.
+ */
+export function pauseTracking(): void {
+  isPaused = true;
+}
+
+/**
+ * v1.2: Resume data collection. Next event or poll will process accumulated changes.
+ */
+export function resumeTracking(): void {
+  isPaused = false;
+}
 
 function stopTracking(): ClaudeCodeSessionData[] {
   // Clear debounce timers
@@ -519,13 +801,25 @@ function stopTracking(): ClaudeCodeSessionData[] {
     fallbackPollInterval = null;
   }
 
-  // Do final read of all files
+  // Clear new-session emit timer
+  if (newSessionEmitTimer) {
+    clearTimeout(newSessionEmitTimer);
+    newSessionEmitTimer = null;
+  }
+  newSessionQueue.length = 0;
+
+  // Do final read of all active tracked files
   for (const uuid of sessionState.keys()) {
     processFile(uuid);
   }
 
-  // Serialize session state to ClaudeCodeSessionData[]
-  const result: ClaudeCodeSessionData[] = Array.from(sessionState.values()).map((s) => ({
+  // Merge active sessions + frozen sessions into result
+  const allStates = [
+    ...Array.from(sessionState.values()),
+    ...Array.from(frozenSessions.values()),
+  ];
+
+  const result: ClaudeCodeSessionData[] = allStates.map((s) => ({
     ccSessionUuid: s.ccSessionUuid,
     fileEditCount: s.filesEdited.size,
     totalIdleSeconds: s.idlePeriods.reduce((acc, p) => acc + p.durationSeconds, 0),
@@ -537,60 +831,81 @@ function stopTracking(): ClaudeCodeSessionData[] {
   }));
 
   sessionState.clear();
-  // watchedProjectPath cleared (tracking stopped)
+  frozenSessions.clear();
+  trackedUuids.clear();
+  discoveredSessions = [];
+  watchedProjectPath = null;
+  isPaused = false;
 
   return result;
-}
-
-export function startTracking(
-  projectDirName: string,
-  webContents: WebContents,
-  idleThresholdMinutes?: number,
-): { started: boolean; error?: string } {
-  // If already tracking, stop first (implicit stop-then-start).
-  // Check all resource types including debounce timers and fallback poll interval.
-  if (
-    sessionState.size > 0 ||
-    directoryWatcher !== null ||
-    fileWatchers.size > 0 ||
-    debounceTimers.size > 0 ||
-    fallbackPollInterval !== null
-  ) {
-    console.warn("[claude-tracker] Tracker already active — stopping previous session");
-    stopTracking();
-  }
-
-  let resolvedPath: string;
-  try {
-    resolvedPath = validateProjectDirName(projectDirName);
-  } catch (err) {
-    return { started: false, error: err instanceof Error ? err.message : "Invalid project directory name" };
-  }
-
-  // Check if directory exists
-  try {
-    const stat = fs.statSync(resolvedPath);
-    if (!stat.isDirectory()) {
-      return { started: false, error: "Project not found" };
-    }
-  } catch {
-    return { started: false, error: "Project not found" };
-  }
-
-  targetWebContents = webContents;
-  timerStartTime = Date.now();
-  idleThresholdMs = (idleThresholdMinutes ?? 5) * 60 * 1000;
-
-  scanAndInitialize(resolvedPath);
-  watchDirectory(resolvedPath);
-  startFallbackPoll();
-
-  return { started: true };
 }
 
 export function stopTrackingAndGetData(): { sessions: ClaudeCodeSessionData[] } {
   const sessions = stopTracking();
   return { sessions };
+}
+
+/**
+ * Scan ALL projects for active Claude Code sessions.
+ * Lightweight: no watchers, no state mutation. Just reads JSONL previews.
+ * Used by the stopwatch dropdown to let users pick a session to link.
+ */
+export function scanAllProjects(): { sessions: Array<ClaudeCodeSessionPreview & { projectDirName: string; projectDisplayPath: string }> } {
+  const projectsRoot = path.join(os.homedir(), ".claude", "projects");
+
+  let projectEntries: fs.Dirent[];
+  try {
+    projectEntries = fs.readdirSync(projectsRoot, { withFileTypes: true });
+  } catch {
+    return { sessions: [] };
+  }
+
+  const allSessions: Array<ClaudeCodeSessionPreview & { projectDirName: string; projectDisplayPath: string }> = [];
+
+  for (const projEntry of projectEntries) {
+    if (!projEntry.isDirectory()) continue;
+    const projectPath = path.join(projectsRoot, projEntry.name);
+    const displayPath = decodeProjectPath(projEntry.name);
+
+    let fileEntries: fs.Dirent[];
+    try {
+      fileEntries = fs.readdirSync(projectPath, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+
+    const now = Date.now();
+    const bufferStart = now - SESSION_BUFFER_MS;
+
+    for (const fileEntry of fileEntries) {
+      if (!fileEntry.isFile() || !fileEntry.name.endsWith(".jsonl")) continue;
+
+      const filePath = path.join(projectPath, fileEntry.name);
+      const ccSessionUuid = fileEntry.name.replace(/\.jsonl$/, "");
+
+      const lastTs = readLastLineTimestamp(filePath);
+      if (!lastTs) continue;
+
+      const tsMs = new Date(lastTs).getTime();
+      if (tsMs < bufferStart || tsMs > now) continue;
+
+      const firstUserMessage = extractFirstUserMessage(filePath);
+
+      allSessions.push({
+        ccSessionUuid,
+        lastActivityAt: lastTs,
+        firstUserMessage,
+        filePath,
+        projectDirName: projEntry.name,
+        projectDisplayPath: displayPath,
+      });
+    }
+  }
+
+  // Sort by most recent activity first
+  allSessions.sort((a, b) => b.lastActivityAt.localeCompare(a.lastActivityAt));
+
+  return { sessions: allSessions };
 }
 
 export function getProjects(): { projects: ClaudeCodeProject[] } {
@@ -652,8 +967,19 @@ export function destroyTracker(): void {
     fallbackPollInterval = null;
   }
 
+  // Clear new-session emit timer
+  if (newSessionEmitTimer) {
+    clearTimeout(newSessionEmitTimer);
+    newSessionEmitTimer = null;
+  }
+  newSessionQueue.length = 0;
+
   // Clear in-memory state
   sessionState.clear();
+  frozenSessions.clear();
+  discoveredSessions = [];
+  trackedUuids.clear();
   targetWebContents = null;
-  // watchedProjectPath cleared (tracking stopped)
+  watchedProjectPath = null;
+  isPaused = false;
 }

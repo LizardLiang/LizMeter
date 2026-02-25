@@ -1,10 +1,12 @@
 // src/renderer/src/components/StopwatchView.tsx
-// Stopwatch UI: elapsed display, controls, title input, issue linkage
+// Stopwatch UI: elapsed display, controls, title input, issue linkage, Claude session linking
 
 import { useCallback, useState } from "react";
 import type { IssueRef } from "../../../shared/types.ts";
 import type { UseStopwatchReturn } from "../hooks/useStopwatch.ts";
 import { formatElapsed } from "../utils/format.ts";
+import type { SelectedClaudeSession } from "./ClaudeSessionSelect.tsx";
+import { ClaudeSessionSelect } from "./ClaudeSessionSelect.tsx";
 import { IssuePromptDialog } from "./IssuePromptDialog.tsx";
 import styles from "./StopwatchView.module.scss";
 
@@ -16,6 +18,7 @@ interface StopwatchViewProps {
 export function StopwatchView({ stopwatch, promptForIssue }: StopwatchViewProps) {
   const { state, start, pause, resume, stop, setTitle, setLinkedIssue, saveError } = stopwatch;
   const [showIssuePrompt, setShowIssuePrompt] = useState(false);
+  const [linkedClaudeSession, setLinkedClaudeSession] = useState<SelectedClaudeSession | null>(null);
 
   const handleStart = useCallback(() => {
     if (promptForIssue) {
@@ -53,6 +56,12 @@ export function StopwatchView({ stopwatch, promptForIssue }: StopwatchViewProps)
         onChange={(e) => setTitle(e.target.value)}
         disabled={isActive}
         maxLength={500}
+      />
+
+      <ClaudeSessionSelect
+        selected={linkedClaudeSession}
+        onSelect={setLinkedClaudeSession}
+        disabled={isActive}
       />
 
       <div className={styles.elapsed}>{formatElapsed(state.elapsedSeconds)}</div>

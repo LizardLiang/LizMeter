@@ -82,11 +82,15 @@ const mockElectronAPI = {
     markLogged: vi.fn().mockResolvedValue(undefined),
   },
   claudeTracker: {
-    start: vi.fn().mockResolvedValue({ started: true }),
+    scan: vi.fn().mockResolvedValue({ success: true, sessions: [] }),
+    trackSelected: vi.fn().mockResolvedValue({ tracked: 0 }),
     stop: vi.fn().mockResolvedValue({ sessions: [] }),
+    pause: vi.fn().mockResolvedValue(undefined),
+    resume: vi.fn().mockResolvedValue(undefined),
     getProjects: vi.fn().mockResolvedValue({ projects: [] }),
     getForSession: vi.fn().mockResolvedValue(null),
     onUpdate: vi.fn().mockReturnValue(() => {}),
+    onNewSession: vi.fn().mockReturnValue(() => {}),
   },
 };
 

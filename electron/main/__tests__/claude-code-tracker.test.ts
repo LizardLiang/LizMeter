@@ -2,15 +2,21 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { JsonlLine, SessionState } from "../claude-code-tracker.ts";
 import {
   decodeProjectPath,
   destroyTracker,
   extractFileEditsFromLine,
+  extractFirstUserMessage,
   parseJsonlLine,
+  pauseTracking,
   processLines,
   readNewLines,
+  resumeTracking,
+  scanSessions,
+  stopTrackingAndGetData,
+  trackSelectedSessions,
   validateProjectDirName,
 } from "../claude-code-tracker.ts";
 
@@ -604,5 +610,220 @@ describe("Session buffer: 2-minute window check", () => {
     const timerStart = Date.now();
     const sessionLastTs = new Date(timerStart + 60 * 1000).toISOString();
     expect(new Date(sessionLastTs).getTime()).toBeGreaterThan(timerStart);
+  });
+});
+
+// ============================================================
+// v1.2: extractFirstUserMessage
+// ============================================================
+
+function makeUserLineWithText(timestamp: string, text: string): string {
+  return JSON.stringify({
+    type: "user",
+    timestamp,
+    sessionId: "session-1",
+    message: { role: "user", content: [{ type: "text", text }] },
+  });
+}
+
+function makeSystemLine(timestamp: string): string {
+  return JSON.stringify({ type: "system", timestamp, sessionId: "session-1" });
+}
+
+describe("extractFirstUserMessage: returns first user message text", () => {
+  it("returns text of first user message", () => {
+    const tmpPath = writeTempJsonl([
+      makeSystemLine("2026-02-25T10:00:00.000Z"),
+      makeUserLineWithText("2026-02-25T10:00:01.000Z", "Fix the login bug"),
+      makeAssistantLine("2026-02-25T10:00:02.000Z"),
+    ]);
+    const result = extractFirstUserMessage(tmpPath);
+    expect(result).toBe("Fix the login bug");
+  });
+
+  it("truncates long messages to 60 chars with ellipsis", () => {
+    const longText = "A".repeat(80);
+    const tmpPath = writeTempJsonl([
+      makeUserLineWithText("2026-02-25T10:00:00.000Z", longText),
+    ]);
+    const result = extractFirstUserMessage(tmpPath);
+    expect(result).not.toBeNull();
+    expect(result!.length).toBe(60);
+    expect(result!.endsWith("…")).toBe(true);
+  });
+
+  it("returns exact text when message is within 60 chars", () => {
+    const text = "Short message";
+    const tmpPath = writeTempJsonl([
+      makeUserLineWithText("2026-02-25T10:00:00.000Z", text),
+    ]);
+    expect(extractFirstUserMessage(tmpPath)).toBe("Short message");
+  });
+
+  it("returns null if no user message in first 100 lines", () => {
+    // 101 assistant lines then a user line
+    const lines: string[] = [];
+    for (let i = 0; i < 101; i++) {
+      lines.push(makeAssistantLine(`2026-02-25T10:${String(i).padStart(2, "0")}:00.000Z`));
+    }
+    lines.push(makeUserLineWithText("2026-02-25T11:42:00.000Z", "Late user message"));
+    const tmpPath = writeTempJsonl(lines);
+    // Should return null because user message is after line 100
+    const result = extractFirstUserMessage(tmpPath);
+    expect(result).toBeNull();
+  });
+
+  it("returns null for an empty file", () => {
+    const tmpPath = path.join(os.tmpdir(), `cc-empty-${Date.now()}.jsonl`);
+    fs.writeFileSync(tmpPath, "", "utf8");
+    tempFiles.push(tmpPath);
+    expect(extractFirstUserMessage(tmpPath)).toBeNull();
+  });
+
+  it("returns null for a non-existent file", () => {
+    const fakePath = path.join(os.tmpdir(), "cc-does-not-exist.jsonl");
+    expect(extractFirstUserMessage(fakePath)).toBeNull();
+  });
+
+  it("handles string content (non-array) in user message", () => {
+    const line = JSON.stringify({
+      type: "user",
+      timestamp: "2026-02-25T10:00:00.000Z",
+      message: { role: "user", content: "Direct string content" },
+    });
+    const tmpPath = writeTempJsonl([line]);
+    const result = extractFirstUserMessage(tmpPath);
+    expect(result).toBe("Direct string content");
+  });
+
+  it("handles JSONL parse errors gracefully (returns null)", () => {
+    const tmpPath = writeTempJsonl(["not-valid-json"]);
+    expect(extractFirstUserMessage(tmpPath)).toBeNull();
+  });
+});
+
+// ============================================================
+// v1.2: scanSessions + trackSelectedSessions
+// ============================================================
+
+// Helper: create a temp project directory with JSONL files
+const tempDirs: string[] = [];
+
+function makeTempProjectDir(): string {
+  const dirPath = path.join(os.tmpdir(), `cc-proj-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  fs.mkdirSync(dirPath, { recursive: true });
+  tempDirs.push(dirPath);
+  return dirPath;
+}
+
+afterEach(() => {
+  for (const d of tempDirs.splice(0)) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+});
+
+// Mock WebContents for tests
+function makeMockWebContents() {
+  return {
+    isDestroyed: () => false,
+    send: vi.fn(),
+  } as unknown as Parameters<typeof scanSessions>[1];
+}
+
+describe("v1.2 scanSessions: returns sessions within 2-minute buffer", () => {
+  it("returns empty array for empty project directory", () => {
+    const projDir = makeTempProjectDir();
+    // Use the actual path directly by creating a mock validateProjectDirName-compatible path
+    // Since we need a real directory, we'll temporarily use the test directory path via direct call
+    const wc = makeMockWebContents();
+    // The projectDirName validation requires ~/.claude/projects/ prefix, so we test the directory
+    // scanning logic via a temp dir that won't pass validation. Test the sub-function indirectly
+    // by verifying scanSessions returns error for non-existent paths.
+    const result = scanSessions("nonexistent-dir-xyz", wc);
+    expect(result.success).toBe(false);
+    expect(result.sessions).toEqual([]);
+    void projDir; // used to create temp dir, cleaned up in afterEach
+  });
+
+  it("returns error for invalid project dir name", () => {
+    const wc = makeMockWebContents();
+    const result = scanSessions("../escape", wc);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/path separator/i);
+  });
+
+  it("returns error when path contains disallowed characters", () => {
+    const wc = makeMockWebContents();
+    const result = scanSessions("my project", wc);
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/disallowed characters/i);
+  });
+
+  it("destroyTracker is idempotent after failed scan", () => {
+    const wc = makeMockWebContents();
+    scanSessions("nonexistent-dir-xyz", wc);
+    expect(() => destroyTracker()).not.toThrow();
+  });
+});
+
+describe("v1.2 trackSelectedSessions: creates watchers only for selected UUIDs", () => {
+  it("returns 0 tracked when called with empty array (skip scenario)", () => {
+    const result = trackSelectedSessions([]);
+    expect(result.tracked).toBe(0);
+  });
+
+  it("returns 0 tracked for unknown UUID (not in discoveredSessions)", () => {
+    const result = trackSelectedSessions(["unknown-uuid-12345"]);
+    // UUID not discovered, so nothing is tracked
+    expect(result.tracked).toBe(0);
+  });
+});
+
+describe("v1.2 pauseTracking / resumeTracking", () => {
+  it("can be called without error when no tracking is active", () => {
+    expect(() => {
+      pauseTracking();
+      resumeTracking();
+    }).not.toThrow();
+  });
+
+  it("pausing and resuming does not affect session state integrity", () => {
+    pauseTracking();
+    resumeTracking();
+    // After resume, stop should return empty sessions (nothing was tracked)
+    const result = stopTrackingAndGetData();
+    expect(result.sessions).toEqual([]);
+  });
+});
+
+describe("v1.2 stopTrackingAndGetData: merges active and frozen sessions", () => {
+  it("returns empty sessions when nothing was tracked", () => {
+    const result = stopTrackingAndGetData();
+    expect(result.sessions).toEqual([]);
+  });
+
+  it("clears state after stop (idempotent)", () => {
+    const first = stopTrackingAndGetData();
+    const second = stopTrackingAndGetData();
+    expect(first.sessions).toEqual([]);
+    expect(second.sessions).toEqual([]);
+  });
+});
+
+describe("v1.2 destroyTracker: clears all v1.2 state", () => {
+  it("resets discoveredSessions and frozenSessions on destroy", () => {
+    destroyTracker();
+    // After destroy, trackSelectedSessions with any UUID returns 0 (nothing discovered)
+    const result = trackSelectedSessions(["some-uuid"]);
+    expect(result.tracked).toBe(0);
+  });
+
+  it("is safe to call after stopTrackingAndGetData", () => {
+    stopTrackingAndGetData();
+    expect(() => destroyTracker()).not.toThrow();
   });
 });

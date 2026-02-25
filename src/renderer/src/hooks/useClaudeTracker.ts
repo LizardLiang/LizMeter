@@ -1,40 +1,86 @@
 // src/renderer/src/hooks/useClaudeTracker.ts
-// React hook for consuming Claude Code tracker IPC events
+// React hook for consuming Claude Code tracker IPC events (v1.2: two-phase scan/track flow)
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ClaudeCodeLiveStats, ClaudeCodeSessionData } from "../../../shared/types.ts";
+import type { ClaudeCodeLiveStats, ClaudeCodeSessionData, ClaudeCodeSessionPreview } from "../../../shared/types.ts";
+import type { SessionPickerState } from "../components/SessionPicker.tsx";
 
 export interface UseClaudeTrackerReturn {
+  // Tracking state
   isTracking: boolean;
   liveStats: ClaudeCodeLiveStats | null;
-  startTracking: (projectDirName: string) => Promise<{ started: boolean; error?: string; }>;
+  trackedUuids: string[];
+  // Picker state
+  pickerState: SessionPickerState;
+  discoveredSessions: ClaudeCodeSessionPreview[];
+  // New session notification
+  newSessionNotification: ClaudeCodeSessionPreview | null;
+  dismissNewSessionNotification: () => void;
+  // Actions
+  scan: (
+    projectDirName: string,
+  ) => Promise<{ success: boolean; error?: string; sessions: ClaudeCodeSessionPreview[]; }>;
+  trackSelected: (sessionUuids: string[]) => Promise<{ tracked: number; }>;
   stopTracking: () => Promise<ClaudeCodeSessionData[]>;
+  pauseTracking: () => Promise<void>;
+  resumeTracking: () => Promise<void>;
+  setPickerState: (state: SessionPickerState) => void;
 }
 
 export function useClaudeTracker(): UseClaudeTrackerReturn {
   const [isTracking, setIsTracking] = useState(false);
   const [liveStats, setLiveStats] = useState<ClaudeCodeLiveStats | null>(null);
-  const isTrackingRef = useRef(false);
+  const [trackedUuids, setTrackedUuids] = useState<string[]>([]);
+  const [pickerState, setPickerState] = useState<SessionPickerState>("hidden");
+  const [discoveredSessions, setDiscoveredSessions] = useState<ClaudeCodeSessionPreview[]>([]);
+  const [newSessionNotification, setNewSessionNotification] = useState<ClaudeCodeSessionPreview | null>(null);
 
-  useEffect(() => {
-    isTrackingRef.current = isTracking;
-  }, [isTracking]);
+  // Track dismissed session UUIDs to avoid re-notifying
+  const dismissedUuidsRef = useRef<Set<string>>(new Set());
 
-  // Subscribe to live updates from main process
+  // Subscribe to live updates and new-session notifications from main process
   useEffect(() => {
-    const unsubscribe = window.electronAPI.claudeTracker.onUpdate((stats) => {
+    const unsubUpdate = window.electronAPI.claudeTracker.onUpdate((stats) => {
       setLiveStats(stats);
     });
-    // Cleanup on unmount — prevents memory leak
-    return unsubscribe;
+    const unsubNewSession = window.electronAPI.claudeTracker.onNewSession(({ session }) => {
+      // Don't re-notify for dismissed sessions
+      if (dismissedUuidsRef.current.has(session.ccSessionUuid)) return;
+      // Replace any existing notification (only one at a time per spec)
+      setNewSessionNotification(session);
+    });
+    return () => {
+      unsubUpdate();
+      unsubNewSession();
+    };
   }, []);
 
-  const startTracking = useCallback(async (projectDirName: string): Promise<{ started: boolean; error?: string; }> => {
-    const result = await window.electronAPI.claudeTracker.start({ projectDirName });
-    if (result.started) {
-      setIsTracking(true);
-      setLiveStats(null);
+  const scan = useCallback(async (
+    projectDirName: string,
+  ): Promise<{ success: boolean; error?: string; sessions: ClaudeCodeSessionPreview[]; }> => {
+    setPickerState("loading");
+    setDiscoveredSessions([]);
+    setTrackedUuids([]);
+    setLiveStats(null);
+    setIsTracking(false);
+
+    const result = await window.electronAPI.claudeTracker.scan({ projectDirName });
+
+    if (result.success) {
+      setDiscoveredSessions(result.sessions);
+      setPickerState("open");
+    } else {
+      setPickerState("hidden");
     }
+
+    return result;
+  }, []);
+
+  const trackSelected = useCallback(async (sessionUuids: string[]): Promise<{ tracked: number; }> => {
+    const result = await window.electronAPI.claudeTracker.trackSelected({ sessionUuids });
+    setTrackedUuids(sessionUuids);
+    setIsTracking(sessionUuids.length > 0);
+    setPickerState("collapsed");
     return result;
   }, []);
 
@@ -42,13 +88,44 @@ export function useClaudeTracker(): UseClaudeTrackerReturn {
     const result = await window.electronAPI.claudeTracker.stop();
     setIsTracking(false);
     setLiveStats(null);
+    setTrackedUuids([]);
+    setPickerState("hidden");
+    setDiscoveredSessions([]);
+    setNewSessionNotification(null);
+    dismissedUuidsRef.current.clear();
     return result.sessions;
+  }, []);
+
+  const pauseTracking = useCallback(async (): Promise<void> => {
+    await window.electronAPI.claudeTracker.pause();
+  }, []);
+
+  const resumeTracking = useCallback(async (): Promise<void> => {
+    await window.electronAPI.claudeTracker.resume();
+  }, []);
+
+  const dismissNewSessionNotification = useCallback(() => {
+    setNewSessionNotification((prev) => {
+      if (prev) {
+        dismissedUuidsRef.current.add(prev.ccSessionUuid);
+      }
+      return null;
+    });
   }, []);
 
   return {
     isTracking,
     liveStats,
-    startTracking,
+    trackedUuids,
+    pickerState,
+    discoveredSessions,
+    newSessionNotification,
+    dismissNewSessionNotification,
+    scan,
+    trackSelected,
     stopTracking,
+    pauseTracking,
+    resumeTracking,
+    setPickerState,
   };
 }

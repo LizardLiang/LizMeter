@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   AssignTagInput,
   ClaudeCodeLiveStats,
+  ClaudeCodeSessionPreview,
   CreateTagInput,
   IssuesListInput,
   IssuesSetTokenInput,
@@ -84,10 +85,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   },
   claudeTracker: {
-    start: (input: { projectDirName: string }) => ipcRenderer.invoke("claude-tracker:start", input),
+    // Phase 1: Scan (v1.2)
+    scan: (input: { projectDirName: string }) => ipcRenderer.invoke("claude-tracker:scan", input),
+    // Phase 2: Track selected (v1.2)
+    trackSelected: (input: { sessionUuids: string[] }) =>
+      ipcRenderer.invoke("claude-tracker:track-selected", input),
+    // Lifecycle
     stop: () => ipcRenderer.invoke("claude-tracker:stop"),
+    pause: () => ipcRenderer.invoke("claude-tracker:pause"),
+    resume: () => ipcRenderer.invoke("claude-tracker:resume"),
+    // Scan all projects for active sessions (lightweight, for dropdown selection)
+    scanAll: () => ipcRenderer.invoke("claude-tracker:scan-all"),
+    // Configuration
     getProjects: () => ipcRenderer.invoke("claude-tracker:get-projects"),
+    // Historical data
     getForSession: (input: { sessionId: string }) => ipcRenderer.invoke("claude-tracker:get-for-session", input),
+    // Push events
     onUpdate: (callback: (stats: ClaudeCodeLiveStats) => void) => {
       // Wrap callback to extract payload from the IPC event
       const handler = (_event: IpcRendererEvent, stats: ClaudeCodeLiveStats) => {
@@ -97,6 +110,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
       // Return an unsubscribe function that removes this specific listener
       return () => {
         ipcRenderer.removeListener("claude-tracker:update", handler);
+      };
+    },
+    onNewSession: (callback: (data: { session: ClaudeCodeSessionPreview }) => void) => {
+      const handler = (_event: IpcRendererEvent, data: { session: ClaudeCodeSessionPreview }) => {
+        callback(data);
+      };
+      ipcRenderer.on("claude-tracker:new-session", handler);
+      return () => {
+        ipcRenderer.removeListener("claude-tracker:new-session", handler);
       };
     },
   },

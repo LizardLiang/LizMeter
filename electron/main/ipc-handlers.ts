@@ -38,7 +38,15 @@ import {
   updateTag,
   updateWorklogStatus,
 } from "./database.ts";
-import { getProjects, startTracking, stopTrackingAndGetData } from "./claude-code-tracker.ts";
+import {
+  getProjects,
+  pauseTracking,
+  resumeTracking,
+  scanAllProjects,
+  scanSessions,
+  stopTrackingAndGetData,
+  trackSelectedSessions,
+} from "./claude-code-tracker.ts";
 import {
   getGitHubProvider,
   getJiraProvider,
@@ -336,12 +344,25 @@ export function registerIpcHandlers(): void {
   });
 
   // Claude Code Tracker IPC handlers
+
+  // Phase 1: Scan for active sessions, start directory watcher (v1.2)
   ipcMain.handle(
-    "claude-tracker:start",
+    "claude-tracker:scan",
     (event, input: { projectDirName: string }) => {
-      const idleThresholdMinutes = parseInt(getSettingValue("claudeCode.idleThresholdMinutes") ?? "5", 10);
+      const idleThresholdMinutes = parseInt(
+        getSettingValue("claude_tracker.idle_threshold_minutes") ?? "5",
+        10,
+      );
       const threshold = isNaN(idleThresholdMinutes) ? 5 : idleThresholdMinutes;
-      return startTracking(input.projectDirName, event.sender, threshold);
+      return scanSessions(input.projectDirName, event.sender, threshold);
+    },
+  );
+
+  // Phase 2: Begin tracking only selected sessions (v1.2)
+  ipcMain.handle(
+    "claude-tracker:track-selected",
+    (_event, input: { sessionUuids: string[] }) => {
+      return trackSelectedSessions(input.sessionUuids);
     },
   );
 
@@ -349,8 +370,22 @@ export function registerIpcHandlers(): void {
     return stopTrackingAndGetData();
   });
 
+  // Pause data collection while timer is paused (v1.2)
+  ipcMain.handle("claude-tracker:pause", () => {
+    pauseTracking();
+  });
+
+  // Resume data collection when timer resumes (v1.2)
+  ipcMain.handle("claude-tracker:resume", () => {
+    resumeTracking();
+  });
+
   ipcMain.handle("claude-tracker:get-projects", () => {
     return getProjects();
+  });
+
+  ipcMain.handle("claude-tracker:scan-all", () => {
+    return scanAllProjects();
   });
 
   ipcMain.handle("claude-tracker:get-for-session", (_event, input: { sessionId: string }) => {

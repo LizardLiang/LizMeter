@@ -2,12 +2,19 @@
 // Compact live Claude Code stats widget shown in timer view during active tracking
 
 import { useEffect, useRef, useState } from "react";
-import type { ClaudeCodeLiveStats } from "../../../shared/types.ts";
+import type { ClaudeCodeLiveStats, ClaudeCodeSessionPreview } from "../../../shared/types.ts";
+import { NewSessionNotification } from "./NewSessionNotification.tsx";
 
 interface ClaudeCodeStatsProps {
   liveStats: ClaudeCodeLiveStats | null;
   isTracking: boolean;
   idleThresholdMinutes?: number;
+  // v1.2: "Manage Sessions" button callback
+  onManageSessions?: () => void;
+  // v1.2: new session notification
+  newSession?: ClaudeCodeSessionPreview | null;
+  onAddNewSession?: () => void;
+  onDismissNewSession?: () => void;
 }
 
 function formatIdleDuration(ms: number): string {
@@ -17,7 +24,15 @@ function formatIdleDuration(ms: number): string {
   return `${minutes} min`;
 }
 
-export function ClaudeCodeStats({ liveStats, isTracking, idleThresholdMinutes = 5 }: ClaudeCodeStatsProps) {
+export function ClaudeCodeStats({
+  liveStats,
+  isTracking,
+  idleThresholdMinutes = 5,
+  onManageSessions,
+  newSession,
+  onAddNewSession,
+  onDismissNewSession,
+}: ClaudeCodeStatsProps) {
   const [idleDurationMs, setIdleDurationMs] = useState<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -68,6 +83,13 @@ export function ClaudeCodeStats({ liveStats, isTracking, idleThresholdMinutes = 
     letterSpacing: "0.05em",
   };
 
+  const headerRightStyle: React.CSSProperties = {
+    marginLeft: "auto",
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  };
+
   const rowStyle: React.CSSProperties = {
     display: "flex",
     justifyContent: "space-between",
@@ -87,6 +109,20 @@ export function ClaudeCodeStats({ liveStats, isTracking, idleThresholdMinutes = 
   const errorStyle: React.CSSProperties = {
     color: "#f7768e",
     fontSize: 12,
+  };
+
+  const manageBtnStyle: React.CSSProperties = {
+    padding: "2px 8px",
+    borderRadius: 4,
+    border: "1px solid rgba(122, 162, 247, 0.3)",
+    background: "transparent",
+    color: "#7aa2f7",
+    fontSize: 11,
+    cursor: "pointer",
+    fontFamily: "inherit",
+    textTransform: "none",
+    fontWeight: 400,
+    letterSpacing: 0,
   };
 
   const idleThresholdMs = idleThresholdMinutes * 60_000;
@@ -117,6 +153,13 @@ export function ClaudeCodeStats({ liveStats, isTracking, idleThresholdMinutes = 
               : "Active"}
           </span>
         )}
+        <div style={headerRightStyle}>
+          {onManageSessions && (
+            <button style={manageBtnStyle} onClick={onManageSessions}>
+              Manage Sessions
+            </button>
+          )}
+        </div>
       </div>
 
       {liveStats
@@ -139,6 +182,14 @@ export function ClaudeCodeStats({ liveStats, isTracking, idleThresholdMinutes = 
           </>
         )
         : <div style={labelStyle}>Waiting for Claude Code activity…</div>}
+
+      {newSession && onAddNewSession && onDismissNewSession && (
+        <NewSessionNotification
+          session={newSession}
+          onAdd={() => onAddNewSession()}
+          onDismiss={onDismissNewSession}
+        />
+      )}
     </div>
   );
 }
