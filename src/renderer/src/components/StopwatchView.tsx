@@ -27,18 +27,9 @@ export function StopwatchView({ stopwatch, promptForIssue }: StopwatchViewProps)
 
   const handleIssueSelected = useCallback((issue: IssueRef) => {
     setLinkedIssue(issue);
-    // Auto-fill title from issue
-    if (!state.title) {
-      const label = issue.provider === "github"
-        ? `#${issue.number}: ${issue.title}`
-        : issue.provider === "linear"
-        ? `${issue.identifier}: ${issue.title}`
-        : `${issue.key}: ${issue.title}`;
-      setTitle(label);
-    }
     setShowIssuePrompt(false);
     start();
-  }, [setLinkedIssue, setTitle, start, state.title]);
+  }, [setLinkedIssue, start]);
 
   const handleSkipIssue = useCallback(() => {
     setShowIssuePrompt(false);
@@ -57,7 +48,7 @@ export function StopwatchView({ stopwatch, promptForIssue }: StopwatchViewProps)
       <input
         className={styles.titleInput}
         type="text"
-        placeholder="What are you working on?"
+        placeholder="Describe what you'll be working on…"
         value={state.title}
         onChange={(e) => setTitle(e.target.value)}
         disabled={isActive}
@@ -80,7 +71,9 @@ export function StopwatchView({ stopwatch, promptForIssue }: StopwatchViewProps)
       )}
 
       <div className={styles.controls}>
-        {isIdle && <button className={styles.startBtn} onClick={handleStart}>Start</button>}
+        {isIdle && (
+          <button className={styles.startBtn} onClick={handleStart} disabled={state.title.trim() === ""}>Start</button>
+        )}
         {isRunning && (
           <>
             <button className={styles.pauseBtn} onClick={pause}>Pause</button>

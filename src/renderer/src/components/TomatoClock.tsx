@@ -119,11 +119,8 @@ export function TomatoClock() {
   const handleIssueSelect = useCallback(
     (issue: IssueRef | null) => {
       setPendingIssue(issue);
-      if (issue && state.title === "") {
-        setTitle(issue.title);
-      }
     },
-    [state.title, setTitle],
+    [],
   );
 
   const handlePendingTagAdd = useCallback((tagId: number) => {

@@ -19,7 +19,7 @@ export function SessionTitleInput({
   return (
     <div className={styles.wrapper}>
       <label htmlFor="session-title" className={styles.label}>
-        Session Title (optional)
+        Session Description
       </label>
       <input
         id="session-title"
@@ -27,7 +27,7 @@ export function SessionTitleInput({
         className={styles.input}
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder="What are you working on?"
+        placeholder="Describe what you'll be working on…"
         maxLength={maxLength}
         disabled={disabled}
       />

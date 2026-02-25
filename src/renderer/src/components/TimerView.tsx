@@ -72,6 +72,7 @@ export function TimerView({
 
       <TimerControls
         status={status}
+        startDisabled={title.trim() === ""}
         onStart={onStart}
         onPause={onPause}
         onResume={onResume}

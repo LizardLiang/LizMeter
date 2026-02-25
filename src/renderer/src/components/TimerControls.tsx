@@ -6,6 +6,7 @@ import styles from "./TimerControls.module.scss";
 
 interface TimerControlsProps {
   status: TimerStatus;
+  startDisabled?: boolean;
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -15,6 +16,7 @@ interface TimerControlsProps {
 
 export function TimerControls({
   status,
+  startDisabled = false,
   onStart,
   onPause,
   onResume,
@@ -40,7 +42,7 @@ export function TimerControls({
     <div className={styles.container}>
       {/* Start button — visible when idle */}
       {isIdle && (
-        <button className={styles.btnPrimary} onClick={onStart}>
+        <button className={styles.btnPrimary} onClick={onStart} disabled={startDisabled}>
           Start
         </button>
       )}
