@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+  ClaudeCodeProject,
   IssueProviderStatus,
   JiraAuthType,
   JiraProviderStatus,
@@ -8,6 +9,11 @@ import type {
   StopwatchSettings,
   TimerSettings,
 } from "../../../shared/types.ts";
+import {
+  IDLE_THRESHOLD_DEFAULT as IDLE_DEFAULT,
+  IDLE_THRESHOLD_MAX as IDLE_MAX,
+  IDLE_THRESHOLD_MIN as IDLE_MIN,
+} from "../../../shared/types.ts";
 import styles from "./SettingsPage.module.scss";
 
 interface Props {
@@ -15,9 +21,22 @@ interface Props {
   onSave: (settings: TimerSettings) => Promise<void>;
   stopwatchSettings?: StopwatchSettings;
   onStopwatchSettingsChange?: (settings: StopwatchSettings) => void;
+  claudeProjectDirName?: string | null;
+  claudeIdleThresholdMinutes?: number;
+  onClaudeProjectChange?: (dirName: string | null) => void;
+  onClaudeIdleThresholdChange?: (minutes: number) => void;
 }
 
-export function SettingsPage({ settings, onSave, stopwatchSettings, onStopwatchSettingsChange }: Props) {
+export function SettingsPage({
+  settings,
+  onSave,
+  stopwatchSettings,
+  onStopwatchSettingsChange,
+  claudeProjectDirName,
+  claudeIdleThresholdMinutes = IDLE_DEFAULT,
+  onClaudeProjectChange,
+  onClaudeIdleThresholdChange,
+}: Props) {
   const [work, setWork] = useState(String(settings.workDuration / 60));
   const [shortBreak, setShortBreak] = useState(String(settings.shortBreakDuration / 60));
   const [longBreak, setLongBreak] = useState(String(settings.longBreakDuration / 60));
@@ -74,11 +93,44 @@ export function SettingsPage({ settings, onSave, stopwatchSettings, onStopwatchS
   const [jiraTesting, setJiraTesting] = useState(false);
   const [jiraTestResult, setJiraTestResult] = useState<{ ok: boolean; message: string; } | null>(null);
 
+  // Claude Code state
+  const [claudeProjects, setClaudeProjects] = useState<ClaudeCodeProject[]>([]);
+  const [claudeProjectsLoading, setClaudeProjectsLoading] = useState(false);
+  const [claudeIdleInput, setClaudeIdleInput] = useState(String(claudeIdleThresholdMinutes));
+  const [claudeIdleError, setClaudeIdleError] = useState<string | null>(null);
+
   useEffect(() => {
     void window.electronAPI.issues.providerStatus().then(setTokenStatus);
     void window.electronAPI.linear.providerStatus().then(setLinearStatus);
     void window.electronAPI.jira.providerStatus().then(setJiraStatus);
   }, []);
+
+  useEffect(() => {
+    setClaudeIdleInput(String(claudeIdleThresholdMinutes));
+  }, [claudeIdleThresholdMinutes]);
+
+  async function loadClaudeProjects() {
+    setClaudeProjectsLoading(true);
+    try {
+      const { projects } = await window.electronAPI.claudeTracker.getProjects();
+      setClaudeProjects(projects);
+    } catch {
+      setClaudeProjects([]);
+    } finally {
+      setClaudeProjectsLoading(false);
+    }
+  }
+
+  function handleClaudeIdleChange(value: string) {
+    setClaudeIdleInput(value);
+    const parsed = parseInt(value, 10);
+    if (!isNaN(parsed) && parsed >= IDLE_MIN && parsed <= IDLE_MAX) {
+      setClaudeIdleError(null);
+      onClaudeIdleThresholdChange?.(parsed);
+    } else {
+      setClaudeIdleError(`Idle threshold must be between ${IDLE_MIN} and ${IDLE_MAX} minutes.`);
+    }
+  }
 
   async function handleSaveToken() {
     const t = tokenInput.trim();
@@ -678,6 +730,65 @@ export function SettingsPage({ settings, onSave, stopwatchSettings, onStopwatchS
             )}
           </>
         )}
+
+      {/* --- Claude Code Section --- */}
+      {onClaudeProjectChange && (
+        <>
+          <div className={styles.sectionDivider} />
+          <h2 className={styles.sectionHeading}>Claude Code</h2>
+          <p className={styles.tokenHint}>
+            Select a project to automatically track Claude Code activity during timer sessions.
+          </p>
+
+          <div className={styles.field}>
+            <label className={styles.label}>Project</label>
+            <div className={styles.inputRow}>
+              <select
+                className={styles.tokenInput}
+                value={claudeProjectDirName ?? ""}
+                onChange={(e) => onClaudeProjectChange(e.target.value || null)}
+                onClick={() => {
+                  if (claudeProjects.length === 0 && !claudeProjectsLoading) void loadClaudeProjects();
+                }}
+              >
+                <option value="">No project selected</option>
+                {claudeProjects.map((p) => (
+                  <option key={p.dirName} value={p.dirName} title={p.dirName}>
+                    {p.displayPath}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              className={styles.testTokenBtn}
+              onClick={() => void loadClaudeProjects()}
+              disabled={claudeProjectsLoading}
+              style={{ marginTop: 8 }}
+            >
+              {claudeProjectsLoading ? "Loading…" : "Refresh Projects"}
+            </button>
+          </div>
+
+          <div className={styles.field} style={{ marginTop: 16 }}>
+            <label className={styles.label}>Idle Threshold</label>
+            <div className={styles.inputRow}>
+              <input
+                type="number"
+                min={IDLE_MIN}
+                max={IDLE_MAX}
+                className={styles.input}
+                value={claudeIdleInput}
+                onChange={(e) => handleClaudeIdleChange(e.target.value)}
+              />
+              <span className={styles.unit}>min</span>
+            </div>
+            {claudeIdleError && <div className={styles.errorMsg}>{claudeIdleError}</div>}
+            <p className={styles.tokenHint}>
+              A gap longer than this between Claude Code messages is recorded as an idle period.
+            </p>
+          </div>
+        </>
+      )}
 
       {/* --- Time Tracking Section --- */}
       {stopwatchSettings && onStopwatchSettingsChange && (

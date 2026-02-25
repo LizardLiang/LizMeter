@@ -6,6 +6,7 @@ const mockElectronAPI = {
   platform: "linux",
   session: {
     save: vi.fn().mockResolvedValue({}),
+    saveWithTracking: vi.fn().mockResolvedValue({}),
     list: vi.fn().mockResolvedValue({ sessions: [], total: 0 }),
     delete: vi.fn().mockResolvedValue(undefined),
   },
@@ -16,6 +17,8 @@ const mockElectronAPI = {
       longBreakDuration: 900,
     }),
     save: vi.fn().mockResolvedValue(undefined),
+    getValue: vi.fn().mockResolvedValue(null),
+    setValue: vi.fn().mockResolvedValue(undefined),
   },
   tag: {
     create: vi.fn().mockResolvedValue({ id: 1, name: "test", color: "#7aa2f7", createdAt: "" }),
@@ -55,6 +58,35 @@ const mockElectronAPI = {
   },
   shell: {
     openExternal: vi.fn().mockResolvedValue(undefined),
+  },
+  jira: {
+    setToken: vi.fn().mockResolvedValue(undefined),
+    deleteToken: vi.fn().mockResolvedValue(undefined),
+    testConnection: vi.fn().mockResolvedValue({ displayName: "Test User" }),
+    fetchIssues: vi.fn().mockResolvedValue([]),
+    providerStatus: vi.fn().mockResolvedValue({
+      configured: false,
+      domainSet: false,
+      projectKeySet: false,
+      authType: null,
+    }),
+    fetchComments: vi.fn().mockResolvedValue([]),
+    setAuthType: vi.fn().mockResolvedValue(undefined),
+    setDomain: vi.fn().mockResolvedValue(undefined),
+    setEmail: vi.fn().mockResolvedValue(undefined),
+    setProjectKey: vi.fn().mockResolvedValue(undefined),
+    setJqlFilter: vi.fn().mockResolvedValue(undefined),
+  },
+  worklog: {
+    log: vi.fn().mockResolvedValue({ worklogId: "wl-1" }),
+    markLogged: vi.fn().mockResolvedValue(undefined),
+  },
+  claudeTracker: {
+    start: vi.fn().mockResolvedValue({ started: true }),
+    stop: vi.fn().mockResolvedValue({ sessions: [] }),
+    getProjects: vi.fn().mockResolvedValue({ projects: [] }),
+    getForSession: vi.fn().mockResolvedValue(null),
+    onUpdate: vi.fn().mockReturnValue(() => {}),
   },
 };
 

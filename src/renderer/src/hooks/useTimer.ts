@@ -200,16 +200,21 @@ export function useTimer(
   settings: TimerSettings,
   onSaved?: (session: Session) => void,
   pendingIssue?: IssueRef | null,
+  customSave?: (input: SaveSessionInput) => Promise<Session>,
 ): UseTimerReturn {
   const [state, dispatch] = useReducer(timerReducer, settings, getInitialTimerState);
   const [saveError, setSaveError] = useState<string | null>(null);
   const onSavedRef = useRef(onSaved);
   const pendingIssueRef = useRef(pendingIssue);
+  const customSaveRef = useRef(customSave);
   useLayoutEffect(() => {
     onSavedRef.current = onSaved;
   });
   useLayoutEffect(() => {
     pendingIssueRef.current = pendingIssue;
+  });
+  useLayoutEffect(() => {
+    customSaveRef.current = customSave;
   });
 
   // Update settings when they change externally
@@ -266,14 +271,16 @@ export function useTimer(
           issueId: issue.identifier,
         }
       : {};
-    window.electronAPI.session
-      .save({
-        title: state.title,
-        timerType: state.timerType,
-        plannedDurationSeconds: getDurationForType(state.settings, state.timerType),
-        actualDurationSeconds,
-        ...issueFields,
-      })
+    const saveInput: SaveSessionInput = {
+      title: state.title,
+      timerType: state.timerType,
+      plannedDurationSeconds: getDurationForType(state.settings, state.timerType),
+      actualDurationSeconds,
+      ...issueFields,
+    };
+
+    const saveFn = customSaveRef.current ?? window.electronAPI.session.save;
+    saveFn(saveInput)
       .then((session) => {
         setSaveError(null);
         onSavedRef.current?.(session);

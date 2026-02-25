@@ -1,11 +1,13 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   AssignTagInput,
+  ClaudeCodeLiveStats,
   CreateTagInput,
   IssuesListInput,
   IssuesSetTokenInput,
   ListSessionsInput,
   SaveSessionInput,
+  SaveSessionWithTrackingInput,
   TimerSettings,
   UpdateTagInput,
   WorklogLogInput,
@@ -15,12 +17,16 @@ contextBridge.exposeInMainWorld("electronAPI", {
   platform: process.platform,
   session: {
     save: (input: SaveSessionInput) => ipcRenderer.invoke("session:save", input),
+    saveWithTracking: (input: SaveSessionWithTrackingInput) =>
+      ipcRenderer.invoke("session:save-with-tracking", input),
     list: (input: ListSessionsInput) => ipcRenderer.invoke("session:list", input),
     delete: (id: string) => ipcRenderer.invoke("session:delete", id),
   },
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),
     save: (settings: TimerSettings) => ipcRenderer.invoke("settings:save", settings),
+    getValue: (key: string) => ipcRenderer.invoke("settings:get-value", key),
+    setValue: (key: string, value: string | null) => ipcRenderer.invoke("settings:set-value", key, value),
   },
   tag: {
     create: (input: CreateTagInput) => ipcRenderer.invoke("tag:create", input),
@@ -76,5 +82,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
+  },
+  claudeTracker: {
+    start: (input: { projectDirName: string }) => ipcRenderer.invoke("claude-tracker:start", input),
+    stop: () => ipcRenderer.invoke("claude-tracker:stop"),
+    getProjects: () => ipcRenderer.invoke("claude-tracker:get-projects"),
+    getForSession: (input: { sessionId: string }) => ipcRenderer.invoke("claude-tracker:get-for-session", input),
+    onUpdate: (callback: (stats: ClaudeCodeLiveStats) => void) => {
+      // Wrap callback to extract payload from the IPC event
+      const handler = (_event: IpcRendererEvent, stats: ClaudeCodeLiveStats) => {
+        callback(stats);
+      };
+      ipcRenderer.on("claude-tracker:update", handler);
+      // Return an unsubscribe function that removes this specific listener
+      return () => {
+        ipcRenderer.removeListener("claude-tracker:update", handler);
+      };
+    },
   },
 });

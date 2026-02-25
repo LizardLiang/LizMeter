@@ -7,10 +7,13 @@ import path from "node:path";
 import Database from "better-sqlite3";
 import type {
   AssignTagInput,
+  ClaudeCodeIdlePeriod,
+  ClaudeCodeSessionSummary,
   CreateTagInput,
   ListSessionsInput,
   ListSessionsResult,
   SaveSessionInput,
+  SaveSessionWithTrackingInput,
   Session,
   Tag,
   TimerSettings,
@@ -81,6 +84,31 @@ export function initDatabase(dbPath?: string): void {
       tag_id     INTEGER NOT NULL REFERENCES tags(id)     ON DELETE CASCADE,
       PRIMARY KEY (session_id, tag_id)
     );
+
+    CREATE TABLE IF NOT EXISTS claude_code_sessions (
+      id                  TEXT PRIMARY KEY,
+      session_id          TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      cc_session_uuid     TEXT NOT NULL,
+      file_edit_count     INTEGER NOT NULL DEFAULT 0,
+      total_idle_seconds  INTEGER NOT NULL DEFAULT 0,
+      idle_period_count   INTEGER NOT NULL DEFAULT 0,
+      first_activity_at   TEXT,
+      last_activity_at    TEXT,
+      files_edited        TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cc_sessions_session_id ON claude_code_sessions(session_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_cc_sessions_unique ON claude_code_sessions(session_id, cc_session_uuid);
+
+    CREATE TABLE IF NOT EXISTS claude_code_idle_periods (
+      id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+      cc_session_id       TEXT NOT NULL REFERENCES claude_code_sessions(id) ON DELETE CASCADE,
+      start_at            TEXT NOT NULL,
+      end_at              TEXT NOT NULL,
+      duration_seconds    INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_cc_idle_cc_session_id ON claude_code_idle_periods(cc_session_id);
   `);
 
   // Idempotent migration: add issue columns if they don't exist yet
@@ -335,6 +363,193 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
   }));
 
   return { sessions, total };
+}
+
+export function saveSessionWithTracking(input: SaveSessionWithTrackingInput): Session {
+  const database = getDb();
+
+  // Input validation (same as saveSession)
+  validateTimerType(input.timerType);
+  validateIssueProvider(input.issueProvider);
+  const title = sanitizeTitle(input.title);
+
+  if (input.timerType === "stopwatch") {
+    if (typeof input.plannedDurationSeconds !== "number" || input.plannedDurationSeconds < 0) {
+      throw new Error(`Invalid plannedDurationSeconds: ${String(input.plannedDurationSeconds)}`);
+    }
+  } else {
+    if (typeof input.plannedDurationSeconds !== "number" || input.plannedDurationSeconds <= 0) {
+      throw new Error(`Invalid plannedDurationSeconds: ${String(input.plannedDurationSeconds)}`);
+    }
+  }
+  if (typeof input.actualDurationSeconds !== "number" || input.actualDurationSeconds < 0) {
+    throw new Error(`Invalid actualDurationSeconds: ${String(input.actualDurationSeconds)}`);
+  }
+
+  const id = crypto.randomUUID();
+  const completedAt = new Date().toISOString();
+  const issueProvider = input.issueProvider ?? null;
+  const issueId = input.issueId ?? null;
+
+  const insertSession = database.prepare(`
+    INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url, issue_provider, issue_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertCcSession = database.prepare(`
+    INSERT OR IGNORE INTO claude_code_sessions
+      (id, session_id, cc_session_uuid, file_edit_count, total_idle_seconds, idle_period_count, first_activity_at, last_activity_at, files_edited)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+
+  const insertIdlePeriod = database.prepare(`
+    INSERT INTO claude_code_idle_periods (cc_session_id, start_at, end_at, duration_seconds)
+    VALUES (?, ?, ?, ?)
+  `);
+
+  const runTransaction = database.transaction(() => {
+    insertSession.run(
+      id,
+      title,
+      input.timerType,
+      input.plannedDurationSeconds,
+      input.actualDurationSeconds,
+      completedAt,
+      input.issueNumber ?? null,
+      input.issueTitle ?? null,
+      input.issueUrl ?? null,
+      issueProvider,
+      issueId,
+    );
+
+    if (input.claudeCodeSessions && input.claudeCodeSessions.length > 0) {
+      for (const ccSession of input.claudeCodeSessions) {
+        const ccId = crypto.randomUUID();
+        const filesEditedJson = JSON.stringify(ccSession.filesEdited ?? []);
+
+        // SELECT-before-INSERT: used instead of relying on INSERT OR IGNORE's `changes` count
+        // because the Vitest sql.js shim does not return `changes` from Statement.run().
+        // Within a single transaction this SELECT will always return null for a fresh UUID,
+        // but the pattern provides idempotency safety and test compatibility.
+        const existingRow = database
+          .prepare(
+            "SELECT id FROM claude_code_sessions WHERE session_id = ? AND cc_session_uuid = ?",
+          )
+          .get(id, ccSession.ccSessionUuid);
+
+        if (!existingRow) {
+          insertCcSession.run(
+            ccId,
+            id,
+            ccSession.ccSessionUuid,
+            ccSession.fileEditCount,
+            ccSession.totalIdleSeconds,
+            ccSession.idlePeriodCount,
+            ccSession.firstActivityAt ?? null,
+            ccSession.lastActivityAt ?? null,
+            filesEditedJson,
+          );
+
+          // Insert idle periods for this CC session
+          if (ccSession.idlePeriods && ccSession.idlePeriods.length > 0) {
+            for (const period of ccSession.idlePeriods) {
+              insertIdlePeriod.run(ccId, period.startAt, period.endAt, period.durationSeconds);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  runTransaction();
+
+  return {
+    id,
+    title,
+    timerType: input.timerType,
+    plannedDurationSeconds: input.plannedDurationSeconds,
+    actualDurationSeconds: input.actualDurationSeconds,
+    completedAt,
+    tags: [],
+    issueNumber: input.issueNumber ?? null,
+    issueTitle: input.issueTitle ?? null,
+    issueUrl: input.issueUrl ?? null,
+    issueProvider,
+    issueId,
+    worklogStatus: "not_logged" as WorklogStatus,
+    worklogId: null,
+  };
+}
+
+export function getClaudeCodeDataForSession(
+  sessionId: string,
+): { sessions: ClaudeCodeSessionSummary[] } | null {
+  const database = getDb();
+
+  const ccRows = database
+    .prepare(
+      `SELECT id, cc_session_uuid, file_edit_count, total_idle_seconds, idle_period_count,
+              first_activity_at, last_activity_at, files_edited
+       FROM claude_code_sessions
+       WHERE session_id = ?
+       ORDER BY first_activity_at ASC`,
+    )
+    .all(sessionId) as Array<{
+      id: string;
+      cc_session_uuid: string;
+      file_edit_count: number;
+      total_idle_seconds: number;
+      idle_period_count: number;
+      first_activity_at: string | null;
+      last_activity_at: string | null;
+      files_edited: string;
+    }>;
+
+  if (ccRows.length === 0) return null;
+
+  const getIdlePeriodsStmt = database.prepare(
+    `SELECT start_at, end_at, duration_seconds
+     FROM claude_code_idle_periods
+     WHERE cc_session_id = ?
+     ORDER BY start_at ASC`,
+  );
+
+  const sessions: ClaudeCodeSessionSummary[] = ccRows.map((row) => {
+    const idlePeriods = (
+      getIdlePeriodsStmt.all(row.id) as Array<{
+        start_at: string;
+        end_at: string;
+        duration_seconds: number;
+      }>
+    ).map(
+      (p): ClaudeCodeIdlePeriod => ({
+        startAt: p.start_at,
+        endAt: p.end_at,
+        durationSeconds: p.duration_seconds,
+      }),
+    );
+
+    let filesEdited: string[];
+    try {
+      filesEdited = JSON.parse(row.files_edited) as string[];
+    } catch {
+      filesEdited = [];
+    }
+
+    return {
+      id: row.id,
+      ccSessionUuid: row.cc_session_uuid,
+      fileEditCount: row.file_edit_count,
+      totalIdleSeconds: row.total_idle_seconds,
+      idlePeriodCount: row.idle_period_count,
+      firstActivityAt: row.first_activity_at,
+      lastActivityAt: row.last_activity_at,
+      filesEdited,
+      idlePeriods,
+    };
+  });
+
+  return { sessions };
 }
 
 export function deleteSession(id: string): void {

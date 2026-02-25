@@ -13,6 +13,7 @@ import type {
   LinearProviderStatus,
   ListSessionsInput,
   SaveSessionInput,
+  SaveSessionWithTrackingInput,
   TimerSettings,
   UpdateTagInput,
 } from "../../src/shared/types.ts";
@@ -22,6 +23,7 @@ import {
   deleteSession,
   deleteSettingValue,
   deleteTag,
+  getClaudeCodeDataForSession,
   getSessionById,
   getSettingValue,
   getSettings,
@@ -29,12 +31,14 @@ import {
   listTags,
   listTagsForSession,
   saveSession,
+  saveSessionWithTracking,
   saveSettings,
   setSettingValue,
   unassignTag,
   updateTag,
   updateWorklogStatus,
 } from "./database.ts";
+import { getProjects, startTracking, stopTrackingAndGetData } from "./claude-code-tracker.ts";
 import {
   getGitHubProvider,
   getJiraProvider,
@@ -54,6 +58,10 @@ export function registerIpcHandlers(): void {
     return saveSession(input);
   });
 
+  ipcMain.handle("session:save-with-tracking", (_event, input: SaveSessionWithTrackingInput) => {
+    return saveSessionWithTracking(input);
+  });
+
   ipcMain.handle("session:list", (_event, input: ListSessionsInput) => {
     return listSessions(input ?? {});
   });
@@ -68,6 +76,18 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("settings:save", (_event, settings: TimerSettings) => {
     return saveSettings(settings);
+  });
+
+  ipcMain.handle("settings:get-value", (_event, key: string) => {
+    return getSettingValue(key);
+  });
+
+  ipcMain.handle("settings:set-value", (_event, key: string, value: string | null) => {
+    if (value === null) {
+      deleteSettingValue(key);
+    } else {
+      setSettingValue(key, value);
+    }
   });
 
   // Tag handlers
@@ -313,6 +333,28 @@ export function registerIpcHandlers(): void {
     } else {
       deleteSettingValue("jira_jql_filter");
     }
+  });
+
+  // Claude Code Tracker IPC handlers
+  ipcMain.handle(
+    "claude-tracker:start",
+    (event, input: { projectDirName: string }) => {
+      const idleThresholdMinutes = parseInt(getSettingValue("claudeCode.idleThresholdMinutes") ?? "5", 10);
+      const threshold = isNaN(idleThresholdMinutes) ? 5 : idleThresholdMinutes;
+      return startTracking(input.projectDirName, event.sender, threshold);
+    },
+  );
+
+  ipcMain.handle("claude-tracker:stop", () => {
+    return stopTrackingAndGetData();
+  });
+
+  ipcMain.handle("claude-tracker:get-projects", () => {
+    return getProjects();
+  });
+
+  ipcMain.handle("claude-tracker:get-for-session", (_event, input: { sessionId: string }) => {
+    return getClaudeCodeDataForSession(input.sessionId);
   });
 
   ipcMain.handle("shell:open-external", (_event, url: string) => {

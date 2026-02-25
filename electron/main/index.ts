@@ -2,6 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { closeDatabase, initDatabase } from "./database.ts";
+import { destroyTracker } from "./claude-code-tracker.ts";
 import { registerIpcHandlers } from "./ipc-handlers.ts";
 import {
   initJiraProviderFromDisk,
@@ -41,6 +42,10 @@ function createWindow() {
     }
   });
   ipcMain.on("window:close", () => win.close());
+
+  win.webContents.on("render-process-gone", () => {
+    destroyTracker();
+  });
 
   if (VITE_DEV_SERVER_URL) {
     win.loadURL(VITE_DEV_SERVER_URL);
@@ -84,5 +89,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  destroyTracker();
   closeDatabase();
 });
