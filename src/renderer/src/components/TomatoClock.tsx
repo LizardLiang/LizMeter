@@ -218,6 +218,7 @@ export function TomatoClock() {
             onUnassignTag={tagManager.unassignTag}
             onCreateTag={tagManager.createTag}
             onLogWork={logWork}
+            onRefresh={refresh}
             worklogLoading={worklogLoading}
           />
         )}

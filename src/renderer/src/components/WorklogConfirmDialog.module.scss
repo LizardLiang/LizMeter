@@ -1,0 +1,227 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog {
+  width: 540px;
+  background: var(--tokyoNight-bg-dark, #1a1b26);
+  border: 1px solid var(--tokyoNight-comment, #565f89);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(86, 95, 137, 0.3);
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tokyoNight-fg, #c0caf5);
+  margin: 0;
+}
+
+.body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tokyoNight-comment, #565f89);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.input {
+  padding: 8px 12px;
+  background: #24283b;
+  border: 1px solid rgba(86, 95, 137, 0.4);
+  border-radius: 6px;
+  color: var(--tokyoNight-fg, #c0caf5);
+  font-size: 13px;
+  outline: none;
+  width: 100%;
+  box-sizing: border-box;
+
+  &:focus {
+    border-color: var(--tokyoNight-blue, #7aa2f7);
+  }
+
+  &.inputError {
+    border-color: var(--tokyoNight-red, #f7768e);
+  }
+}
+
+.textarea {
+  composes: input;
+  resize: vertical;
+  min-height: 60px;
+  font-family: inherit;
+  line-height: 1.5;
+}
+
+.sessionList {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(86, 95, 137, 0.3);
+  border-radius: 6px;
+  overflow: hidden;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.sessionListHeader {
+  padding: 6px 10px;
+  background: rgba(86, 95, 137, 0.1);
+  border-bottom: 1px solid rgba(86, 95, 137, 0.2);
+}
+
+.sessionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 12px;
+
+  &:hover {
+    background: rgba(86, 95, 137, 0.08);
+  }
+
+  & + & {
+    border-top: 1px solid rgba(86, 95, 137, 0.1);
+  }
+}
+
+.checkboxLabel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.checkbox {
+  accent-color: var(--tokyoNight-blue, #7aa2f7);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.sessionTitle {
+  color: var(--tokyoNight-fg, #c0caf5);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sessionMeta {
+  color: var(--tokyoNight-comment, #565f89);
+  font-size: 11px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.sessionLogged {
+  font-size: 10px;
+  color: #9ece6a;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(158, 206, 106, 0.1);
+  border: 1px solid rgba(158, 206, 106, 0.3);
+  flex-shrink: 0;
+}
+
+.timeRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.durationDisplay {
+  font-size: 13px;
+  color: var(--tokyoNight-cyan, #7dcfff);
+  font-weight: 600;
+}
+
+.errorMsg {
+  font-size: 12px;
+  color: var(--tokyoNight-red, #f7768e);
+  margin-top: 2px;
+}
+
+.warningBanner {
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid rgba(224, 175, 104, 0.4);
+  background-color: rgba(224, 175, 104, 0.08);
+  color: #e0af68;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid rgba(86, 95, 137, 0.3);
+}
+
+.cancelBtn {
+  padding: 8px 18px;
+  border: 1px solid var(--tokyoNight-comment, #565f89);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tokyoNight-fg, #c0caf5);
+  font-size: 13px;
+  cursor: pointer;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.08);
+    border-color: var(--tokyoNight-blue, #7aa2f7);
+  }
+}
+
+.confirmBtn {
+  padding: 8px 18px;
+  border: 1px solid rgba(122, 162, 247, 0.4);
+  border-radius: 6px;
+  background: rgba(122, 162, 247, 0.12);
+  color: var(--tokyoNight-blue, #7aa2f7);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.2);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "feature": "session-history-grouping",
+  "description": "Categorize session history by date and issue - group sessions on the same day linked to the same issue together with total time",
+  "priority": "P1",
+  "created": "2026-02-24T00:00:00.000Z",
+  "updated": "2026-02-24T15:25:00.000Z",
+  "stage": "8-code-review",
+  "pipeline": {
+    "1-prd": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "prd.md",
+      "completedAt": "2026-02-24"
+    },
+    "2-prd-review": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "prd-review.md",
+      "verdict": "approved",
+      "completedAt": "2026-02-24"
+    },
+    "3-tech-spec": {
+      "status": "complete",
+      "assignee": "hephaestus",
+      "document": "tech-spec.md",
+      "based_on": "prd.md",
+      "revision": "R1",
+      "completedAt": "2026-02-24"
+    },
+    "4-spec-review-pm": {
+      "status": "complete",
+      "assignee": "athena",
+      "document": "spec-review-pm.md",
+      "verdict": "needs-revision",
+      "completedAt": "2026-02-24"
+    },
+    "5-spec-review-sa": {
+      "status": "complete",
+      "assignee": "apollo",
+      "document": "spec-review-sa.md",
+      "verdict": "concerns",
+      "completedAt": "2026-02-24"
+    },
+    "6-test-plan": {
+      "status": "complete",
+      "assignee": "artemis",
+      "document": "test-plan.md",
+      "completedAt": "2026-02-24"
+    },
+    "7-implementation": {
+      "status": "complete",
+      "assignee": "ares",
+      "document": "implementation-notes.md",
+      "completedAt": "2026-02-24"
+    },
+    "8-code-review": {
+      "status": "complete",
+      "assignee": "hermes",
+      "document": "code-review.md",
+      "verdict": "approved",
+      "completedAt": "2026-02-24"
+    }
+  }
+}

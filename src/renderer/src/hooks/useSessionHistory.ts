@@ -14,7 +14,11 @@ export interface UseSessionHistoryReturn {
   deleteSession: (id: string) => void;
   loadMore: () => void;
   setTagFilter: (tagId: number | undefined) => void;
-  logWork: (sessionId: string, issueKey: string) => Promise<void>;
+  logWork: (
+    sessionId: string,
+    issueKey: string,
+    overrides?: { startTime: string; endTime: string; description: string; },
+  ) => Promise<void>;
   worklogLoading: Record<string, boolean>;
 }
 
@@ -91,10 +95,24 @@ export function useSessionHistory(): UseSessionHistoryReturn {
   }, []);
 
   const logWork = useCallback(
-    async (sessionId: string, issueKey: string): Promise<void> => {
+    async (
+      sessionId: string,
+      issueKey: string,
+      overrides?: { startTime: string; endTime: string; description: string; },
+    ): Promise<void> => {
       setWorklogLoading((prev) => ({ ...prev, [sessionId]: true }));
       try {
-        await window.electronAPI.worklog.log({ sessionId, issueKey });
+        await window.electronAPI.worklog.log({
+          sessionId,
+          issueKey,
+          ...(overrides
+            ? {
+              startTimeOverride: overrides.startTime,
+              endTimeOverride: overrides.endTime,
+              descriptionOverride: overrides.description,
+            }
+            : {}),
+        });
         refresh();
       } finally {
         setWorklogLoading((prev) => {

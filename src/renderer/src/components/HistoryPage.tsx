@@ -2,12 +2,14 @@ import { useCallback, useState } from "react";
 import type { CreateTagInput, Session, Tag } from "../../../shared/types.ts";
 import { useGroupExpand } from "../hooks/useGroupExpand.ts";
 import { formatDuration, formatTimerType, timerTypeColor } from "../utils/format.ts";
+import type { DateSubGroup } from "../utils/groupSessions.ts";
 import { DateSubGroupHeader } from "./DateSubGroupHeader.tsx";
 import styles from "./HistoryPage.module.scss";
 import { IssueBadge } from "./IssueBadge.tsx";
 import { IssueGroupHeader } from "./IssueGroupHeader.tsx";
 import { TagBadge } from "./TagBadge.tsx";
 import { TagPicker } from "./TagPicker.tsx";
+import { WorklogConfirmDialog } from "./WorklogConfirmDialog.tsx";
 
 interface Toast {
   id: string;
@@ -28,7 +30,12 @@ interface Props {
   onAssignTag: (sessionId: string, tagId: number) => Promise<void>;
   onUnassignTag: (sessionId: string, tagId: number) => Promise<void>;
   onCreateTag: (input: CreateTagInput) => Promise<Tag>;
-  onLogWork?: (sessionId: string, issueKey: string) => Promise<void>;
+  onLogWork?: (
+    sessionId: string,
+    issueKey: string,
+    overrides?: { startTime: string; endTime: string; description: string; },
+  ) => Promise<void>;
+  onRefresh?: () => void;
   worklogLoading?: Record<string, boolean>;
 }
 
@@ -87,9 +94,19 @@ function SessionCard(
         {showWorklogUi && (
           <>
             {session.worklogStatus === "logged" && (
-              <span className={styles.worklogLogged} aria-label="Work logged to Jira">
-                Logged
-              </span>
+              <>
+                <span className={styles.worklogLogged} aria-label="Work logged to Jira">
+                  Logged
+                </span>
+                <button
+                  className={styles.relogBtn}
+                  onClick={handleLogWork}
+                  disabled={worklogLoading}
+                  aria-label={`Re-log to Jira for: ${session.title || "session"}`}
+                >
+                  {worklogLoading ? "..." : "Re-log"}
+                </button>
+              </>
             )}
             {session.worklogStatus === "not_logged" && (
               <button
@@ -147,6 +164,7 @@ export function HistoryPage({
   onUnassignTag,
   onCreateTag,
   onLogWork,
+  onRefresh,
   worklogLoading,
 }: Props) {
   const activeFilterTag = allTags.find((t) => t.id === activeTagFilter);
@@ -156,16 +174,23 @@ export function HistoryPage({
   );
 
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [worklogDialogState, setWorklogDialogState] = useState<
+    { session: Session | Session[]; issueKey: string; isRelog: boolean; sessionIds: string[]; } | null
+  >(null);
 
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const handleLogWork = useCallback(
-    async (sessionId: string, issueKey: string) => {
+    async (
+      sessionId: string,
+      issueKey: string,
+      overrides?: { startTime: string; endTime: string; description: string; },
+    ) => {
       if (!onLogWork) return;
       try {
-        await onLogWork(sessionId, issueKey);
+        await onLogWork(sessionId, issueKey, overrides);
         const session = sessions.find((s) => s.id === sessionId);
         const durationMins = session ? Math.round(session.actualDurationSeconds / 60) : 0;
         const toastId = crypto.randomUUID();
@@ -194,6 +219,90 @@ export function HistoryPage({
       }
     },
     [onLogWork, sessions, dismissToast],
+  );
+
+  // Open dialog for individual session log work
+  const handleOpenWorklogDialog = useCallback(
+    (sessionId: string, issueKey: string) => {
+      const session = sessions.find((s) => s.id === sessionId);
+      if (!session) return;
+      const isRelog = session.worklogStatus === "logged";
+      setWorklogDialogState({ session, issueKey, isRelog, sessionIds: [session.id] });
+    },
+    [sessions],
+  );
+
+  // Called when user confirms the worklog dialog (single or bulk)
+  const handleWorklogDialogConfirm = useCallback(
+    async (params: {
+      startTime: string;
+      endTime: string;
+      description: string;
+      selectedSessionIds: string[];
+    }) => {
+      if (!worklogDialogState) return;
+      const { issueKey } = worklogDialogState;
+      const selectedIds = params.selectedSessionIds;
+      const isBulk = selectedIds.length > 1;
+      setWorklogDialogState(null);
+
+      if (isBulk) {
+        // Bulk: ONE Jira API call using first selected session as anchor, then mark rest as logged
+        try {
+          const result = await window.electronAPI.worklog.log({
+            sessionId: selectedIds[0],
+            issueKey,
+            startTimeOverride: params.startTime,
+            endTimeOverride: params.endTime,
+            descriptionOverride: params.description,
+          });
+          // Mark remaining sessions as logged (no extra API calls)
+          if (selectedIds.length > 1) {
+            await window.electronAPI.worklog.markLogged({
+              sessionIds: selectedIds.slice(1),
+              worklogId: result.worklogId,
+            });
+          }
+          const durationMins = Math.round(
+            (new Date(params.endTime).getTime() - new Date(params.startTime).getTime()) / 60000,
+          );
+          const toastId = crypto.randomUUID();
+          const message = `Logged ${durationMins}m to ${issueKey} (${selectedIds.length} sessions combined)`;
+          setToasts((prev) => [...prev, { id: toastId, message, type: "success" }]);
+          setTimeout(() => dismissToast(toastId), 4000);
+          onRefresh?.();
+        } catch (err) {
+          const errMessage = err instanceof Error ? err.message : "Failed to log work";
+          const toastId = crypto.randomUUID();
+          setToasts((prev) => [...prev, { id: toastId, message: errMessage, type: "error" }]);
+          setTimeout(() => dismissToast(toastId), 4000);
+        }
+      } else {
+        // Single session
+        await handleLogWork(selectedIds[0], issueKey, params);
+      }
+    },
+    [worklogDialogState, handleLogWork, dismissToast, onRefresh],
+  );
+
+  // Open combined worklog dialog for a date sub-group
+  const handleLogDate = useCallback(
+    (subGroup: DateSubGroup) => {
+      const eligible = subGroup.sessions.filter(
+        (s) => s.issueProvider === "jira" && s.issueId && s.actualDurationSeconds >= 60,
+      );
+      if (eligible.length === 0) return;
+      const unloggedCount = eligible.filter((s) => s.worklogStatus !== "logged").length;
+      const isRelog = unloggedCount === 0;
+      const issueKey = eligible[0].issueId!;
+      setWorklogDialogState({
+        session: eligible.length === 1 ? eligible[0] : eligible,
+        issueKey,
+        isRelog,
+        sessionIds: eligible.map((s) => s.id),
+      });
+    },
+    [],
   );
 
   return (
@@ -254,6 +363,7 @@ export function HistoryPage({
                     isExpanded={isDateExpanded}
                     onToggle={() => toggleDateGroup(dateGroupKey)}
                     compact={false}
+                    onLogDate={onLogWork ? handleLogDate : undefined}
                   >
                     {subGroup.sessions.map((session) => (
                       <SessionCard
@@ -264,7 +374,7 @@ export function HistoryPage({
                         onAssign={onAssignTag}
                         onUnassign={onUnassignTag}
                         onCreateTag={onCreateTag}
-                        onLogWork={onLogWork ? (sid, key) => void handleLogWork(sid, key) : undefined}
+                        onLogWork={onLogWork ? handleOpenWorklogDialog : undefined}
                         worklogLoading={worklogLoading?.[session.id] ?? false}
                       />
                     ))}
@@ -285,7 +395,7 @@ export function HistoryPage({
             onAssign={onAssignTag}
             onUnassign={onUnassignTag}
             onCreateTag={onCreateTag}
-            onLogWork={onLogWork ? (sid, key) => void handleLogWork(sid, key) : undefined}
+            onLogWork={onLogWork ? handleOpenWorklogDialog : undefined}
             worklogLoading={worklogLoading?.[session.id] ?? false}
           />
         ))}
@@ -295,6 +405,16 @@ export function HistoryPage({
         <button className={styles.loadMoreBtn} onClick={onLoadMore}>
           Load more ({total - sessions.length} remaining)
         </button>
+      )}
+
+      {worklogDialogState && (
+        <WorklogConfirmDialog
+          session={worklogDialogState.session}
+          issueKey={worklogDialogState.issueKey}
+          isRelog={worklogDialogState.isRelog}
+          onConfirm={(params) => void handleWorklogDialogConfirm(params)}
+          onCancel={() => setWorklogDialogState(null)}
+        />
       )}
 
       {toasts.length > 0 && (

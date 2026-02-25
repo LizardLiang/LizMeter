@@ -40,9 +40,19 @@ export function SessionHistoryItem({ session, onDelete, onLogWork, worklogLoadin
       {showWorklogUi && (
         <>
           {session.worklogStatus === "logged" && (
-            <span className={styles.worklogLogged} aria-label="Work logged to Jira">
-              Logged
-            </span>
+            <>
+              <span className={styles.worklogLogged} aria-label="Work logged to Jira">
+                Logged
+              </span>
+              <button
+                className={styles.relogBtn}
+                onClick={handleLogWork}
+                disabled={worklogLoading}
+                aria-label={`Re-log to Jira for session: ${displayTitle}`}
+              >
+                {worklogLoading ? "..." : "Re-log"}
+              </button>
+            </>
           )}
           {session.worklogStatus === "not_logged" && (
             <button

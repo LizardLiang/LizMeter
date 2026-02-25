@@ -1,0 +1,60 @@
+{
+  "feature": "work-time-logging",
+  "description": "Add work time / log work integration to Jira — sync completed session durations to linked Jira issues via worklog API",
+  "created": "2026-02-24",
+  "pipeline": {
+    "1-prd": {
+      "status": "complete",
+      "agent": "athena",
+      "document": "prd.md",
+      "completedAt": "2026-02-24"
+    },
+    "2-prd-review": {
+      "status": "complete",
+      "agent": "athena",
+      "document": "prd-review.md",
+      "verdict": "approved",
+      "completedAt": "2026-02-24"
+    },
+    "3-tech-spec": {
+      "status": "complete",
+      "agent": "hephaestus",
+      "document": "tech-spec.md",
+      "based_on": "prd.md",
+      "completedAt": "2026-02-24"
+    },
+    "4-spec-review-pm": {
+      "status": "complete",
+      "agent": "athena",
+      "document": "spec-review-pm.md",
+      "verdict": "approved",
+      "completedAt": "2026-02-24"
+    },
+    "5-spec-review-sa": {
+      "status": "complete",
+      "agent": "apollo",
+      "document": "spec-review-sa.md",
+      "verdict": "sound",
+      "completedAt": "2026-02-24"
+    },
+    "6-test-plan": {
+      "status": "complete",
+      "agent": "artemis",
+      "document": "test-plan.md",
+      "completedAt": "2026-02-24"
+    },
+    "7-implementation": {
+      "status": "complete",
+      "agent": "ares",
+      "document": "implementation-notes.md",
+      "completedAt": "2026-02-24"
+    },
+    "8-code-review": {
+      "status": "complete",
+      "agent": "hermes",
+      "document": "code-review.md",
+      "verdict": "approved",
+      "completedAt": "2026-02-24"
+    }
+  }
+}

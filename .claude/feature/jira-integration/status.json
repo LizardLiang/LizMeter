@@ -1,0 +1,16 @@
+{
+  "feature": "jira-integration",
+  "created": "2026-02-23",
+  "stages": {
+    "0-research": { "status": "complete" },
+    "1-prd": { "status": "complete", "document": "prd.md" },
+    "2-prd-review": { "status": "complete", "document": "prd-review.md", "verdict": "approved" },
+    "3-tech-spec": { "status": "complete", "document": "tech-spec.md" },
+    "4-spec-review-pm": { "status": "complete", "document": "spec-review-pm.md", "verdict": "approved" },
+    "5-spec-review-sa": { "status": "complete", "document": "spec-review-sa.md", "verdict": "approved" },
+    "6-test-plan": { "status": "complete" },
+    "7-implementation": { "status": "complete", "mode": "ares", "document": "implementation-notes.md" },
+    "8-code-review": { "status": "complete", "document": "code-review.md", "verdict": "approved" }
+  },
+  "current_stage": "complete"
+}

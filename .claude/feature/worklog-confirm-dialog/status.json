@@ -1,0 +1,26 @@
+{
+  "feature": "worklog-confirm-dialog",
+  "description": "Add confirmation dialog before uploading work logs to Jira; remove LizMeter prefix from worklog comment",
+  "priority": "P1",
+  "created": "2026-02-25T09:30:00.000Z",
+  "updated": "2026-02-25T09:30:00.000Z",
+  "stage": "7-implementation",
+  "pipeline": {
+    "7-implementation": {
+      "status": "complete",
+      "assignee": "ares",
+      "mode": "ares",
+      "document": "implementation-notes.md",
+      "started": "2026-02-25T09:00:00.000Z",
+      "completed": "2026-02-25T09:30:00.000Z",
+      "tests": {
+        "files": 25,
+        "total": 249,
+        "passed": 249
+      }
+    },
+    "8-code-review": {
+      "status": "ready"
+    }
+  }
+}

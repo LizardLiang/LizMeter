@@ -36,6 +36,9 @@ export interface Session {
 export interface WorklogLogInput {
   sessionId: string;
   issueKey: string;
+  startTimeOverride?: string; // ISO string
+  endTimeOverride?: string; // ISO string
+  descriptionOverride?: string;
 }
 
 export interface WorklogLogResult {
@@ -278,6 +281,7 @@ export interface ElectronAPI {
   };
   worklog: {
     log: (input: WorklogLogInput) => Promise<WorklogLogResult>;
+    markLogged: (input: { sessionIds: string[]; worklogId: string; }) => Promise<void>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

@@ -103,6 +103,30 @@
   white-space: nowrap;
 }
 
+.relogBtn {
+  padding: 2px 8px;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid #565f8944;
+  background-color: transparent;
+  color: #565f89;
+  cursor: pointer;
+  flex-shrink: 0;
+  white-space: nowrap;
+
+  &:hover:not(:disabled) {
+    color: #7aa2f7;
+    border-color: #7aa2f744;
+    background-color: #7aa2f711;
+  }
+
+  &:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+  }
+}
+
 // Issue badge (shown for sessions linked to GitHub or Linear issues)
 .issueBadge {
   display: inline-flex;

@@ -18,7 +18,9 @@ interface IssueGroupHeaderProps {
  * Clicking the header toggles the expand/collapse state.
  * Children are rendered inside the collapsible content area.
  */
-export function IssueGroupHeader({ group, isExpanded, onToggle, compact = false, children }: IssueGroupHeaderProps) {
+export function IssueGroupHeader(
+  { group, isExpanded, onToggle, compact = false, children }: IssueGroupHeaderProps,
+) {
   const { issueKey, totalSeconds, sessionCount } = group;
 
   const handleKeyDown = (e: React.KeyboardEvent) => {

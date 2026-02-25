@@ -1,0 +1,171 @@
+{
+  "feature": "linear-integration",
+  "description": "Add Linear issue tracking integration — browse, search, and link Linear issues to pomodoro sessions, mirroring the existing GitHub Issues integration",
+  "priority": "P2",
+  "created": "2026-02-23T00:00:00Z",
+  "updated": "2026-02-23T17:00:00Z",
+  "stage": "8-code-review",
+  "pipeline": {
+    "1-prd": {
+      "status": "complete",
+      "assignee": "athena",
+      "started": "2026-02-23T00:00:00Z",
+      "completed": "2026-02-23T12:00:00Z",
+      "document": "prd.md"
+    },
+    "2-prd-review": {
+      "status": "complete",
+      "assignee": "athena",
+      "started": "2026-02-23T12:30:00Z",
+      "completed": "2026-02-23T13:00:00Z",
+      "document": "prd-review.md",
+      "verdict": "approved-with-notes",
+      "gate": {
+        "requires": ["1-prd"],
+        "condition": "prd.status === 'approved'"
+      }
+    },
+    "3-tech-spec": {
+      "status": "complete",
+      "assignee": "hephaestus",
+      "started": "2026-02-23T13:30:00Z",
+      "completed": "2026-02-23T14:00:00Z",
+      "document": "tech-spec.md",
+      "gate": {
+        "requires": ["2-prd-review"],
+        "condition": "prd-review.verdict === 'approved'"
+      }
+    },
+    "4-spec-review-pm": {
+      "status": "complete",
+      "assignee": "athena",
+      "started": "2026-02-23T14:30:00Z",
+      "completed": "2026-02-23T15:00:00Z",
+      "document": "spec-review-pm.md",
+      "verdict": "pass-with-notes",
+      "gate": {
+        "requires": ["3-tech-spec"],
+        "condition": "tech-spec.status === 'complete'"
+      }
+    },
+    "5-spec-review-sa": {
+      "status": "complete",
+      "assignee": "apollo",
+      "started": "2026-02-23T15:00:00Z",
+      "completed": "2026-02-23T15:30:00Z",
+      "verdict": "pass-with-notes",
+      "document": "spec-review-sa.md",
+      "gate": {
+        "requires": ["3-tech-spec"],
+        "condition": "tech-spec.status === 'complete'"
+      }
+    },
+    "6-test-plan": {
+      "status": "complete",
+      "assignee": "artemis",
+      "started": "2026-02-23T15:30:00Z",
+      "completed": "2026-02-23T16:00:00Z",
+      "document": "test-plan.md",
+      "gate": {
+        "requires": ["4-spec-review-pm", "5-spec-review-sa"],
+        "condition": "both reviews passed"
+      }
+    },
+    "7-implementation": {
+      "status": "complete",
+      "assignee": "ares",
+      "started": "2026-02-23T16:00:00Z",
+      "completed": "2026-02-23T17:00:00Z",
+      "document": "implementation-notes.md",
+      "gate": {
+        "requires": ["6-test-plan"],
+        "condition": "test-plan exists"
+      }
+    },
+    "8-code-review": {
+      "status": "ready",
+      "assignee": "hermes",
+      "started": null,
+      "completed": null,
+      "document": "code-review.md",
+      "gate": {
+        "requires": ["7-implementation"],
+        "condition": "implementation complete"
+      }
+    }
+  },
+  "documents": {
+    "prd.md": {
+      "path": ".claude/feature/linear-integration/prd.md",
+      "author": "athena",
+      "created": "2026-02-23T12:00:00Z",
+      "version": "1.0",
+      "status": "approved-with-notes"
+    },
+    "prd-review.md": {
+      "path": ".claude/feature/linear-integration/prd-review.md",
+      "author": "athena",
+      "created": "2026-02-23T13:00:00Z",
+      "version": "1.0",
+      "status": "complete"
+    },
+    "tech-spec.md": {
+      "path": ".claude/feature/linear-integration/tech-spec.md",
+      "author": "hephaestus",
+      "created": "2026-02-23T14:00:00Z",
+      "version": "1.0",
+      "status": "complete",
+      "based_on": "prd.md"
+    },
+    "spec-review-pm.md": {
+      "path": ".claude/feature/linear-integration/spec-review-pm.md",
+      "author": "athena",
+      "created": "2026-02-23T15:00:00Z",
+      "version": "1.0",
+      "status": "complete",
+      "verdict": "pass-with-notes",
+      "based_on": "tech-spec.md"
+    },
+    "spec-review-sa.md": {
+      "path": ".claude/feature/linear-integration/spec-review-sa.md",
+      "author": "apollo",
+      "created": "2026-02-23T15:30:00Z",
+      "version": "1.0",
+      "status": "complete",
+      "verdict": "pass-with-notes",
+      "based_on": "tech-spec.md"
+    },
+    "test-plan.md": {
+      "path": ".claude/feature/linear-integration/test-plan.md",
+      "author": "artemis",
+      "created": "2026-02-23T16:00:00Z",
+      "version": "1.0",
+      "status": "complete",
+      "based_on": "prd.md, tech-spec.md, spec-review-pm.md, spec-review-sa.md"
+    },
+    "implementation-notes.md": {
+      "path": ".claude/feature/linear-integration/implementation-notes.md",
+      "author": "ares",
+      "created": "2026-02-23T17:00:00Z",
+      "version": "1.0",
+      "status": "complete",
+      "based_on": "tech-spec.md, test-plan.md",
+      "test_results": {
+        "total": 143,
+        "passed": 143,
+        "failed": 0,
+        "files": 18
+      }
+    }
+  },
+  "history": [
+    "2026-02-23T00:00:00Z: Feature created by Kratos. Metis research complete at .claude/.Arena/linear-research.md",
+    "2026-02-23T12:00:00Z: PRD created by Athena. 8 P0 requirements, 3 P1, 3 P2. Covers Linear API key auth, team selection, multi-provider sidebar/selector, session linking, and history display.",
+    "2026-02-23T13:00:00Z: PRD reviewed by Athena. Verdict: APPROVED WITH NOTES. 4 major issues (stale file names from research, SCSS vs inline styles mismatch, type system redesign not flagged, backward compat missing), 5 minor issues. PRD is fundamentally sound; inaccuracies are from stale research data. Hephaestus must verify file inventory before tech spec.",
+    "2026-02-23T14:00:00Z: Tech spec created by Hephaestus. Fresh codebase survey completed — corrected all stale file references from research. Key decisions: raw fetch over @linear/sdk (lighter, no CJS/ESM risk), generic issue_provider+issue_id columns (future-proof), tabs for multi-provider UI, IssueRef discriminated union for type-safe issue references. 4 files to create, 18 files to modify. 5-phase implementation plan. Full backward compatibility preserved.",
+    "2026-02-23T15:00:00Z: Tech spec PM review by Athena. Verdict: PASS WITH NOTES. All 8 P0 requirements fully covered. 4 minor issues: search mechanism ambiguity (FR-010), zero-teams edge case not addressed, refresh button missing from UI spec, retry button on network error not explicit. No scope creep. Backward compatibility excellent. 8 of 9 PRD review issues addressed. Approved to proceed.",
+    "2026-02-23T15:30:00Z: Tech spec SA review by Apollo. Verdict: PASS WITH NOTES. 0 critical, 2 major (search method gap, IssueProviderStatus scalability), 5 minor. Architecture sound. Both reviews passed — stage 6 (test-plan) unlocked.",
+    "2026-02-23T16:00:00Z: Test plan created by Artemis. 69 total test cases across 10 test files. 49 P0 tests, 15 P1 tests, 5 P2 tests. Coverage: all 8 P0 requirements + 3 P1 + 3 P2 requirements. Incorporates all review notes: search clarity (client-side filter), issueProvider validation in saveSession, backward compat (legacy issueNumber sessions), zero-teams edge case, single-team auto-select, error states with retry buttons, network failure handling. Stage 7 (implementation) now unlocked.",
+    "2026-02-23T17:00:00Z: Implementation complete by Ares. 9 files created, 21 files modified. 143 tests written and passing (18 test files). 0 lint errors. 0 format errors. Key deviations: search is client-side (per review notes). All P0, P1, P2 tests passing. Stage 8 (code-review) now unlocked."
+  ]
+}

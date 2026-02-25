@@ -321,48 +321,78 @@ export function registerIpcHandlers(): void {
     }
   });
 
+  // Mark sessions as logged without making a Jira API call (used for bulk combined worklogs)
+  ipcMain.handle(
+    "worklog:mark-logged",
+    (_event, input: { sessionIds: string[]; worklogId: string }) => {
+      for (const sessionId of input.sessionIds) {
+        updateWorklogStatus(sessionId, "logged", input.worklogId);
+      }
+    },
+  );
+
   // Worklog IPC handler
-  ipcMain.handle("worklog:log", async (_event, input: { sessionId: string; issueKey: string }) => {
-    const provider = getJiraProvider();
-    if (!provider) throw new IssueProviderError("No Jira credentials configured", "NO_TOKEN");
+  ipcMain.handle(
+    "worklog:log",
+    async (
+      _event,
+      input: {
+        sessionId: string;
+        issueKey: string;
+        startTimeOverride?: string;
+        endTimeOverride?: string;
+        descriptionOverride?: string;
+      },
+    ) => {
+      const provider = getJiraProvider();
+      if (!provider) throw new IssueProviderError("No Jira credentials configured", "NO_TOKEN");
 
-    // Fetch session from database
-    const session = getSessionById(input.sessionId);
-    if (!session) throw new Error("Session not found");
+      // Fetch session from database
+      const session = getSessionById(input.sessionId);
+      if (!session) throw new Error("Session not found");
 
-    // Guard: already logged
-    if (session.worklogStatus === "logged" && session.worklogId) {
-      throw new IssueProviderError("Worklog already logged for this session", "INELIGIBLE");
-    }
+      // Calculate started timestamp and duration
+      let started: string;
+      let durationSeconds: number;
 
-    // Guard: duration too short
-    if (session.actualDurationSeconds < 60) {
-      throw new IssueProviderError(
-        "Session duration is less than 60 seconds (Jira minimum)",
-        "INELIGIBLE",
-      );
-    }
+      if (input.startTimeOverride && input.endTimeOverride) {
+        // Use override times
+        const startDate = new Date(input.startTimeOverride);
+        const endDate = new Date(input.endTimeOverride);
+        durationSeconds = Math.round((endDate.getTime() - startDate.getTime()) / 1000);
+        started = startDate.toISOString();
+      } else {
+        // Default: completedAt - actualDurationSeconds
+        const completedDate = new Date(session.completedAt);
+        const startedDate = new Date(completedDate.getTime() - session.actualDurationSeconds * 1000);
+        started = startedDate.toISOString();
+        durationSeconds = session.actualDurationSeconds;
+      }
 
-    // Calculate started timestamp: completedAt - actualDurationSeconds
-    const completedDate = new Date(session.completedAt);
-    const startedDate = new Date(completedDate.getTime() - session.actualDurationSeconds * 1000);
-    const started = startedDate.toISOString();
+      // Guard: duration too short
+      if (durationSeconds < 60) {
+        throw new IssueProviderError(
+          "Session duration is less than 60 seconds (Jira minimum)",
+          "INELIGIBLE",
+        );
+      }
 
-    // Build comment
-    const comment = session.title ? `LizMeter: ${session.title}` : "Logged via LizMeter";
+      // Build comment
+      const comment = input.descriptionOverride ?? (session.title || "Work session");
 
-    try {
-      const result = await provider.addWorklog(
-        input.issueKey,
-        session.actualDurationSeconds,
-        started,
-        comment,
-      );
-      updateWorklogStatus(input.sessionId, "logged", result.id);
-      return { worklogId: result.id };
-    } catch (err) {
-      updateWorklogStatus(input.sessionId, "failed");
-      throw err;
-    }
-  });
+      try {
+        const result = await provider.addWorklog(
+          input.issueKey,
+          durationSeconds,
+          started,
+          comment,
+        );
+        updateWorklogStatus(input.sessionId, "logged", result.id);
+        return { worklogId: result.id };
+      } catch (err) {
+        updateWorklogStatus(input.sessionId, "failed");
+        throw err;
+      }
+    },
+  );
 }

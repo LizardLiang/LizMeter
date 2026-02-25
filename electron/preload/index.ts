@@ -71,6 +71,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   },
   worklog: {
     log: (input: WorklogLogInput) => ipcRenderer.invoke("worklog:log", input),
+    markLogged: (input: { sessionIds: string[]; worklogId: string }) =>
+      ipcRenderer.invoke("worklog:mark-logged", input),
   },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
