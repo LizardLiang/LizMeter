@@ -19,6 +19,7 @@ interface SessionHistoryItemProps {
 export function SessionHistoryItem({ session, onDelete, onLogWork, worklogLoading }: SessionHistoryItemProps) {
   const typeAccent = timerTypeColor(session.timerType);
 
+  const hasTitle = Boolean(session.title);
   const displayTitle = session.title || "(no title)";
 
   const isJiraLinked = session.issueProvider === "jira" && session.issueId;
@@ -31,11 +32,23 @@ export function SessionHistoryItem({ session, onDelete, onLogWork, worklogLoadin
     }
   };
 
+  // Detect if the title contains HTML tags (rich text)
+  const isRichText = hasTitle && /<[a-z][\s\S]*>/i.test(session.title);
+
   return (
     <li className={styles.row}>
-      <span className={styles.title} title={session.title || undefined}>
-        {displayTitle}
-      </span>
+      {isRichText
+        ? (
+          <span
+            className={`${styles.title} ${styles.richTitle}`}
+            dangerouslySetInnerHTML={{ __html: session.title }}
+          />
+        )
+        : (
+          <span className={styles.title} title={session.title || undefined}>
+            {displayTitle}
+          </span>
+        )}
       <IssueBadge session={session} />
       {showWorklogUi && (
         <>

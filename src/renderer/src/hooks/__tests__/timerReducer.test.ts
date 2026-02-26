@@ -164,11 +164,11 @@ describe("TC-109: SET_TITLE works in idle, running, and paused states", () => {
   });
 });
 
-describe("TC-110: SET_TITLE enforces maximum length of 500", () => {
-  it("truncates title to 500 characters", () => {
-    const longTitle = "a".repeat(501);
+describe("TC-110: SET_TITLE enforces maximum length of 5000", () => {
+  it("truncates title to 5000 characters", () => {
+    const longTitle = "a".repeat(5001);
     const result = timerReducer(idleState, { type: "SET_TITLE", payload: longTitle });
-    expect(result.title.length).toBeLessThanOrEqual(500);
+    expect(result.title.length).toBeLessThanOrEqual(5000);
   });
 });
 

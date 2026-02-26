@@ -6,41 +6,10 @@
 
 .label {
   display: block;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
   font-size: 0.6875rem;
   font-weight: 700;
-  color: #565f89;
+  color: var(--tn-muted, #565f89);
   letter-spacing: 0.12em;
   text-transform: uppercase;
-}
-
-.input {
-  width: 100%;
-  padding: 9px 0;
-  font-size: 0.9375rem;
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid #1e2030;
-  outline: none;
-  box-sizing: border-box;
-  color: var(--tn-text);
-  letter-spacing: 0.01em;
-  transition: border-color 0.2s ease;
-
-  &::placeholder {
-    color: #565f89;
-  }
-
-  &:hover:not(:focus):not(:disabled) {
-    border-bottom-color: #292e42;
-  }
-
-  &:focus {
-    border-bottom-color: #7aa2f750;
-  }
-
-  &:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
 }

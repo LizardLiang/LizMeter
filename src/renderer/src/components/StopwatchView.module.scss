@@ -1,7 +1,7 @@
 .container {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   gap: 16px;
   padding: 24px;
   border: 1px solid var(--tokyoNight-blue, #7aa2f7);
@@ -18,30 +18,6 @@
   align-self: flex-start;
 }
 
-.titleInput {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--tokyoNight-comment, #565f89);
-  border-radius: 6px;
-  background: var(--tokyoNight-bg, #1a1b26);
-  color: var(--tokyoNight-fg, #c0caf5);
-  font-size: 14px;
-
-  &::placeholder {
-    color: var(--tokyoNight-comment, #565f89);
-  }
-
-  &:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  &:focus {
-    outline: none;
-    border-color: var(--tokyoNight-blue, #7aa2f7);
-  }
-}
-
 .elapsed {
   font-size: 56px;
   font-weight: 700;
@@ -50,11 +26,14 @@
   letter-spacing: 2px;
   line-height: 1;
   padding: 16px 0;
+  text-align: center;
+  align-self: center;
 }
 
 .issueBadge {
   display: flex;
   align-items: center;
+  align-self: center;
   gap: 8px;
   padding: 6px 12px;
   border-radius: 6px;

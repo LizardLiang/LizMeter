@@ -235,14 +235,14 @@ describe("TC-314: Input validation — session title is trimmed and length-cappe
     expect(session.title).toBe("padded");
   });
 
-  it("truncates title at 500 characters", () => {
+  it("truncates title at 5000 characters", () => {
     const session = saveSession({
-      title: "a".repeat(501),
+      title: "a".repeat(5001),
       timerType: "work",
       plannedDurationSeconds: 1500,
       actualDurationSeconds: 1500,
     });
-    expect(session.title.length).toBeLessThanOrEqual(500);
+    expect(session.title.length).toBeLessThanOrEqual(5000);
   });
 });
 

@@ -27,7 +27,7 @@ type StopwatchAction =
   | { type: "SET_LINKED_ISSUE"; payload: IssueRef | null; }
   | { type: "AUTO_STOP"; };
 
-const MAX_TITLE_LENGTH = 500;
+const MAX_TITLE_LENGTH = 5000;
 
 function getInitialState(): StopwatchState {
   return {

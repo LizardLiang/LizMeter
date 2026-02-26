@@ -32,7 +32,7 @@ type TimerAction =
   | { type: "UPDATE_SETTINGS"; payload: TimerSettings; }
   | { type: "CLEAR_COMPLETION"; };
 
-const MAX_TITLE_LENGTH = 500;
+const MAX_TITLE_LENGTH = 5000;
 
 function getDurationForType(settings: TimerSettings, timerType: TimerType): number {
   switch (timerType) {

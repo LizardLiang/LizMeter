@@ -35,7 +35,7 @@ const DEFAULT_SETTINGS: TimerSettings = {
 
 const MIN_DURATION = 60;
 const MAX_DURATION = 7200;
-const MAX_TITLE_LENGTH = 500;
+const MAX_TITLE_LENGTH = 5000;
 
 export function initDatabase(dbPath?: string): void {
   // Close existing connection if any (supports re-initialization in tests)

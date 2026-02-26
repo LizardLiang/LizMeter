@@ -5,9 +5,11 @@ import { useCallback, useState } from "react";
 import type { IssueRef } from "../../../shared/types.ts";
 import type { UseStopwatchReturn } from "../hooks/useStopwatch.ts";
 import { formatElapsed } from "../utils/format.ts";
+import { stripHtml } from "../utils/html.ts";
 import type { SelectedClaudeSession } from "./ClaudeSessionSelect.tsx";
 import { ClaudeSessionSelect } from "./ClaudeSessionSelect.tsx";
 import { IssuePromptDialog } from "./IssuePromptDialog.tsx";
+import { RichTextInput } from "./RichTextInput.tsx";
 import styles from "./StopwatchView.module.scss";
 
 interface StopwatchViewProps {
@@ -51,14 +53,11 @@ export function StopwatchView(
     <div className={styles.container}>
       <div className={styles.sectionLabel}>Stopwatch</div>
 
-      <input
-        className={styles.titleInput}
-        type="text"
-        placeholder="Describe what you'll be working on…"
+      <RichTextInput
         value={state.title}
-        onChange={(e) => setTitle(e.target.value)}
+        onChange={setTitle}
+        placeholder="Describe what you'll be working on\u2026"
         disabled={isActive}
-        maxLength={500}
       />
 
       <ClaudeSessionSelect
@@ -84,7 +83,13 @@ export function StopwatchView(
 
       <div className={styles.controls}>
         {isIdle && (
-          <button className={styles.startBtn} onClick={handleStart} disabled={state.title.trim() === ""}>Start</button>
+          <button
+            className={styles.startBtn}
+            onClick={handleStart}
+            disabled={stripHtml(state.title).trim() === ""}
+          >
+            Start
+          </button>
         )}
         {isRunning && (
           <>

@@ -2,6 +2,7 @@
 // Timer section: type selector, display, title input, controls
 
 import type { IssueRef, TimerStatus, TimerType } from "../../../shared/types.ts";
+import { stripHtml } from "../utils/html.ts";
 import { IssuePickerDropdown } from "./IssuePickerDropdown.tsx";
 import { SessionTitleInput } from "./SessionTitleInput.tsx";
 import { TimerControls } from "./TimerControls.tsx";
@@ -72,7 +73,7 @@ export function TimerView({
 
       <TimerControls
         status={status}
-        startDisabled={title.trim() === ""}
+        startDisabled={stripHtml(title).trim() === ""}
         onStart={onStart}
         onPause={onPause}
         onResume={onResume}
