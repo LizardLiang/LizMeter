@@ -313,6 +313,8 @@ export function extractFirstUserMessage(filePath: string): string | null {
 
       if (text && text.trim().length > 0) {
         const trimmedText = text.trim();
+        // Skip system-injected messages (plugin caveats, slash commands, command output)
+        if (trimmedText.startsWith("<")) continue;
         if (trimmedText.length <= FIRST_USER_MSG_MAX_CHARS) {
           return trimmedText;
         }
