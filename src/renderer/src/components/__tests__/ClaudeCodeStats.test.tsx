@@ -68,9 +68,9 @@ describe("TC-CC-UI-004: Shows error message when liveStats.error is set", () => 
   });
 });
 
-// TC-CC-UI-005: Shows "Active" status when within idle threshold
+// TC-CC-UI-005: Shows "Active" status when within idle threshold (no activity data)
 describe("TC-CC-UI-005: Shows Active status when within idle threshold", () => {
-  it("shows Active when last activity was recent", () => {
+  it("shows Active when last activity was recent and no sessionActivity", () => {
     const recentTimestamp = new Date(Date.now() - 60_000).toISOString(); // 1 minute ago
     const stats = makeLiveStats({ lastActivityTimestamp: recentTimestamp });
     const { getAllByText } = render(
@@ -214,5 +214,68 @@ describe("TC-CC-UI-010 (v1.2): NewSessionNotification rendering", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Add/i }));
     expect(onAdd).toHaveBeenCalledTimes(1);
+  });
+});
+
+// TC-CC-UI-011: Session activity display
+describe("TC-CC-UI-011: Session activity display", () => {
+  it("shows 'Thinking' when sessionActivity type is thinking", () => {
+    const recentTimestamp = new Date(Date.now() - 10_000).toISOString();
+    const stats = makeLiveStats({
+      lastActivityTimestamp: recentTimestamp,
+      sessionActivity: { type: "thinking" },
+    });
+    render(<ClaudeCodeStats liveStats={stats} isTracking={true} idleThresholdMinutes={5} />);
+    expect(screen.getByText("Thinking")).toBeInTheDocument();
+  });
+
+  it("shows tool names when sessionActivity type is tool_use", () => {
+    const recentTimestamp = new Date(Date.now() - 10_000).toISOString();
+    const stats = makeLiveStats({
+      lastActivityTimestamp: recentTimestamp,
+      sessionActivity: { type: "tool_use", toolNames: ["Read", "Edit"] },
+    });
+    render(<ClaudeCodeStats liveStats={stats} isTracking={true} idleThresholdMinutes={5} />);
+    expect(screen.getByText("Read, Edit")).toBeInTheDocument();
+  });
+
+  it("shows 'Using tools' when tool_use has no tool names", () => {
+    const recentTimestamp = new Date(Date.now() - 10_000).toISOString();
+    const stats = makeLiveStats({
+      lastActivityTimestamp: recentTimestamp,
+      sessionActivity: { type: "tool_use", toolNames: [] },
+    });
+    render(<ClaudeCodeStats liveStats={stats} isTracking={true} idleThresholdMinutes={5} />);
+    expect(screen.getByText("Using tools")).toBeInTheDocument();
+  });
+
+  it("shows 'Idle' when sessionActivity type is idle (within threshold)", () => {
+    const recentTimestamp = new Date(Date.now() - 60_000).toISOString();
+    const stats = makeLiveStats({
+      lastActivityTimestamp: recentTimestamp,
+      sessionActivity: { type: "idle" },
+    });
+    render(<ClaudeCodeStats liveStats={stats} isTracking={true} idleThresholdMinutes={5} />);
+    expect(screen.getByText("Idle")).toBeInTheDocument();
+  });
+
+  it("shows 'Idle for X min' when past idle threshold regardless of sessionActivity", () => {
+    const oldTimestamp = new Date(Date.now() - 10 * 60_000).toISOString();
+    const stats = makeLiveStats({
+      lastActivityTimestamp: oldTimestamp,
+      sessionActivity: { type: "thinking" }, // even if thinking, idle threshold wins
+    });
+    render(<ClaudeCodeStats liveStats={stats} isTracking={true} idleThresholdMinutes={5} />);
+    expect(screen.getByText(/idle for/i)).toBeInTheDocument();
+  });
+
+  it("truncates long tool name lists with +N indicator", () => {
+    const recentTimestamp = new Date(Date.now() - 10_000).toISOString();
+    const stats = makeLiveStats({
+      lastActivityTimestamp: recentTimestamp,
+      sessionActivity: { type: "tool_use", toolNames: ["Read", "Write", "Bash", "Edit"] },
+    });
+    render(<ClaudeCodeStats liveStats={stats} isTracking={true} idleThresholdMinutes={5} />);
+    expect(screen.getByText("Read, Write +2")).toBeInTheDocument();
   });
 });

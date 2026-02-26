@@ -9,6 +9,7 @@ import {
   destroyTracker,
   extractFileEditsFromLine,
   extractFirstUserMessage,
+  extractToolNamesFromLine,
   parseJsonlLine,
   pauseTracking,
   processLines,
@@ -35,6 +36,8 @@ function makeSessionState(overrides: Partial<SessionState> = {}): SessionState {
     bytesRead: 0,
     filePath: "",
     partialLine: "",
+    lastLineType: null,
+    lastToolNames: [],
     ...overrides,
   };
 }
@@ -313,6 +316,51 @@ describe("extractFileEditsFromLine: extracts file paths from Write tool_use", ()
 });
 
 // ============================================================
+// extractToolNamesFromLine
+// ============================================================
+
+describe("extractToolNamesFromLine: extracts tool names from assistant messages", () => {
+  it("returns all tool names from assistant message with tool_use blocks", () => {
+    const line: JsonlLine = {
+      type: "assistant",
+      timestamp: "2026-02-25T10:00:00.000Z",
+      message: {
+        content: [
+          { type: "tool_use", name: "Read", input: { file_path: "a.ts" } },
+          { type: "tool_use", name: "Write", input: { file_path: "b.ts" } },
+          { type: "tool_use", name: "Bash", input: { command: "ls" } },
+        ],
+      },
+    };
+    expect(extractToolNamesFromLine(line)).toEqual(["Read", "Write", "Bash"]);
+  });
+
+  it("returns empty array for user line", () => {
+    const line: JsonlLine = { type: "user", timestamp: "2026-02-25T10:00:00.000Z" };
+    expect(extractToolNamesFromLine(line)).toEqual([]);
+  });
+
+  it("returns empty array for assistant with no tool_use blocks", () => {
+    const line: JsonlLine = {
+      type: "assistant",
+      timestamp: "2026-02-25T10:00:00.000Z",
+      message: {
+        content: [{ type: "text", text: "Hello" }],
+      },
+    };
+    expect(extractToolNamesFromLine(line)).toEqual([]);
+  });
+
+  it("returns empty array when content is not an array", () => {
+    const line: JsonlLine = {
+      type: "assistant",
+      message: { content: "string" as unknown as undefined },
+    };
+    expect(extractToolNamesFromLine(line)).toEqual([]);
+  });
+});
+
+// ============================================================
 // processLines — calls the actual module function
 // ============================================================
 
@@ -483,6 +531,101 @@ describe("processLines: file edit extraction via processLines", () => {
     ];
     processLines(state, lines, 5 * 60 * 1000);
     expect(state.filesEdited.size).toBe(0);
+  });
+});
+
+// ============================================================
+// processLines: activity tracking (lastLineType + lastToolNames)
+// ============================================================
+
+describe("processLines: tracks lastLineType and lastToolNames for activity inference", () => {
+  it("sets lastLineType to 'user' after processing a user line", () => {
+    const state = makeSessionState();
+    const lines: JsonlLine[] = [
+      { type: "user", timestamp: "2026-02-25T10:00:00.000Z" },
+    ];
+    processLines(state, lines, 5 * 60 * 1000);
+    expect(state.lastLineType).toBe("user");
+    expect(state.lastToolNames).toEqual([]);
+  });
+
+  it("sets lastLineType to 'assistant' and captures tool names", () => {
+    const state = makeSessionState();
+    const lines: JsonlLine[] = [
+      {
+        type: "assistant",
+        timestamp: "2026-02-25T10:00:00.000Z",
+        message: {
+          content: [
+            { type: "tool_use", name: "Read", input: { file_path: "a.ts" } },
+            { type: "tool_use", name: "Edit", input: { file_path: "b.ts" } },
+          ],
+        },
+      },
+    ];
+    processLines(state, lines, 5 * 60 * 1000);
+    expect(state.lastLineType).toBe("assistant");
+    expect(state.lastToolNames).toEqual(["Read", "Edit"]);
+  });
+
+  it("clears tool names when a user line follows an assistant line", () => {
+    const state = makeSessionState();
+    const lines: JsonlLine[] = [
+      {
+        type: "assistant",
+        timestamp: "2026-02-25T10:00:00.000Z",
+        message: {
+          content: [
+            { type: "tool_use", name: "Write", input: { file_path: "a.ts" } },
+          ],
+        },
+      },
+      { type: "user", timestamp: "2026-02-25T10:01:00.000Z" },
+    ];
+    processLines(state, lines, 5 * 60 * 1000);
+    expect(state.lastLineType).toBe("user");
+    expect(state.lastToolNames).toEqual([]);
+  });
+
+  it("sets empty tool names for assistant with text-only content", () => {
+    const state = makeSessionState();
+    const lines: JsonlLine[] = [
+      {
+        type: "assistant",
+        timestamp: "2026-02-25T10:00:00.000Z",
+        message: {
+          content: [{ type: "text", text: "Here is my response" }],
+        },
+      },
+    ];
+    processLines(state, lines, 5 * 60 * 1000);
+    expect(state.lastLineType).toBe("assistant");
+    expect(state.lastToolNames).toEqual([]);
+  });
+
+  it("updates lastToolNames with the most recent assistant line's tools", () => {
+    const state = makeSessionState();
+    const lines: JsonlLine[] = [
+      {
+        type: "assistant",
+        timestamp: "2026-02-25T10:00:00.000Z",
+        message: {
+          content: [{ type: "tool_use", name: "Read", input: {} }],
+        },
+      },
+      {
+        type: "assistant",
+        timestamp: "2026-02-25T10:01:00.000Z",
+        message: {
+          content: [
+            { type: "tool_use", name: "Bash", input: { command: "npm test" } },
+            { type: "tool_use", name: "Write", input: { file_path: "c.ts" } },
+          ],
+        },
+      },
+    ];
+    processLines(state, lines, 5 * 60 * 1000);
+    expect(state.lastToolNames).toEqual(["Bash", "Write"]);
   });
 });
 

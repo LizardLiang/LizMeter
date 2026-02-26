@@ -480,17 +480,26 @@ export function TomatoClock() {
             )}
 
             {appMode === "time-tracking" && (
-              <StopwatchView
-                stopwatch={{
-                  ...stopwatch,
-                  start: () => void handleStopwatchStart(stopwatch.start),
-                  pause: () => handleStopwatchPause(stopwatch.pause),
-                  resume: () => handleStopwatchResume(stopwatch.resume),
-                }}
-                promptForIssue={stopwatchSettings.promptForIssue}
-                selectedClaudeSession={linkedStopwatchClaudeSession}
-                onClaudeSessionSelect={setLinkedStopwatchClaudeSession}
-              />
+              <>
+                <StopwatchView
+                  stopwatch={{
+                    ...stopwatch,
+                    start: () => void handleStopwatchStart(stopwatch.start),
+                    pause: () => handleStopwatchPause(stopwatch.pause),
+                    resume: () => handleStopwatchResume(stopwatch.resume),
+                  }}
+                  promptForIssue={stopwatchSettings.promptForIssue}
+                  selectedClaudeSession={linkedStopwatchClaudeSession}
+                  onClaudeSessionSelect={setLinkedStopwatchClaudeSession}
+                />
+                {isStopwatchActive && claudeTracker.isTracking && (
+                  <ClaudeCodeStats
+                    liveStats={claudeTracker.liveStats}
+                    isTracking={true}
+                    idleThresholdMinutes={claudeIdleThresholdMinutes}
+                  />
+                )}
+              </>
             )}
           </div>
         )}

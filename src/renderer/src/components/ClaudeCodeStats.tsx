@@ -2,7 +2,7 @@
 // Compact live Claude Code stats widget shown in timer view during active tracking
 
 import { useEffect, useRef, useState } from "react";
-import type { ClaudeCodeLiveStats, ClaudeCodeSessionPreview } from "../../../shared/types.ts";
+import type { ClaudeCodeLiveStats, ClaudeCodeSessionPreview, ClaudeSessionActivity } from "../../../shared/types.ts";
 import { NewSessionNotification } from "./NewSessionNotification.tsx";
 
 interface ClaudeCodeStatsProps {
@@ -22,6 +22,37 @@ function formatIdleDuration(ms: number): string {
   if (minutes < 1) return "less than 1 min";
   if (minutes === 1) return "1 min";
   return `${minutes} min`;
+}
+
+function formatActivityDisplay(
+  activity: ClaudeSessionActivity | undefined,
+  isCurrentlyIdle: boolean,
+  idleDurationMs: number | null,
+): { label: string; color: string; } {
+  // If idle for longer than threshold, always show idle duration
+  if (isCurrentlyIdle && idleDurationMs !== null) {
+    return { label: `Idle for ${formatIdleDuration(idleDurationMs)}`, color: "#e0af68" };
+  }
+
+  if (!activity) {
+    return { label: "Active", color: "#9ece6a" };
+  }
+
+  switch (activity.type) {
+    case "thinking":
+      return { label: "Thinking", color: "#7aa2f7" };
+    case "tool_use": {
+      const tools = activity.toolNames ?? [];
+      if (tools.length === 0) return { label: "Using tools", color: "#bb9af7" };
+      // Show up to 2 tool names
+      const display = tools.length <= 2 ? tools.join(", ") : `${tools[0]}, ${tools[1]} +${tools.length - 2}`;
+      return { label: display, color: "#bb9af7" };
+    }
+    case "idle":
+      return { label: "Idle", color: "#e0af68" };
+    default:
+      return { label: "Active", color: "#9ece6a" };
+  }
 }
 
 export function ClaudeCodeStats({
@@ -127,8 +158,10 @@ export function ClaudeCodeStats({
 
   const idleThresholdMs = idleThresholdMinutes * 60_000;
   const isCurrentlyIdle = idleDurationMs !== null && idleDurationMs > idleThresholdMs;
+
+  const activityDisplay = formatActivityDisplay(liveStats?.sessionActivity, isCurrentlyIdle, idleDurationMs);
   const statusStyle: React.CSSProperties = {
-    color: isCurrentlyIdle ? "#e0af68" : "#9ece6a",
+    color: activityDisplay.color,
     fontWeight: 600,
     fontSize: 12,
   };
@@ -148,9 +181,7 @@ export function ClaudeCodeStats({
         <span>Claude Code</span>
         {liveStats && (
           <span style={statusStyle}>
-            {isCurrentlyIdle && idleDurationMs !== null
-              ? `Idle for ${formatIdleDuration(idleDurationMs)}`
-              : "Active"}
+            {activityDisplay.label}
           </span>
         )}
         <div style={headerRightStyle}>

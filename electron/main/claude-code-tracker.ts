@@ -8,6 +8,7 @@ import type {
   ClaudeCodeLiveStats,
   ClaudeCodeProject,
   ClaudeCodeSessionData,
+  ClaudeSessionActivity,
   ClaudeCodeSessionPreview,
 } from "../../src/shared/types.ts";
 import type { WebContents } from "electron";
@@ -25,6 +26,9 @@ export interface SessionState {
   bytesRead: number;
   filePath: string;
   partialLine: string;
+  // Activity tracking: inferred from last JSONL line
+  lastLineType: string | null; // "user", "assistant", etc.
+  lastToolNames: string[]; // tool names from last assistant message with tool_use blocks
 }
 
 // --- Module-level singleton state ---
@@ -336,6 +340,28 @@ export function extractFirstUserMessage(filePath: string): string | null {
 
 // --- Session State Processing ---
 
+/**
+ * Extract all tool names from an assistant message's content blocks.
+ */
+export function extractToolNamesFromLine(line: JsonlLine): string[] {
+  if (line.type !== "assistant") return [];
+  const content = line.message?.content;
+  if (!Array.isArray(content)) return [];
+
+  const names: string[] = [];
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === "object" &&
+      (block as ToolUseBlock).type === "tool_use" &&
+      typeof (block as ToolUseBlock).name === "string"
+    ) {
+      names.push((block as ToolUseBlock).name);
+    }
+  }
+  return names;
+}
+
 export function processLines(state: SessionState, lines: JsonlLine[], idleThresholdMs2: number): void {
   for (const line of lines) {
     if (!line.timestamp) continue;
@@ -359,6 +385,15 @@ export function processLines(state: SessionState, lines: JsonlLine[], idleThresh
     }
     state.lastMessageTimestamp = line.timestamp;
 
+    // Track last line type and tool names for activity inference
+    state.lastLineType = line.type;
+    if (line.type === "assistant") {
+      const toolNames = extractToolNamesFromLine(line);
+      state.lastToolNames = toolNames;
+    } else if (line.type === "user") {
+      state.lastToolNames = [];
+    }
+
     // Extract file edits from Write/Edit tool_use blocks
     const edited = extractFileEditsFromLine(line);
     for (const fp of edited) {
@@ -368,6 +403,43 @@ export function processLines(state: SessionState, lines: JsonlLine[], idleThresh
 }
 
 // --- Aggregation ---
+
+/**
+ * Derive session activity from the most recently active tracked session.
+ * Uses the last JSONL line type to infer what Claude is doing.
+ */
+function deriveSessionActivity(states: SessionState[]): ClaudeSessionActivity | undefined {
+  if (states.length === 0) return undefined;
+
+  // Find the session with the most recent activity
+  let mostRecent: SessionState | null = null;
+  for (const s of states) {
+    if (!s.lastActivityAt) continue;
+    if (!mostRecent || s.lastActivityAt > mostRecent.lastActivityAt!) {
+      mostRecent = s;
+    }
+  }
+
+  if (!mostRecent || !mostRecent.lastLineType) return undefined;
+
+  // Infer activity from last line type:
+  // - "user" line → Claude received input, is thinking/reasoning
+  // - "assistant" with tool_use → Claude just used tools
+  // - "assistant" without tool_use → Claude finished responding, idle
+  if (mostRecent.lastLineType === "user") {
+    return { type: "thinking" };
+  }
+
+  if (mostRecent.lastLineType === "assistant") {
+    if (mostRecent.lastToolNames.length > 0) {
+      return { type: "tool_use", toolNames: mostRecent.lastToolNames };
+    }
+    return { type: "idle" };
+  }
+
+  // Other line types (file-history-snapshot, system, etc.) — don't change activity
+  return undefined;
+}
 
 function aggregateStats(): ClaudeCodeLiveStats {
   const states = Array.from(sessionState.values());
@@ -400,6 +472,7 @@ function aggregateStats(): ClaudeCodeLiveStats {
     filesEditedList: Array.from(allFiles),
     lastActivityTimestamp,
     idleSessions,
+    sessionActivity: deriveSessionActivity(states),
   };
 }
 
@@ -737,6 +810,8 @@ export function trackSelectedSessions(
       bytesRead: fileSize, // start at current end (only track new activity)
       filePath: preview.filePath,
       partialLine: "",
+      lastLineType: null,
+      lastToolNames: [],
     };
 
     sessionState.set(uuid, state);
