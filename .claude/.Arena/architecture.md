@@ -1,4 +1,22 @@
+---
+created: 2026-02-26T03:44:47Z
+updated: 2026-02-26T03:44:47Z
+author: metis
+git_hash: 1f6ae2e1eb51e2ec75295ceb47c6782ecd4e9a28
+analysis_scope: full
+confidence: high
+stale_after: 2026-03-28T03:44:47Z
+verification_status: unverified
+---
+
 # Architecture
+
+**Confidence**: High
+**Last Verified**: 2026-02-26
+**Source**: Full examination of electron/main/, src/renderer/src/, src/shared/types.ts
+**Coverage**: 90% of codebase examined
+
+**NOTE**: This file was previously stale. Major features have been added: Stopwatch mode, tags, issue tracker integrations (GitHub/Linear/Jira), Claude Code tracker, Tiptap rich text editor, SCSS Modules styling, paginated history with worklog export. The IPC channel list and component tree below reflect the CURRENT state.
 
 ## Process Model
 
@@ -61,170 +79,201 @@ Values are stored as strings, parsed as integers on read. Defaults: 1500 / 300 /
 
 ---
 
-## IPC Channel Contracts
+## Complete IPC Channel Contracts (Current)
 
-All IPC uses Electron's invoke/handle pattern (request-response, async from renderer side, synchronous on main side).
+All IPC uses Electron's invoke/handle pattern. Registered in `electron/main/ipc-handlers.ts`, typed in `src/shared/types.ts`, exposed in `electron/preload/index.ts`.
 
 ### Session Channels
 
-| Channel | Direction | Input Type | Return Type | Handler |
-|---------|-----------|-----------|-------------|---------|
-| `session:save` | renderer -> main | `SaveSessionInput` | `Session` | `saveSession()` |
-| `session:list` | renderer -> main | `ListSessionsInput` | `ListSessionsResult` | `listSessions()` |
-| `session:delete` | renderer -> main | `string` (id) | `void` | `deleteSession()` |
+| Channel | Input | Return |
+|---------|-------|--------|
+| `session:save` | `SaveSessionInput` | `Session` |
+| `session:save-with-tracking` | `SaveSessionWithTrackingInput` | `Session` |
+| `session:list` | `ListSessionsInput` | `ListSessionsResult` |
+| `session:delete` | `string` (id) | `void` |
 
 ### Settings Channels
 
-| Channel | Direction | Input Type | Return Type | Handler |
-|---------|-----------|-----------|-------------|---------|
-| `settings:get` | renderer -> main | (none) | `TimerSettings` | `getSettings()` |
-| `settings:save` | renderer -> main | `TimerSettings` | `void` | `saveSettings()` |
+| Channel | Input | Return |
+|---------|-------|--------|
+| `settings:get` | none | `TimerSettings` |
+| `settings:save` | `TimerSettings` | `void` |
+| `settings:get-value` | `string` (key) | `string \| null` |
+| `settings:set-value` | `string` key, `string \| null` value | `void` |
 
-### Window Channels (fire-and-forget via `ipcRenderer.send`)
+### Tag Channels
 
-| Channel | Purpose |
-|---------|---------|
-| `window:minimize` | Minimize the window |
-| `window:maximize` | Toggle maximize/unmaximize |
-| `window:close` | Close the window |
+| Channel | Input | Return |
+|---------|-------|--------|
+| `tag:create` | `CreateTagInput` | `Tag` |
+| `tag:list` | none | `Tag[]` |
+| `tag:update` | `UpdateTagInput` | `Tag` |
+| `tag:delete` | `number` (id) | `void` |
+| `tag:assign` | `AssignTagInput` | `void` |
+| `tag:unassign` | `AssignTagInput` | `void` |
+| `tag:list-for-session` | `string` (sessionId) | `Tag[]` |
 
-### Full Type Definitions (from `src/shared/types.ts`)
+### Issue Tracker Channels (GitHub)
 
-```typescript
-type TimerType = "work" | "short_break" | "long_break";
-type TimerStatus = "idle" | "running" | "paused" | "completed";
+| Channel | Input | Return |
+|---------|-------|--------|
+| `issues:list` | `IssuesListInput` | `IssuesListResult` |
+| `issues:provider-status` | none | `IssueProviderStatus` |
+| `issues:set-token` | `IssuesSetTokenInput` | `void` |
+| `issues:delete-token` | none | `void` |
+| `issues:test-token` | none | `{ username: string }` |
+| `issues:fetch-comments` | `{ repo, issueNumber }` | `IssueComment[]` |
 
-interface Session {
-  id: string;              // UUID v4
-  title: string;
-  timerType: TimerType;
-  plannedDurationSeconds: number;
-  actualDurationSeconds: number;
-  completedAt: string;     // ISO 8601
-}
+### Linear Channels
 
-interface SaveSessionInput {
-  title: string;
-  timerType: TimerType;
-  plannedDurationSeconds: number;
-  actualDurationSeconds: number;
-}
+| Channel | Input | Return |
+|---------|-------|--------|
+| `linear:set-token` | `{ token }` | `void` |
+| `linear:delete-token` | none | `void` |
+| `linear:test-connection` | none | `{ displayName }` |
+| `linear:list-teams` | none | `LinearTeam[]` |
+| `linear:set-team` | `{ teamId, teamName }` | `void` |
+| `linear:get-team` | none | `{ teamId, teamName } \| null` |
+| `linear:fetch-issues` | `{ forceRefresh? }` | `LinearIssue[]` |
+| `linear:fetch-comments` | `{ issueId }` | `IssueComment[]` |
+| `linear:provider-status` | none | `LinearProviderStatus` |
 
-interface ListSessionsInput {
-  limit?: number;   // default 50
-  offset?: number;  // default 0
-}
+### Jira Channels
 
-interface ListSessionsResult {
-  sessions: Session[];
-  total: number;
-}
+| Channel | Input | Return |
+|---------|-------|--------|
+| `jira:set-token` | `{ token }` | `void` |
+| `jira:delete-token` | none | `void` |
+| `jira:test-connection` | none | `{ displayName }` |
+| `jira:fetch-issues` | `{ forceRefresh? }` | `JiraIssue[]` |
+| `jira:provider-status` | none | `JiraProviderStatus` |
+| `jira:fetch-comments` | `{ issueKey }` | `IssueComment[]` |
+| `jira:set-auth-type` | `{ authType }` | `void` |
+| `jira:set-domain` | `{ domain }` | `void` |
+| `jira:set-email` | `{ email }` | `void` |
+| `jira:set-project-key` | `{ projectKey }` | `void` |
+| `jira:set-jql-filter` | `{ jql }` | `void` |
 
-interface TimerSettings {
-  workDuration: number;       // seconds
-  shortBreakDuration: number; // seconds
-  longBreakDuration: number;  // seconds
-}
+### Worklog Channels
 
-interface ElectronAPI {
-  platform: string;
-  session: {
-    save: (input: SaveSessionInput) => Promise<Session>;
-    list: (input: ListSessionsInput) => Promise<ListSessionsResult>;
-    delete: (id: string) => Promise<void>;
-  };
-  settings: {
-    get: () => Promise<TimerSettings>;
-    save: (settings: TimerSettings) => Promise<void>;
-  };
-  window: {
-    minimize: () => void;
-    maximize: () => void;
-    close: () => void;
-  };
-}
+| Channel | Input | Return |
+|---------|-------|--------|
+| `worklog:log` | `WorklogLogInput` | `WorklogLogResult` |
+| `worklog:mark-logged` | `{ sessionIds, worklogId }` | `void` |
+
+### Claude Code Tracker Channels
+
+| Channel | Input | Return |
+|---------|-------|--------|
+| `claude-tracker:scan` | `{ projectDirName }` | `{ success, sessions: ClaudeCodeSessionPreview[] }` |
+| `claude-tracker:track-selected` | `{ sessionUuids }` | `{ tracked: number }` |
+| `claude-tracker:stop` | none | `{ sessions: ClaudeCodeSessionData[] }` |
+| `claude-tracker:pause` | none | `void` |
+| `claude-tracker:resume` | none | `void` |
+| `claude-tracker:get-projects` | none | `{ projects: ClaudeCodeProject[] }` |
+| `claude-tracker:scan-all` | none | `{ sessions: ClaudeCodeSessionPreviewWithProject[] }` |
+| `claude-tracker:get-for-session` | `{ sessionId }` | `{ sessions: ClaudeCodeSessionSummary[] } \| null` |
+
+Claude tracker also uses `ipcMain.emit` for push events:
+- `claude-tracker:update` -> `ClaudeCodeLiveStats`
+- `claude-tracker:new-session` -> `{ session: ClaudeCodeSessionPreview }`
+
+### Window / Shell Channels
+
+| Channel | Input | Return |
+|---------|-------|--------|
+| `window:minimize` | none | void (send) |
+| `window:maximize` | none | void (send) |
+| `window:close` | none | void (send) |
+| `shell:open-external` | `string` (url) | `void` |
+
+---
+
+## React Component Tree (Current)
+
+```
+TomatoClock (root orchestrator - all hooks, all page routing)
+  NavSidebar (7 nav buttons: timer/history/issues/claude/stats/tags/settings)
+  [activePage === "timer"]
+    ModeToggle (pomodoro / time-tracking)
+    [pomodoro mode]
+      TimerView
+        TimerTypeSelector (work/short_break/long_break)
+        TimerDisplay (MM:SS countdown, editable when idle)
+        SessionTitleInput (RichTextInput wrapper, required)
+        IssuePickerDropdown (optional issue link - GitHub/Linear/Jira)
+        TimerControls (Start/Pause/Resume/Reset/Dismiss)
+      [timer running/paused]
+        SessionPicker (Claude Code session selection)
+        ClaudeCodeStats (live file edit stats)
+        TagPicker (assign tags to pending session)
+    [time-tracking mode]
+      StopwatchView
+        RichTextInput (session title/description - required)
+        ClaudeSessionSelect (link to Claude Code session)
+        elapsed display
+        IssuePromptDialog (on start if promptForIssue=true)
+        controls (Start/Pause/Resume/Stop)
+  [activePage === "history"]
+    HistoryPage
+      tag filter bar
+      DateSubGroupHeader[]
+      IssueGroupHeader[]
+      SessionHistoryItem[] (with IssueBadge, TagBadge[], delete, worklog)
+      WorklogConfirmDialog
+  [activePage === "issues"]
+    IssuesPage
+      ProviderTabs (GitHub/Linear/Jira)
+  [activePage === "claude"]
+    ClaudePage
+  [activePage === "stats"]
+    StatsPage
+  [activePage === "tags"]
+    TagsPage -> TagManager -> TagBadge[], TagColorPicker
+  [activePage === "settings"]
+    SettingsPage
 ```
 
 ---
 
-## Preload Bridge (`electron/preload/index.ts`)
+## State Management (Hooks - Current)
 
-Exposes `window.electronAPI` via `contextBridge.exposeInMainWorld`. Each method maps 1:1 to an IPC channel:
+All hooks composed in `TomatoClock.tsx`. No external state library.
 
-- Session methods use `ipcRenderer.invoke` (async request-response)
-- Window methods use `ipcRenderer.send` (fire-and-forget)
-
-The renderer accesses the API via `window.electronAPI`. TypeScript typing is provided by `src/renderer/src/electron-api.d.ts` which augments the global `Window` interface.
-
----
-
-## React Component Tree
-
-```
-App
- └── TomatoClock              (root container, composes hooks)
-      ├── TimerView            (timer panel with accent border)
-      │    ├── TimerTypeSelector  (Work / Short Break / Long Break buttons)
-      │    ├── TimerDisplay       (MM:SS countdown, editable when idle)
-      │    ├── SessionTitleInput  (text input for session title)
-      │    └── TimerControls      (Start/Pause/Resume/Reset/Dismiss buttons)
-      └── SessionHistory        (history section)
-           └── SessionHistoryItem[]  (individual session rows)
-```
+| Hook | Purpose |
+|------|---------|
+| `useTimer` | Pomodoro FSM (idle/running/paused/completed), 250ms wall-clock tick, auto-save |
+| `useStopwatch` | Stopwatch FSM (idle/running/paused), elapsed counting, stop-and-save |
+| `useSettings` | Load/save `TimerSettings` + `StopwatchSettings` via IPC |
+| `useSessionHistory` | Paginated sessions, tag filter, delete, load-more, worklog |
+| `useTagManager` | Tag CRUD (create/update/delete/assign/unassign) |
+| `useClaudeTracker` | Claude Code session scanning/tracking/stats lifecycle |
 
 ---
 
-## State Management (Hooks)
+## Database Schema (Current)
 
-No external state library. Three custom hooks composed in `TomatoClock.tsx`:
+Tables in `electron/main/database.ts` (created via `CREATE TABLE IF NOT EXISTS`):
 
-### `useTimer(settings: TimerSettings)` -> `UseTimerReturn`
+- `sessions` - id (UUID), title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url, issue_provider, issue_id, worklog_status, worklog_id
+- `settings` - key, value (generic KV store for timer durations and any string setting)
+- `tags` - id (AUTOINCREMENT), name (UNIQUE NOCASE), color, created_at
+- `session_tags` - session_id FK, tag_id FK (many-to-many join table)
+- `claude_code_sessions` - tracks Claude Code AI session data linked to timer sessions
 
-- Implements a finite state machine via `useReducer`:
-  - States: `idle` -> `running` -> `paused` -> `completed`
-  - Actions: `START`, `PAUSE`, `RESUME`, `RESET`, `TICK`, `COMPLETE`, `SET_TIMER_TYPE`, `SET_TITLE`, `SET_REMAINING`, `UPDATE_SETTINGS`, `CLEAR_COMPLETION`
-- Wall-clock tick: 250ms interval using `Date.now()` endpoint math to avoid drift
-- Auto-saves session to SQLite via IPC when status transitions to `completed`
-- Exposes: `state`, `start`, `pause`, `resume`, `reset`, `setTimerType`, `setTitle`, `setRemaining`, `dismissCompletion`, `saveError`
-
-### `useSettings()` -> `UseSettingsReturn`
-
-- Loads timer settings from SQLite on mount via `window.electronAPI.settings.get()`
-- Falls back to hardcoded defaults on failure
-- `saveSettings()` persists via IPC and updates local state
-- Exposes: `settings` (nullable until loaded), `isLoading`, `saveSettings`
-
-### `useSessionHistory()` -> `UseSessionHistoryReturn`
-
-- Fetches paginated session list via `window.electronAPI.session.list()`
-- Refresh via token counter pattern (`refreshToken` state triggers re-fetch)
-- `deleteSession()` calls IPC then triggers refresh
-- `loadMore()` increments offset and appends results
-- Exposes: `sessions`, `total`, `isLoading`, `error`, `refresh`, `deleteSession`, `loadMore`
+Validation: `MIN_DURATION=60`, `MAX_DURATION=7200`, `MAX_TITLE_LENGTH=5000` (updated from 500)
 
 ---
 
 ## App Startup Sequence
 
-1. `app.whenReady()` fires
-2. `initDatabase()` creates/opens SQLite database
-3. `registerIpcHandlers()` registers all `ipcMain.handle` listeners
-4. `createWindow()` creates a frameless `BrowserWindow` with preload script
-5. Window loads Vite dev server URL (dev) or `dist/index.html` (prod)
-6. `index.html` renders the custom title bar and mounts React at `#root`
-7. `main.tsx` creates root and renders `<App />` inside `<StrictMode>`
-8. `TomatoClock` mounts, `useSettings` loads settings, `useSessionHistory` fetches initial sessions
+1. `app.whenReady()` fires in `electron/main/index.ts`
+2. `initDatabase()` creates/opens `~/.local/share/lizmeter/lizmeter.db` (or platform equivalent)
+3. `registerIpcHandlers()` registers all `ipcMain.handle` channels
+4. `createWindow()` creates a BrowserWindow with preload script
+5. Window loads Vite dev server (dev) or `dist/index.html` (prod)
+6. React mounts `TomatoClock` which loads settings and sessions
 
----
+## Update History
 
-## Adding New Features: The IPC Pattern
-
-To add a new feature that touches the database (e.g., session tagging):
-
-1. **Types** (`src/shared/types.ts`): Define input/output interfaces and extend `ElectronAPI`
-2. **Database** (`electron/main/database.ts`): Add tables in `initDatabase()`, add query/mutation functions
-3. **IPC Handlers** (`electron/main/ipc-handlers.ts`): Register new `ipcMain.handle` channels
-4. **Preload** (`electron/preload/index.ts`): Expose new methods via `contextBridge`
-5. **Renderer hook** (`src/renderer/src/hooks/`): Create a custom hook that calls `window.electronAPI`
-6. **Components** (`src/renderer/src/components/`): Build UI components, compose with hook in parent
-7. **Tests**: Database tests in `electron/main/__tests__/`, component tests in `src/renderer/src/components/__tests__/`, hook tests in `src/renderer/src/hooks/__tests__/`
+- **2026-02-26 03:44** (Metis): Major rewrite - added frontmatter, complete current IPC channel table (all 40+ channels), updated component tree with all new components, updated hooks table, updated DB schema. Previous version was from initial project creation and was significantly outdated.

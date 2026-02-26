@@ -1,4 +1,22 @@
-# Conventions
+---
+created: 2026-02-26T03:44:47Z
+updated: 2026-02-26T03:44:47Z
+author: metis
+git_hash: 1f6ae2e1eb51e2ec75295ceb47c6782ecd4e9a28
+analysis_scope: full
+confidence: high
+stale_after: 2026-03-28T03:44:47Z
+verification_status: unverified
+---
+
+# Coding Conventions
+
+**Confidence**: High
+**Last Verified**: 2026-02-26
+**Source**: CLAUDE.md, dprint.json, vitest.config.ts, source code inspection
+**Coverage**: 80% of codebase examined
+
+**IMPORTANT CORRECTION**: The previous version stated "ALL styling is done via inline React.CSSProperties". This is WRONG for the current codebase. The project has migrated to **SCSS Modules** (`.module.scss` files per component). Every component now has a corresponding `.module.scss` file and uses `className={styles.foo}`.
 
 ## Code Style & Formatting
 
@@ -80,33 +98,23 @@ export function MyComponent({ value, onChange }: MyComponentProps) {
 }
 ```
 
-### Styling -- Inline CSSProperties
+### Styling -- SCSS Modules (CURRENT)
 
-ALL styling is done via inline `React.CSSProperties` objects. No CSS files, no CSS modules, no styled-components, no Tailwind.
-
-Pattern: define style objects as `const` variables above the JSX return:
+All styling uses **SCSS Modules** (`.module.scss` file per component). Components import the module and use `className={styles.foo}`.
 
 ```typescript
+import styles from "./MyComponent.module.scss";
+
 export function MyComponent() {
-  const containerStyle: React.CSSProperties = {
-    padding: "16px",
-    backgroundColor: "#1f2335",
-    borderRadius: "8px",
-    border: "1px solid #292e42",
-  };
-
-  const textStyle: React.CSSProperties = {
-    color: "#c0caf5",
-    fontSize: "0.875rem",
-  };
-
   return (
-    <div style={containerStyle}>
-      <span style={textStyle}>Hello</span>
+    <div className={styles.container}>
+      <span className={styles.text}>Hello</span>
     </div>
   );
 }
 ```
+
+Each component has a paired `.module.scss` file (e.g., `TimerView.tsx` + `TimerView.module.scss`). The Tokyo Night color variables are available via CSS custom properties defined in `index.html` (e.g., `var(--tn-bg)`, `var(--tn-blue)`).
 
 ### State Management
 - `useState` for simple local state
@@ -224,8 +232,29 @@ bun run dev              # Dev server + Electron
 bun run build            # Production build
 bun run test             # Vitest single run
 bun run test:watch       # Vitest watch
+bun run test:e2e         # Playwright E2E (requires bun run build first)
 bun run lint             # ESLint
 bun run fmt              # dprint format
 bun run fmt:check        # dprint check
 bun run rebuild          # Recompile better-sqlite3 for Electron ABI
 ```
+
+## Session Title Input Conventions
+
+- **Pomodoro mode**: Uses `SessionTitleInput` (plain text input) - stores as plain string
+- **Stopwatch mode**: Uses `RichTextInput` (Tiptap rich text editor) - stores HTML
+- `stripHtml()` utility in `src/renderer/src/utils/html.ts` extracts plain text from Tiptap HTML
+- Start button is disabled when `stripHtml(title).trim() === ""` (both modes require non-empty title)
+
+## E2E Testing Conventions (NEW)
+
+- Framework: Playwright with `electron-playwright-helpers`
+- Tests live in `e2e/` at project root
+- Must `bun run build` before running `bun run test:e2e`
+- Launch Electron app via `electron.launch({ args: ["dist-electron/main/index.js"] })`
+- Use `app.firstWindow()` to get the renderer window
+- Config: `playwright.config.ts` (testDir: `./e2e`, timeout: 30s, retries: 0)
+
+## Update History
+
+- **2026-02-26 03:44** (Metis): Added frontmatter, corrected styling section (SCSS Modules not inline styles), added SessionTitleInput conventions, added E2E testing conventions, added test:e2e to package manager scripts.

@@ -1,4 +1,20 @@
+---
+created: 2026-02-26T03:44:47Z
+updated: 2026-02-26T03:44:47Z
+author: metis
+git_hash: 1f6ae2e1eb51e2ec75295ceb47c6782ecd4e9a28
+analysis_scope: full
+confidence: high
+stale_after: 2026-03-28T03:44:47Z
+verification_status: unverified
+---
+
 # Tech Stack
+
+**Confidence**: High
+**Last Verified**: 2026-02-26
+**Source**: package.json fully examined, all sections verified
+**Coverage**: 100% of dependency manifests examined
 
 ## Runtime & Framework
 
@@ -90,3 +106,43 @@
 ```
 
 Note: `electron/` files are NOT covered by dprint currently.
+
+## Rich Text Editor (Added Since Last Audit)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| @tiptap/react | ^3.20.0 | Rich text editor used for session title (RichTextInput.tsx) |
+| @tiptap/starter-kit | ^3.20.0 | Core Tiptap extensions bundle |
+| @tiptap/extension-placeholder | ^3.20.0 | Placeholder text in editor |
+| @tiptap/pm | ^3.20.0 | ProseMirror peer dependency |
+
+## Issue Tracker Integrations (Production Dependencies)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| @octokit/rest | ^20 | GitHub REST API client |
+
+Note: Linear and Jira use native `fetch` with no SDK.
+
+## Styling (Current - Updated)
+
+- **SCSS Modules** (`.module.scss` files, one per component) - NOT inline styles
+- Compiled by `sass ^1.97.3` via Vite
+- Tokyo Night dark theme via CSS custom properties in `index.html`
+- No CSS-in-JS libraries
+
+## E2E Testing Stack
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| @playwright/test | ^1.58.2 | E2E test framework and runner |
+| playwright | ^1.58.2 | Browser/Electron automation engine |
+| electron-playwright-helpers | ^2.1.0 | Helpers for launching Electron via Playwright |
+
+Script: `bun run test:e2e` -> `playwright test`
+Config: `playwright.config.ts` (testDir: `./e2e`)
+Prerequisite: `bun run build` required before E2E
+
+## Update History
+
+- **2026-02-26 03:44** (Metis): Added frontmatter, documented Tiptap, SCSS modules, issue tracker SDKs, E2E stack details. Corrected styling section (SCSS not inline styles).
