@@ -124,18 +124,25 @@ export interface UseStopwatchReturn {
   saveError: string | null;
 }
 
+export type StopwatchSaveFn = (
+  input: Parameters<typeof window.electronAPI.session.save>[0],
+) => Promise<Session>;
+
 export function useStopwatch(
   settings: StopwatchSettings,
   onSaved?: (session: Session) => void,
+  customSave?: StopwatchSaveFn,
 ): UseStopwatchReturn {
   const [state, dispatch] = useReducer(stopwatchReducer, undefined, getInitialState);
   const [saveError, setSaveError] = useState<string | null>(null);
   const onSavedRef = useRef(onSaved);
+  const customSaveRef = useRef(customSave);
   const savingRef = useRef(false);
   const lastSaveElapsedRef = useRef<number | null>(null);
 
   useLayoutEffect(() => {
     onSavedRef.current = onSaved;
+    customSaveRef.current = customSave;
   });
 
   // Wall-clock tick-up effect
@@ -198,14 +205,17 @@ export function useStopwatch(
         }
       : {};
 
-    window.electronAPI.session
-      .save({
-        title: state.title,
-        timerType: "stopwatch",
-        plannedDurationSeconds: 0,
-        actualDurationSeconds: elapsed,
-        ...issueFields,
-      })
+    const saveInput = {
+      title: state.title,
+      timerType: "stopwatch" as const,
+      plannedDurationSeconds: 0,
+      actualDurationSeconds: elapsed,
+      ...issueFields,
+    };
+
+    const saveFn = customSaveRef.current ?? window.electronAPI.session.save;
+
+    saveFn(saveInput)
       .then((session) => {
         setSaveError(null);
         onSavedRef.current?.(session);

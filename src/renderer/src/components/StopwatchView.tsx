@@ -13,12 +13,15 @@ import styles from "./StopwatchView.module.scss";
 interface StopwatchViewProps {
   stopwatch: UseStopwatchReturn;
   promptForIssue: boolean;
+  selectedClaudeSession: SelectedClaudeSession | null;
+  onClaudeSessionSelect: (session: SelectedClaudeSession | null) => void;
 }
 
-export function StopwatchView({ stopwatch, promptForIssue }: StopwatchViewProps) {
+export function StopwatchView(
+  { stopwatch, promptForIssue, selectedClaudeSession, onClaudeSessionSelect }: StopwatchViewProps,
+) {
   const { state, start, pause, resume, stop, setTitle, setLinkedIssue, saveError } = stopwatch;
   const [showIssuePrompt, setShowIssuePrompt] = useState(false);
-  const [linkedClaudeSession, setLinkedClaudeSession] = useState<SelectedClaudeSession | null>(null);
 
   const handleStart = useCallback(() => {
     if (promptForIssue) {
@@ -59,8 +62,8 @@ export function StopwatchView({ stopwatch, promptForIssue }: StopwatchViewProps)
       />
 
       <ClaudeSessionSelect
-        selected={linkedClaudeSession}
-        onSelect={setLinkedClaudeSession}
+        selected={selectedClaudeSession}
+        onSelect={onClaudeSessionSelect}
         disabled={isActive}
       />
 

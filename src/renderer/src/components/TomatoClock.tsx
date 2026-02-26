@@ -18,6 +18,7 @@ import { useTagManager } from "../hooks/useTagManager.ts";
 import { useTimer } from "../hooks/useTimer.ts";
 import { ClaudeCodeStats } from "./ClaudeCodeStats.tsx";
 import { ClaudePage } from "./ClaudePage.tsx";
+import type { SelectedClaudeSession } from "./ClaudeSessionSelect.tsx";
 import { HistoryPage } from "./HistoryPage.tsx";
 import { IssuesPage } from "./IssuesPage.tsx";
 import { ModeToggle } from "./ModeToggle.tsx";
@@ -78,6 +79,13 @@ export function TomatoClock() {
   const [appMode, setAppMode] = useState<AppMode>("pomodoro");
   const [stopwatchSettings, setStopwatchSettings] = useState<StopwatchSettings>(DEFAULT_STOPWATCH_SETTINGS);
 
+  // Stopwatch Claude session linkage (lifted from StopwatchView)
+  const [linkedStopwatchClaudeSession, setLinkedStopwatchClaudeSession] = useState<SelectedClaudeSession | null>(null);
+  const linkedStopwatchClaudeSessionRef = useRef<SelectedClaudeSession | null>(null);
+  useEffect(() => {
+    linkedStopwatchClaudeSessionRef.current = linkedStopwatchClaudeSession;
+  }, [linkedStopwatchClaudeSession]);
+
   // Load persisted Claude Code settings from the generic KV store on mount
   useEffect(() => {
     const loadClaudeSettings = async () => {
@@ -127,6 +135,9 @@ export function TomatoClock() {
   // Ref to capture pending CC sessions at completion time
   const pendingCcSessionsRef = useRef<ClaudeCodeSessionData[] | null>(null);
 
+  // Ref to track whether stopwatch has an active Claude tracking session
+  const stopwatchIsTrackingRef = useRef(false);
+
   const handleSessionSaved = useCallback(
     (session: Session) => {
       const assigns = pendingTagIds.map((tagId) => window.electronAPI.tag.assign({ sessionId: session.id, tagId }));
@@ -147,19 +158,44 @@ export function TomatoClock() {
     [pendingTagIds, refresh],
   );
 
-  const handleStopwatchSaved = useCallback(
-    (session: Session) => {
-      refresh();
-      void session;
-    },
-    [refresh],
-  );
-
-  // Ref to claudeTracker to avoid stale closure in customSaveSession
+  // Ref to claudeTracker to avoid stale closure in customSaveSession and stopwatch handlers
   const claudeTrackerRef = useRef(claudeTracker);
   useEffect(() => {
     claudeTrackerRef.current = claudeTracker;
   }, [claudeTracker]);
+
+  const handleStopwatchSaved = useCallback(
+    (session: Session) => {
+      void session;
+      setLinkedStopwatchClaudeSession(null);
+      stopwatchIsTrackingRef.current = false;
+      refresh();
+    },
+    [refresh],
+  );
+
+  // Custom save function for stopwatch that integrates Claude tracking
+  const customStopwatchSave = useCallback(
+    async (input: Parameters<typeof window.electronAPI.session.save>[0]): Promise<Session> => {
+      if (stopwatchIsTrackingRef.current) {
+        try {
+          const ccSessions = await claudeTrackerRef.current.stopTracking();
+          stopwatchIsTrackingRef.current = false;
+          if (ccSessions && ccSessions.length > 0) {
+            return window.electronAPI.session.saveWithTracking({
+              ...input,
+              claudeCodeSessions: ccSessions,
+            });
+          }
+        } catch {
+          // Non-fatal — fall through to plain save
+          stopwatchIsTrackingRef.current = false;
+        }
+      }
+      return window.electronAPI.session.save(input);
+    },
+    [],
+  );
 
   // Custom save function for the timer that supports atomic save-with-tracking
   // Stops the tracker first, then saves atomically with tracking data
@@ -241,7 +277,7 @@ export function TomatoClock() {
     }
   }, [resume]);
 
-  const stopwatch = useStopwatch(stopwatchSettings, handleStopwatchSaved);
+  const stopwatch = useStopwatch(stopwatchSettings, handleStopwatchSaved, customStopwatchSave);
 
   const handleReset = useCallback(() => {
     reset();
@@ -253,6 +289,43 @@ export function TomatoClock() {
       });
     }
   }, [reset]);
+
+  // Stopwatch lifecycle handlers with Claude tracking
+  const handleStopwatchStart = useCallback(
+    async (baseStart: () => void) => {
+      baseStart();
+      const linked = linkedStopwatchClaudeSessionRef.current;
+      if (linked) {
+        try {
+          await claudeTrackerRef.current.scan(linked.projectDirName);
+          await claudeTrackerRef.current.trackSelected([linked.ccSessionUuid]);
+          stopwatchIsTrackingRef.current = true;
+        } catch {
+          // Non-fatal — tracking failure doesn't block the stopwatch
+          stopwatchIsTrackingRef.current = false;
+        }
+      }
+    },
+    [],
+  );
+
+  const handleStopwatchPause = useCallback((basePause: () => void) => {
+    basePause();
+    if (stopwatchIsTrackingRef.current) {
+      claudeTrackerRef.current.pauseTracking().catch(() => {
+        // Non-fatal
+      });
+    }
+  }, []);
+
+  const handleStopwatchResume = useCallback((baseResume: () => void) => {
+    baseResume();
+    if (stopwatchIsTrackingRef.current) {
+      claudeTrackerRef.current.resumeTracking().catch(() => {
+        // Non-fatal
+      });
+    }
+  }, []);
 
   const handleIssueSelect = useCallback(
     (issue: IssueRef | null) => {
@@ -408,8 +481,15 @@ export function TomatoClock() {
 
             {appMode === "time-tracking" && (
               <StopwatchView
-                stopwatch={stopwatch}
+                stopwatch={{
+                  ...stopwatch,
+                  start: () => void handleStopwatchStart(stopwatch.start),
+                  pause: () => handleStopwatchPause(stopwatch.pause),
+                  resume: () => handleStopwatchResume(stopwatch.resume),
+                }}
                 promptForIssue={stopwatchSettings.promptForIssue}
+                selectedClaudeSession={linkedStopwatchClaudeSession}
+                onClaudeSessionSelect={setLinkedStopwatchClaudeSession}
               />
             )}
           </div>
