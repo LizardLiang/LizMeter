@@ -596,6 +596,16 @@ export function getSessionById(id: string): Session | null {
   };
 }
 
+export function updateSessionDuration(id: string, actualDurationSeconds: number): Session {
+  const database = getDb();
+  database
+    .prepare("UPDATE sessions SET actual_duration_seconds = ? WHERE id = ?")
+    .run(actualDurationSeconds, id);
+  const updated = getSessionById(id);
+  if (!updated) throw new Error(`Session not found after update: ${id}`);
+  return updated;
+}
+
 export function updateWorklogStatus(
   sessionId: string,
   status: WorklogStatus,

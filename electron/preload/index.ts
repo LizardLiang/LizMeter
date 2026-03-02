@@ -22,6 +22,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.invoke("session:save-with-tracking", input),
     list: (input: ListSessionsInput) => ipcRenderer.invoke("session:list", input),
     delete: (id: string) => ipcRenderer.invoke("session:delete", id),
+    updateDuration: (input: { id: string; actualDurationSeconds: number }) =>
+      ipcRenderer.invoke("session:update-duration", input),
   },
   settings: {
     get: () => ipcRenderer.invoke("settings:get"),

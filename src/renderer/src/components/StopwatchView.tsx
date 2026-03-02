@@ -22,7 +22,7 @@ interface StopwatchViewProps {
 export function StopwatchView(
   { stopwatch, promptForIssue, selectedClaudeSession, onClaudeSessionSelect }: StopwatchViewProps,
 ) {
-  const { state, start, pause, resume, stop, setTitle, setLinkedIssue, saveError } = stopwatch;
+  const { state, start, pause, resume, stop, reset, setTitle, setLinkedIssue, saveError } = stopwatch;
   const [showIssuePrompt, setShowIssuePrompt] = useState(false);
 
   const handleStart = useCallback(() => {
@@ -89,6 +89,11 @@ export function StopwatchView(
             disabled={stripHtml(state.title).trim() === ""}
           >
             Start
+          </button>
+        )}
+        {isIdle && state.restoredSessionId !== null && (
+          <button className={styles.cancelBtn} onClick={reset}>
+            Cancel
           </button>
         )}
         {isRunning && (

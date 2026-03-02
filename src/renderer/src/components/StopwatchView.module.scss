@@ -65,7 +65,8 @@
 .startBtn,
 .pauseBtn,
 .resumeBtn,
-.stopBtn {
+.stopBtn,
+.cancelBtn {
   padding: 10px 28px;
   border: none;
   border-radius: 8px;
@@ -97,6 +98,18 @@
 .stopBtn {
   background: var(--tokyoNight-red, #f7768e);
   color: var(--tokyoNight-bg, #1a1b26);
+}
+
+.cancelBtn {
+  background: transparent;
+  color: var(--tokyoNight-comment, #565f89);
+  border: 1px solid var(--tokyoNight-comment, #565f89);
+
+  &:hover {
+    color: var(--tokyoNight-red, #f7768e);
+    border-color: var(--tokyoNight-red, #f7768e);
+    opacity: 1;
+  }
 }
 
 .error {

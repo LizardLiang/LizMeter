@@ -601,8 +601,14 @@ function watchDirectory(projectPath: string): void {
       // Add to discovered sessions so we don't emit again
       discoveredSessions.push(preview);
 
-      // Emit notification to renderer
-      queueNewSessionNotification(preview);
+      if (trackedUuids.size > 0) {
+        // Already tracking sessions — auto-add the new one silently
+        trackSelectedSessions([...Array.from(trackedUuids), ccSessionUuid]);
+        pushUpdate();
+      } else {
+        // Not tracking yet — notify the user so they can start
+        queueNewSessionNotification(preview);
+      }
     });
 
     directoryWatcher.on("error", (err) => {

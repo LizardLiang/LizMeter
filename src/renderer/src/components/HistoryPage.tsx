@@ -3,6 +3,7 @@ import type { CreateTagInput, Session, Tag, TimerStatus } from "../../../shared/
 import { useGroupExpand } from "../hooks/useGroupExpand.ts";
 import { formatDuration, formatTimerType, timerTypeColor } from "../utils/format.ts";
 import type { DateSubGroup } from "../utils/groupSessions.ts";
+import { stripHtml } from "../utils/html.ts";
 import { DateSubGroupHeader } from "./DateSubGroupHeader.tsx";
 import styles from "./HistoryPage.module.scss";
 import { IssueBadge } from "./IssueBadge.tsx";
@@ -87,10 +88,6 @@ function SessionCard(
   const isEligibleDuration = session.actualDurationSeconds >= 60;
   const showWorklogUi = isJiraLinked && isEligibleDuration;
 
-  const isResumable = session.timerType !== "stopwatch"
-    && session.actualDurationSeconds < session.plannedDurationSeconds;
-  const isCompleted = session.timerType !== "stopwatch"
-    && session.actualDurationSeconds >= session.plannedDurationSeconds;
   const isTimerActive = timerStatus !== undefined && timerStatus !== "idle";
 
   const handleLogWork = () => {
@@ -151,7 +148,7 @@ function SessionCard(
             )}
           </>
         )}
-        {isResumable && onResumeSession && (
+        {onResumeSession && (
           <button
             style={{
               padding: "2px 8px",
@@ -172,28 +169,11 @@ function SessionCard(
             ▶ Resume
           </button>
         )}
-        {isCompleted && (
-          <span
-            style={{
-              padding: "2px 8px",
-              fontSize: "0.75rem",
-              fontWeight: 500,
-              borderRadius: "4px",
-              border: "1px solid #9ece6a30",
-              backgroundColor: "#9ece6a11",
-              color: "#9ece6a",
-              marginLeft: "4px",
-            }}
-            aria-label="Session completed"
-          >
-            Completed
-          </span>
-        )}
         <button className={styles.cardDelBtn} onClick={() => onDelete(session.id)} aria-label="Delete session">
           ✕
         </button>
       </div>
-      {session.title && <div className={styles.cardTitle}>{session.title}</div>}
+      {session.title && <div className={styles.cardTitle}>{stripHtml(session.title)}</div>}
       <div className={styles.cardTags}>
         <IssueBadge session={session} />
         {session.tags.map((t) => <TagBadge key={t.id} tag={t} onRemove={(id) => void onUnassign(session.id, id)} />)}

@@ -311,6 +311,7 @@ export interface ElectronAPI {
     saveWithTracking: (input: SaveSessionWithTrackingInput) => Promise<Session>;
     list: (input: ListSessionsInput) => Promise<ListSessionsResult>;
     delete: (id: string) => Promise<void>;
+    updateDuration: (input: { id: string; actualDurationSeconds: number; }) => Promise<Session>;
   };
   settings: {
     get: () => Promise<TimerSettings>;

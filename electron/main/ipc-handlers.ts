@@ -35,6 +35,7 @@ import {
   saveSettings,
   setSettingValue,
   unassignTag,
+  updateSessionDuration,
   updateTag,
   updateWorklogStatus,
 } from "./database.ts";
@@ -72,6 +73,10 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("session:list", (_event, input: ListSessionsInput) => {
     return listSessions(input ?? {});
+  });
+
+  ipcMain.handle("session:update-duration", (_event, input: { id: string; actualDurationSeconds: number }) => {
+    return updateSessionDuration(input.id, input.actualDurationSeconds);
   });
 
   ipcMain.handle("session:delete", (_event, id: string) => {

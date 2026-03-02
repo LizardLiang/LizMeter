@@ -13,6 +13,8 @@ export interface StopwatchState {
   linkedIssue: IssueRef | null;
   startedAtWallClock: number | null;
   accumulatedActiveMs: number;
+  restoredBaseMs: number; // set by RESTORE, consumed by START, 0 for normal starts
+  restoredSessionId: string | null; // if set, stop updates this session instead of creating a new one
 }
 
 // --- Actions ---
@@ -22,10 +24,12 @@ type StopwatchAction =
   | { type: "PAUSE"; }
   | { type: "RESUME"; }
   | { type: "STOP"; }
+  | { type: "RESET"; }
   | { type: "TICK_UP"; payload: number; } // payload = elapsed seconds
   | { type: "SET_TITLE"; payload: string; }
   | { type: "SET_LINKED_ISSUE"; payload: IssueRef | null; }
-  | { type: "AUTO_STOP"; };
+  | { type: "AUTO_STOP"; }
+  | { type: "RESTORE"; payload: { title: string; linkedIssue: IssueRef | null; baseMs: number; sessionId: string; }; };
 
 const MAX_TITLE_LENGTH = 5000;
 
@@ -37,6 +41,8 @@ function getInitialState(): StopwatchState {
     linkedIssue: null,
     startedAtWallClock: null,
     accumulatedActiveMs: 0,
+    restoredBaseMs: 0,
+    restoredSessionId: null,
   };
 }
 
@@ -44,12 +50,14 @@ function stopwatchReducer(state: StopwatchState, action: StopwatchAction): Stopw
   switch (action.type) {
     case "START": {
       if (state.status !== "idle") return state;
+      const baseMs = state.restoredBaseMs;
       return {
         ...state,
         status: "running",
-        elapsedSeconds: 0,
+        elapsedSeconds: Math.round(baseMs / 1000),
         startedAtWallClock: Date.now(),
-        accumulatedActiveMs: 0,
+        accumulatedActiveMs: baseMs,
+        restoredBaseMs: 0,
       };
     }
 
@@ -106,6 +114,24 @@ function stopwatchReducer(state: StopwatchState, action: StopwatchAction): Stopw
       return { ...state, linkedIssue: action.payload };
     }
 
+    case "RESET": {
+      // Only valid from idle with a restored session (restoredSessionId set)
+      if (state.status !== "idle" || !state.restoredSessionId) return state;
+      return getInitialState();
+    }
+
+    case "RESTORE": {
+      if (state.status !== "idle") return state;
+      return {
+        ...state,
+        title: action.payload.title,
+        linkedIssue: action.payload.linkedIssue,
+        restoredBaseMs: action.payload.baseMs,
+        restoredSessionId: action.payload.sessionId,
+        elapsedSeconds: Math.round(action.payload.baseMs / 1000),
+      };
+    }
+
     default:
       return state;
   }
@@ -119,8 +145,10 @@ export interface UseStopwatchReturn {
   pause: () => void;
   resume: () => void;
   stop: () => void;
+  reset: () => void;
   setTitle: (title: string) => void;
   setLinkedIssue: (issue: IssueRef | null) => void;
+  restore: (title: string, linkedIssue: IssueRef | null, baseMs: number, sessionId: string) => void;
   saveError: string | null;
 }
 
@@ -213,9 +241,12 @@ export function useStopwatch(
       ...issueFields,
     };
 
-    const saveFn = customSaveRef.current ?? window.electronAPI.session.save;
+    const restoredId = state.restoredSessionId;
+    const savePromise = restoredId
+      ? window.electronAPI.session.updateDuration({ id: restoredId, actualDurationSeconds: elapsed })
+      : (customSaveRef.current ?? window.electronAPI.session.save)(saveInput);
 
-    saveFn(saveInput)
+    savePromise
       .then((session) => {
         setSaveError(null);
         onSavedRef.current?.(session);
@@ -234,8 +265,11 @@ export function useStopwatch(
     pause: () => dispatch({ type: "PAUSE" }),
     resume: () => dispatch({ type: "RESUME" }),
     stop: () => dispatch({ type: "STOP" }),
+    reset: () => dispatch({ type: "RESET" }),
     setTitle: (title: string) => dispatch({ type: "SET_TITLE", payload: title }),
     setLinkedIssue: (issue: IssueRef | null) => dispatch({ type: "SET_LINKED_ISSUE", payload: issue }),
+    restore: (title: string, linkedIssue: IssueRef | null, baseMs: number, sessionId: string) =>
+      dispatch({ type: "RESTORE", payload: { title, linkedIssue, baseMs, sessionId } }),
     saveError,
   };
 }

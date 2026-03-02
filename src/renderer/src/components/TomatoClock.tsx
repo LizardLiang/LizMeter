@@ -352,11 +352,16 @@ export function TomatoClock() {
   const handleResumeSession = useCallback(
     (session: Session) => {
       const issue = reconstructIssueRef(session);
-      restore(session);
-      if (issue) setPendingIssue(issue);
+      if (session.timerType === "stopwatch") {
+        stopwatch.restore(session.title, issue, session.actualDurationSeconds * 1000, session.id);
+        setAppMode("time-tracking");
+      } else {
+        restore(session);
+        if (issue) setPendingIssue(issue);
+      }
       setActivePage("timer");
     },
-    [restore],
+    [restore, stopwatch.restore],
   );
 
   const handleIssueSelect = useCallback(
@@ -459,6 +464,7 @@ export function TomatoClock() {
                   title={state.title}
                   saveError={saveError}
                   selectedIssue={pendingIssue}
+                  isRestored={state.originalPlannedDuration !== null}
                   onStart={() => void start()}
                   onPause={handlePause}
                   onResume={handleResume}

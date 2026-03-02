@@ -17,6 +17,7 @@ interface TimerViewProps {
   title: string;
   saveError: string | null;
   selectedIssue: IssueRef | null;
+  isRestored?: boolean;
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -35,6 +36,7 @@ export function TimerView({
   title,
   saveError,
   selectedIssue,
+  isRestored = false,
   onStart,
   onPause,
   onResume,
@@ -74,6 +76,7 @@ export function TimerView({
       <TimerControls
         status={status}
         startDisabled={stripHtml(title).trim() === ""}
+        isRestored={isRestored}
         onStart={onStart}
         onPause={onPause}
         onResume={onResume}

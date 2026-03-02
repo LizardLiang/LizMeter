@@ -139,17 +139,19 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
     }
 
     case "RESET": {
-      // Valid from running or paused state. Title is preserved (PRD requirement).
-      if (state.status !== "running" && state.status !== "paused") return state;
+      // Valid from running/paused, OR from idle when a session was restored but not yet started.
+      const isRestoredIdle = state.status === "idle" && state.originalPlannedDuration !== null;
+      if (state.status !== "running" && state.status !== "paused" && !isRestoredIdle) return state;
       const duration = getDurationForType(state.settings, state.timerType);
       return {
         ...state,
         status: "idle",
         remainingSeconds: duration,
+        // Clear title only when cancelling a restored session (not during a regular reset)
+        title: isRestoredIdle ? "" : state.title,
         startedAtWallClock: null,
         accumulatedActiveMs: 0,
         originalPlannedDuration: null,
-        // title is intentionally NOT reset
       };
     }
 
@@ -345,7 +347,9 @@ export function useTimer(
     setRemaining: (seconds: number) => dispatch({ type: "SET_REMAINING", payload: seconds }),
     dismissCompletion: () => dispatch({ type: "CLEAR_COMPLETION" }),
     restore: (session: Session) => {
-      const remaining = Math.max(0, session.plannedDurationSeconds - session.actualDurationSeconds);
+      const remaining = session.actualDurationSeconds >= session.plannedDurationSeconds
+        ? session.plannedDurationSeconds
+        : Math.max(0, session.plannedDurationSeconds - session.actualDurationSeconds);
       dispatch({
         type: "RESTORE",
         payload: {
