@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import type { CreateTagInput, Session, Tag } from "../../../shared/types.ts";
+import type { CreateTagInput, Session, Tag, TimerStatus } from "../../../shared/types.ts";
 import { useGroupExpand } from "../hooks/useGroupExpand.ts";
 import { formatDuration, formatTimerType, timerTypeColor } from "../utils/format.ts";
 import type { DateSubGroup } from "../utils/groupSessions.ts";
@@ -37,6 +37,8 @@ interface Props {
   ) => Promise<void>;
   onRefresh?: () => void;
   worklogLoading?: Record<string, boolean>;
+  onResumeSession?: (session: Session) => void;
+  timerStatus?: TimerStatus;
 }
 
 function formatDate(iso: string): string {
@@ -58,10 +60,23 @@ interface SessionCardProps {
   onCreateTag: (input: CreateTagInput) => Promise<Tag>;
   onLogWork?: (sessionId: string, issueKey: string) => void;
   worklogLoading?: boolean;
+  onResumeSession?: (session: Session) => void;
+  timerStatus?: TimerStatus;
 }
 
 function SessionCard(
-  { session, allTags, onDelete, onAssign, onUnassign, onCreateTag, onLogWork, worklogLoading }: SessionCardProps,
+  {
+    session,
+    allTags,
+    onDelete,
+    onAssign,
+    onUnassign,
+    onCreateTag,
+    onLogWork,
+    worklogLoading,
+    onResumeSession,
+    timerStatus,
+  }: SessionCardProps,
 ) {
   const assignedTagIds = session.tags.map((t) => t.id);
 
@@ -71,6 +86,12 @@ function SessionCard(
   const isJiraLinked = session.issueProvider === "jira" && session.issueId;
   const isEligibleDuration = session.actualDurationSeconds >= 60;
   const showWorklogUi = isJiraLinked && isEligibleDuration;
+
+  const isResumable = session.timerType !== "stopwatch"
+    && session.actualDurationSeconds < session.plannedDurationSeconds;
+  const isCompleted = session.timerType !== "stopwatch"
+    && session.actualDurationSeconds >= session.plannedDurationSeconds;
+  const isTimerActive = timerStatus !== undefined && timerStatus !== "idle";
 
   const handleLogWork = () => {
     if (onLogWork && session.issueId) {
@@ -130,6 +151,44 @@ function SessionCard(
             )}
           </>
         )}
+        {isResumable && onResumeSession && (
+          <button
+            style={{
+              padding: "2px 8px",
+              fontSize: "0.75rem",
+              fontWeight: 500,
+              borderRadius: "4px",
+              border: "1px solid #7aa2f730",
+              backgroundColor: "#7aa2f711",
+              color: "#7aa2f7",
+              cursor: isTimerActive ? "not-allowed" : "pointer",
+              opacity: isTimerActive ? 0.4 : 1,
+              marginLeft: "4px",
+            }}
+            disabled={isTimerActive}
+            onClick={() => onResumeSession(session)}
+            aria-label={`Resume session: ${session.title || "session"}`}
+          >
+            ▶ Resume
+          </button>
+        )}
+        {isCompleted && (
+          <span
+            style={{
+              padding: "2px 8px",
+              fontSize: "0.75rem",
+              fontWeight: 500,
+              borderRadius: "4px",
+              border: "1px solid #9ece6a30",
+              backgroundColor: "#9ece6a11",
+              color: "#9ece6a",
+              marginLeft: "4px",
+            }}
+            aria-label="Session completed"
+          >
+            Completed
+          </span>
+        )}
         <button className={styles.cardDelBtn} onClick={() => onDelete(session.id)} aria-label="Delete session">
           ✕
         </button>
@@ -166,6 +225,8 @@ export function HistoryPage({
   onLogWork,
   onRefresh,
   worklogLoading,
+  onResumeSession,
+  timerStatus,
 }: Props) {
   const activeFilterTag = allTags.find((t) => t.id === activeTagFilter);
   const { groupedData, expandedIssueGroups, expandedDateGroups, toggleIssueGroup, toggleDateGroup } = useGroupExpand(
@@ -250,7 +311,7 @@ export function HistoryPage({
         // Bulk: ONE Jira API call using first selected session as anchor, then mark rest as logged
         try {
           const result = await window.electronAPI.worklog.log({
-            sessionId: selectedIds[0],
+            sessionId: selectedIds[0]!,
             issueKey,
             startTimeOverride: params.startTime,
             endTimeOverride: params.endTime,
@@ -279,7 +340,7 @@ export function HistoryPage({
         }
       } else {
         // Single session
-        await handleLogWork(selectedIds[0], issueKey, params);
+        await handleLogWork(selectedIds[0]!, issueKey, params);
       }
     },
     [worklogDialogState, handleLogWork, dismissToast, onRefresh],
@@ -294,9 +355,9 @@ export function HistoryPage({
       if (eligible.length === 0) return;
       const unloggedCount = eligible.filter((s) => s.worklogStatus !== "logged").length;
       const isRelog = unloggedCount === 0;
-      const issueKey = eligible[0].issueId!;
+      const issueKey = eligible[0]!.issueId!;
       setWorklogDialogState({
-        session: eligible.length === 1 ? eligible[0] : eligible,
+        session: eligible.length === 1 ? eligible[0]! : eligible,
         issueKey,
         isRelog,
         sessionIds: eligible.map((s) => s.id),
@@ -376,6 +437,8 @@ export function HistoryPage({
                         onCreateTag={onCreateTag}
                         onLogWork={onLogWork ? handleOpenWorklogDialog : undefined}
                         worklogLoading={worklogLoading?.[session.id] ?? false}
+                        onResumeSession={onResumeSession}
+                        timerStatus={timerStatus}
                       />
                     ))}
                   </DateSubGroupHeader>
@@ -397,6 +460,8 @@ export function HistoryPage({
             onCreateTag={onCreateTag}
             onLogWork={onLogWork ? handleOpenWorklogDialog : undefined}
             worklogLoading={worklogLoading?.[session.id] ?? false}
+            onResumeSession={onResumeSession}
+            timerStatus={timerStatus}
           />
         ))}
       </div>

@@ -2,7 +2,14 @@
 // Timer finite state machine using useReducer with wall-clock accuracy
 
 import { useEffect, useLayoutEffect, useReducer, useRef, useState } from "react";
-import type { IssueRef, Session, TimerSettings, TimerStatus, TimerType } from "../../../shared/types.ts";
+import type {
+  IssueRef,
+  SaveSessionInput,
+  Session,
+  TimerSettings,
+  TimerStatus,
+  TimerType,
+} from "../../../shared/types.ts";
 
 // --- State ---
 
@@ -15,6 +22,7 @@ export interface TimerState {
   // Internal tracking (not displayed):
   startedAtWallClock: number | null; // Date.now() when timer was started/resumed
   accumulatedActiveMs: number; // total active (non-paused) milliseconds
+  originalPlannedDuration: number | null; // set by RESTORE, used by save effect, cleared by SET_TIMER_TYPE/RESET/CLEAR_COMPLETION
 }
 
 // --- Actions ---
@@ -30,7 +38,16 @@ type TimerAction =
   | { type: "TICK"; payload: number; } // payload = remaining seconds
   | { type: "COMPLETE"; payload: number; } // payload = elapsed ms for this run segment
   | { type: "UPDATE_SETTINGS"; payload: TimerSettings; }
-  | { type: "CLEAR_COMPLETION"; };
+  | { type: "CLEAR_COMPLETION"; }
+  | {
+    type: "RESTORE";
+    payload: {
+      remainingSeconds: number;
+      originalPlannedDuration: number;
+      title: string;
+      timerType: TimerType;
+    };
+  };
 
 const MAX_TITLE_LENGTH = 5000;
 
@@ -56,6 +73,7 @@ export function getInitialTimerState(settings: TimerSettings): TimerState {
     settings,
     startedAtWallClock: null,
     accumulatedActiveMs: 0,
+    originalPlannedDuration: null,
   };
 }
 
@@ -69,6 +87,7 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
         ...state,
         timerType: action.payload,
         remainingSeconds: duration,
+        originalPlannedDuration: null, // clear restored state when user changes type
       };
     }
 
@@ -129,6 +148,7 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
         remainingSeconds: duration,
         startedAtWallClock: null,
         accumulatedActiveMs: 0,
+        originalPlannedDuration: null,
         // title is intentionally NOT reset
       };
     }
@@ -163,16 +183,32 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
         status: "idle",
         remainingSeconds: duration,
         accumulatedActiveMs: 0,
+        originalPlannedDuration: null,
       };
     }
 
     case "UPDATE_SETTINGS": {
-      // Update settings; if idle, also update remainingSeconds
+      // Update settings; if idle and not in a restored state, also update remainingSeconds
       const newDuration = getDurationForType(action.payload, state.timerType);
+      const shouldUpdateRemaining = state.status === "idle" && state.originalPlannedDuration === null;
       return {
         ...state,
         settings: action.payload,
-        remainingSeconds: state.status === "idle" ? newDuration : state.remainingSeconds,
+        remainingSeconds: shouldUpdateRemaining ? newDuration : state.remainingSeconds,
+      };
+    }
+
+    case "RESTORE": {
+      // Only allowed from idle state
+      if (state.status !== "idle") return state;
+      return {
+        ...state,
+        timerType: action.payload.timerType,
+        title: action.payload.title,
+        remainingSeconds: action.payload.remainingSeconds,
+        originalPlannedDuration: action.payload.originalPlannedDuration,
+        accumulatedActiveMs: 0,
+        startedAtWallClock: null,
       };
     }
 
@@ -193,6 +229,7 @@ export interface UseTimerReturn {
   setTitle: (title: string) => void;
   setRemaining: (seconds: number) => void;
   dismissCompletion: () => void;
+  restore: (session: Session) => void;
   saveError: string | null;
 }
 
@@ -255,26 +292,33 @@ export function useTimer(
     const actualDurationSeconds = Math.round(state.accumulatedActiveMs / 1000);
 
     const issue = pendingIssueRef.current;
-    const issueFields = issue
-      ? issue.provider === "github"
-        ? {
-          issueNumber: issue.number,
-          issueTitle: issue.title,
-          issueUrl: issue.url,
-          issueProvider: "github" as const,
-          issueId: String(issue.number),
-        }
-        : {
-          issueTitle: issue.title,
-          issueUrl: issue.url,
-          issueProvider: "linear" as const,
-          issueId: issue.identifier,
-        }
-      : {};
+    const issueFields = !issue
+      ? {}
+      : issue.provider === "github"
+      ? {
+        issueNumber: issue.number,
+        issueTitle: issue.title,
+        issueUrl: issue.url,
+        issueProvider: "github" as const,
+        issueId: String(issue.number),
+      }
+      : issue.provider === "linear"
+      ? {
+        issueTitle: issue.title,
+        issueUrl: issue.url,
+        issueProvider: "linear" as const,
+        issueId: issue.identifier,
+      }
+      : {
+        issueTitle: issue.title,
+        issueUrl: issue.url,
+        issueProvider: "jira" as const,
+        issueId: issue.key,
+      };
     const saveInput: SaveSessionInput = {
       title: state.title,
       timerType: state.timerType,
-      plannedDurationSeconds: getDurationForType(state.settings, state.timerType),
+      plannedDurationSeconds: state.originalPlannedDuration ?? getDurationForType(state.settings, state.timerType),
       actualDurationSeconds,
       ...issueFields,
     };
@@ -300,6 +344,18 @@ export function useTimer(
     setTitle: (title: string) => dispatch({ type: "SET_TITLE", payload: title }),
     setRemaining: (seconds: number) => dispatch({ type: "SET_REMAINING", payload: seconds }),
     dismissCompletion: () => dispatch({ type: "CLEAR_COMPLETION" }),
+    restore: (session: Session) => {
+      const remaining = Math.max(0, session.plannedDurationSeconds - session.actualDurationSeconds);
+      dispatch({
+        type: "RESTORE",
+        payload: {
+          remainingSeconds: remaining,
+          originalPlannedDuration: session.plannedDurationSeconds,
+          title: session.title,
+          timerType: session.timerType,
+        },
+      });
+    },
     saveError,
   };
 }

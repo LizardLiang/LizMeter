@@ -45,6 +45,27 @@ const DEFAULT_STOPWATCH_SETTINGS: StopwatchSettings = {
   promptForIssue: true,
 };
 
+function reconstructIssueRef(session: Session): IssueRef | null {
+  if (!session.issueProvider || !session.issueId) return null;
+  if (session.issueProvider === "linear") {
+    return {
+      provider: "linear",
+      identifier: session.issueId,
+      title: session.issueTitle ?? "",
+      url: session.issueUrl ?? "",
+    };
+  }
+  if (session.issueProvider === "jira") {
+    return { provider: "jira", key: session.issueId, title: session.issueTitle ?? "", url: session.issueUrl ?? "" };
+  }
+  if (session.issueProvider === "github") {
+    const num = session.issueNumber ?? parseInt(session.issueId, 10);
+    if (!num || isNaN(num)) return null;
+    return { provider: "github", number: num, title: session.issueTitle ?? "", url: session.issueUrl ?? "" };
+  }
+  return null;
+}
+
 export function TomatoClock() {
   const { settings, isLoading: settingsLoading, saveSettings } = useSettings();
   const effectiveSettings = settings ?? DEFAULT_SETTINGS;
@@ -242,6 +263,7 @@ export function TomatoClock() {
     setTitle,
     setRemaining,
     dismissCompletion,
+    restore,
     saveError,
   } = useTimer(effectiveSettings, handleSessionSaved, pendingIssue, customSaveSession);
 
@@ -326,6 +348,16 @@ export function TomatoClock() {
       });
     }
   }, []);
+
+  const handleResumeSession = useCallback(
+    (session: Session) => {
+      const issue = reconstructIssueRef(session);
+      restore(session);
+      if (issue) setPendingIssue(issue);
+      setActivePage("timer");
+    },
+    [restore],
+  );
 
   const handleIssueSelect = useCallback(
     (issue: IssueRef | null) => {
@@ -521,6 +553,8 @@ export function TomatoClock() {
             onLogWork={logWork}
             onRefresh={refresh}
             worklogLoading={worklogLoading}
+            onResumeSession={handleResumeSession}
+            timerStatus={state.status}
           />
         )}
 
