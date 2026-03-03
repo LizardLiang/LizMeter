@@ -123,14 +123,33 @@
 
 .card {
   padding: 16px 18px;
-  border-radius: 10px;
-  border: 1px solid #292e42;
-  background: #1f2335;
-  transition: border-color 0.15s, background 0.15s;
+  border-radius: 14px;
+  border: 1px solid rgba(41, 46, 66, 0.85);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.01) 30%, transparent 55%),
+    linear-gradient(315deg, rgba(0, 0, 0, 0.06) 0%, transparent 35%),
+    rgba(15, 17, 34, 0.48);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 1px 0 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
 
   &:hover {
-    border-color: #3b4261;
-    background: #24283b;
+    border-color: rgba(122, 162, 247, 0.2);
+    background:
+      linear-gradient(125deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 28%, transparent 52%),
+      linear-gradient(305deg, rgba(0, 0, 0, 0.05) 0%, transparent 35%),
+      rgba(18, 20, 42, 0.55);
+    box-shadow:
+      0 8px 28px rgba(0, 0, 0, 0.35),
+      0 0 0 1px rgba(122, 162, 247, 0.07),
+      inset 0 1px 0 rgba(255, 255, 255, 0.11),
+      inset 1px 0 0 rgba(255, 255, 255, 0.05),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.14);
   }
 }
 
@@ -196,15 +215,19 @@
 .searchInput {
   flex: 1;
   padding: 7px 10px;
-  border-radius: 6px;
-  border: 1px solid #292e42;
-  background: #16161e;
+  border-radius: 8px;
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  background: rgba(12, 13, 24, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: #c0caf5;
   font-size: 13px;
   outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
 
   &:focus {
-    border-color: #7aa2f7;
+    border-color: rgba(122, 162, 247, 0.5);
+    box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.08);
   }
 
   &::placeholder {
@@ -275,8 +298,9 @@
 // --- Expanded card & comments ---
 
 .cardExpanded {
-  border-color: #7aa2f740;
-  background: #24283b;
+  border-color: rgba(122, 162, 247, 0.2);
+  background: rgba(20, 22, 44, 0.6);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.3), 0 0 0 1px rgba(122, 162, 247, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
 .expandedSection {
@@ -340,9 +364,11 @@
 
 .comment {
   padding: 10px 12px;
-  border-radius: 6px;
-  background: #1a1b26;
-  border: 1px solid #292e42;
+  border-radius: 10px;
+  background: rgba(12, 13, 24, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(41, 46, 66, 0.8);
 }
 
 .commentHeader {

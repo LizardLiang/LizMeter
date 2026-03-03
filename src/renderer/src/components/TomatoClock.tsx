@@ -18,7 +18,7 @@ import { useTagManager } from "../hooks/useTagManager.ts";
 import { useTimer } from "../hooks/useTimer.ts";
 import { ClaudeCodeStats } from "./ClaudeCodeStats.tsx";
 import { ClaudePage } from "./ClaudePage.tsx";
-import type { SelectedClaudeSession } from "./ClaudeSessionSelect.tsx";
+import { ClaudeSessionSelect, type SelectedClaudeSession } from "./ClaudeSessionSelect.tsx";
 import { HistoryPage } from "./HistoryPage.tsx";
 import { IssuesPage } from "./IssuesPage.tsx";
 import { ModeToggle } from "./ModeToggle.tsx";
@@ -106,6 +106,9 @@ export function TomatoClock() {
   useEffect(() => {
     linkedStopwatchClaudeSessionRef.current = linkedStopwatchClaudeSession;
   }, [linkedStopwatchClaudeSession]);
+
+  // Pomodoro Claude session linkage (for manual linking without project scan)
+  const [linkedPomodoroClaudeSession, setLinkedPomodoroClaudeSession] = useState<SelectedClaudeSession | null>(null);
 
   // Load persisted Claude Code settings from the generic KV store on mount
   useEffect(() => {
@@ -301,9 +304,67 @@ export function TomatoClock() {
 
   const stopwatch = useStopwatch(stopwatchSettings, handleStopwatchSaved, customStopwatchSave);
 
+  // Handle stopwatch Claude session change — if stopwatch is active, update tracking in real-time
+  const handleLinkedStopwatchClaudeSessionChange = useCallback(
+    async (session: SelectedClaudeSession | null) => {
+      setLinkedStopwatchClaudeSession(session);
+      const isActive = stopwatch.state.status === "running" || stopwatch.state.status === "paused";
+      if (!isActive) return;
+
+      if (stopwatchIsTrackingRef.current) {
+        try {
+          await claudeTrackerRef.current.stopTracking();
+        } catch {
+          // Non-fatal
+        }
+        stopwatchIsTrackingRef.current = false;
+      }
+
+      if (session) {
+        try {
+          await claudeTrackerRef.current.scan(session.projectDirName);
+          await claudeTrackerRef.current.trackSelected([session.ccSessionUuid]);
+          stopwatchIsTrackingRef.current = true;
+          if (stopwatch.state.status === "paused") {
+            await claudeTrackerRef.current.pauseTracking();
+          }
+        } catch {
+          stopwatchIsTrackingRef.current = false;
+        }
+      }
+    },
+    [stopwatch.state.status],
+  );
+
+  // Handle pomodoro Claude session manual link (used when no project scan is active)
+  const handlePomodoroClaudeSessionSelect = useCallback(
+    async (session: SelectedClaudeSession | null) => {
+      setLinkedPomodoroClaudeSession(session);
+      const isActive = state.status === "running" || state.status === "paused";
+      if (!isActive) return;
+
+      if (session) {
+        try {
+          await claudeTracker.scan(session.projectDirName);
+          await claudeTracker.trackSelected([session.ccSessionUuid]);
+        } catch {
+          // Non-fatal
+        }
+      } else if (claudeTrackerRef.current.isTracking) {
+        try {
+          await claudeTrackerRef.current.stopTracking();
+        } catch {
+          // Non-fatal
+        }
+      }
+    },
+    [state.status, claudeTracker],
+  );
+
   const handleReset = useCallback(() => {
     reset();
     setPendingIssue(null);
+    setLinkedPomodoroClaudeSession(null);
     // Stop tracking if active (timer was reset mid-session)
     if (claudeTrackerRef.current.isTracking || claudeTrackerRef.current.pickerState !== "hidden") {
       claudeTrackerRef.current.stopTracking().catch(() => {
@@ -478,6 +539,13 @@ export function TomatoClock() {
 
                 {isPomodoroActive && (
                   <>
+                    {pickerState === "hidden" && (
+                      <ClaudeSessionSelect
+                        selected={linkedPomodoroClaudeSession}
+                        onSelect={(s) => void handlePomodoroClaudeSessionSelect(s)}
+                      />
+                    )}
+
                     {showPicker && (
                       <SessionPicker
                         key={pickerOpenKey}
@@ -528,7 +596,7 @@ export function TomatoClock() {
                   }}
                   promptForIssue={stopwatchSettings.promptForIssue}
                   selectedClaudeSession={linkedStopwatchClaudeSession}
-                  onClaudeSessionSelect={setLinkedStopwatchClaudeSession}
+                  onClaudeSessionSelect={(s) => void handleLinkedStopwatchClaudeSessionChange(s)}
                 />
                 {isStopwatchActive && claudeTracker.isTracking && (
                   <ClaudeCodeStats
@@ -585,10 +653,6 @@ export function TomatoClock() {
             onSave={saveSettings}
             stopwatchSettings={stopwatchSettings}
             onStopwatchSettingsChange={setStopwatchSettings}
-            claudeProjectDirName={claudeProjectDirName}
-            claudeIdleThresholdMinutes={claudeIdleThresholdMinutes}
-            onClaudeProjectChange={setClaudeProjectDirName}
-            onClaudeIdleThresholdChange={setClaudeIdleThresholdMinutes}
           />
         )}
       </div>

@@ -4,9 +4,36 @@
   align-items: stretch;
   gap: 16px;
   padding: 24px;
-  border: 1px solid var(--tokyoNight-blue, #7aa2f7);
-  border-radius: 12px;
-  background: var(--tokyoNight-bg-dark, #1a1b26);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 35%, transparent 58%),
+    linear-gradient(315deg, rgba(0, 0, 0, 0.08) 0%, transparent 38%),
+    rgba(16, 18, 36, 0.52);
+  backdrop-filter: blur(32px) saturate(1.6);
+  -webkit-backdrop-filter: blur(32px) saturate(1.6);
+  border: 1px solid rgba(122, 162, 247, 0.14);
+  border-radius: 18px;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 1px 0 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    inset -1px 0 0 rgba(0, 0, 0, 0.06);
+  transition: box-shadow 0.3s ease, background 0.3s ease;
+
+  &:hover {
+    background:
+      linear-gradient(125deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 30%, transparent 55%),
+      linear-gradient(305deg, rgba(0, 0, 0, 0.07) 0%, transparent 38%),
+      rgba(18, 20, 40, 0.55);
+    box-shadow:
+      0 16px 48px rgba(0, 0, 0, 0.45),
+      0 4px 12px rgba(0, 0, 0, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15),
+      inset 1px 0 0 rgba(255, 255, 255, 0.08),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      inset -1px 0 0 rgba(0, 0, 0, 0.06);
+  }
 }
 
 .sectionLabel {

@@ -63,7 +63,6 @@ export function StopwatchView(
       <ClaudeSessionSelect
         selected={selectedClaudeSession}
         onSelect={onClaudeSessionSelect}
-        disabled={isActive}
       />
 
       <div className={styles.elapsed}>{formatElapsed(state.elapsedSeconds)}</div>

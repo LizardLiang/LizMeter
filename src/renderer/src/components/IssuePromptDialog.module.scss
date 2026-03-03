@@ -1,7 +1,9 @@
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11,12 +13,24 @@
 .dialog {
   width: 420px;
   max-height: 480px;
-  background: var(--tokyoNight-bg-dark, #1a1b26);
-  border: 1px solid var(--tokyoNight-comment, #565f89);
-  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.01) 32%, transparent 55%),
+    linear-gradient(315deg, rgba(0, 0, 0, 0.08) 0%, transparent 40%),
+    rgba(14, 16, 30, 0.92);
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+  border: 1px solid rgba(86, 95, 137, 0.3);
+  border-radius: 18px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.65),
+    0 4px 16px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 1px 0 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+    inset -1px 0 0 rgba(0, 0, 0, 0.05);
 }
 
 .header {

@@ -2,8 +2,11 @@
 
 .sidebar {
   height: calc(100vh - 32px);
-  background-color: #1a1b26;
-  border-left: 1px solid #292e42;
+  background: rgba(10, 11, 20, 0.7);
+  backdrop-filter: blur(24px) saturate(1.6);
+  -webkit-backdrop-filter: blur(24px) saturate(1.6);
+  border-left: 1px solid rgba(122, 162, 247, 0.07);
+  box-shadow: -1px 0 0 rgba(255, 255, 255, 0.02);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -98,8 +101,8 @@
   font-size: 11px;
   font-weight: 600;
   cursor: pointer;
-  border: none;
-  background-color: #1e2030;
+  border: 1px solid rgba(41, 46, 66, 0.7);
+  background: rgba(16, 18, 36, 0.4);
   color: #565f89;
   white-space: nowrap;
 }
@@ -152,7 +155,8 @@
   width: 100%;
 
   &:hover {
-    background-color: #1e2030;
+    background: rgba(22, 24, 44, 0.55);
+    border-color: rgba(122, 162, 247, 0.15);
   }
 }
 

@@ -21,24 +21,32 @@
   padding: 4px 12px;
   font-size: 12px;
   font-weight: 500;
-  background: transparent;
-  border: 1px solid #292e42;
-  border-radius: 4px;
+  background: rgba(16, 18, 36, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  border-radius: 8px;
   color: #565f89;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 
   &:hover {
-    background: #1e2030;
+    background: rgba(22, 24, 44, 0.55);
+    border-color: rgba(122, 162, 247, 0.15);
     color: #a9b1d6;
   }
 }
 
 .rangeActive {
   composes: range;
-  background: #1e2030;
-  border-color: #7aa2f750;
+  background: rgba(122, 162, 247, 0.12);
+  border-color: rgba(122, 162, 247, 0.3);
   color: #7aa2f7;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.17);
+    color: #7aa2f7;
+  }
 }
 
 // --- Summary metric cards ---
@@ -51,9 +59,33 @@
 .summaryCard {
   flex: 1;
   padding: 16px 18px;
-  border: 1px solid #292e42;
-  border-radius: 8px;
-  background: #1e2030;
+  border: 1px solid rgba(41, 46, 66, 0.85);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.01) 32%, transparent 56%),
+    linear-gradient(315deg, rgba(0, 0, 0, 0.07) 0%, transparent 36%),
+    rgba(15, 17, 34, 0.48);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 1px 0 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    border-color: rgba(122, 162, 247, 0.18);
+    background:
+      linear-gradient(125deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 28%, transparent 52%),
+      linear-gradient(305deg, rgba(0, 0, 0, 0.06) 0%, transparent 36%),
+      rgba(18, 20, 42, 0.54);
+    box-shadow:
+      0 8px 28px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 1px 0 0 rgba(255, 255, 255, 0.06),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.14);
+  }
 }
 
 .summaryLabel {
@@ -195,7 +227,7 @@
 .hBarTrack {
   flex: 1;
   height: 6px;
-  background: #1e2030;
+  background: rgba(30, 32, 48, 0.7);
   border-radius: 3px;
   overflow: hidden;
 }

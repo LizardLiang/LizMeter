@@ -5,14 +5,16 @@
 .wrapper {
   position: relative;
   display: flex;
-  border-radius: 8px;
-  background: var(--tn-surface, #1f2335);
-  border: 1px solid var(--tn-border, #292e42);
+  border-radius: 10px;
+  background: rgba(12, 13, 26, 0.5);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(41, 46, 66, 0.85);
   overflow: hidden;
   transition: border-color 0.25s ease, box-shadow 0.3s ease;
 
   &:hover:not(.disabled):not(.focused) {
-    border-color: #3b4261;
+    border-color: rgba(59, 66, 97, 0.9);
   }
 }
 
@@ -269,15 +271,24 @@
   width: 600px;
   max-width: 90vw;
   height: 70vh;
-  background: var(--tn-surface, #1f2335);
-  border: 1px solid var(--tn-border, #292e42);
-  border-radius: 12px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.01) 32%, transparent 55%),
+    linear-gradient(315deg, rgba(0, 0, 0, 0.08) 0%, transparent 40%),
+    rgba(14, 16, 30, 0.9);
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+  border: 1px solid rgba(41, 46, 66, 0.9);
+  border-radius: 18px;
   display: flex;
   flex-direction: column;
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--tn-blue, #7aa2f7) 6%, transparent),
-    0 8px 32px -4px rgba(0, 0, 0, 0.6),
-    0 24px 64px -8px rgba(0, 0, 0, 0.4);
+    0 0 0 1px rgba(122, 162, 247, 0.07),
+    0 8px 40px rgba(0, 0, 0, 0.6),
+    0 24px 80px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 1px 0 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.14),
+    inset -1px 0 0 rgba(0, 0, 0, 0.05);
   animation: modalEntrance 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
 }
 

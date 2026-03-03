@@ -16,8 +16,17 @@
   width: 64px;
   min-width: 64px;
   height: calc(100vh - 32px);
-  background: linear-gradient(180deg, #0f0f1a 0%, #13131f 100%);
-  border-right: 1px solid #1e2030;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04) 0%, rgba(255, 255, 255, 0.01) 25%, transparent 50%),
+    linear-gradient(180deg, transparent 60%, rgba(0, 0, 0, 0.08) 100%),
+    rgba(10, 11, 20, 0.74);
+  backdrop-filter: blur(28px) saturate(1.7);
+  -webkit-backdrop-filter: blur(28px) saturate(1.7);
+  border-right: 1px solid rgba(122, 162, 247, 0.08);
+  box-shadow:
+    1px 0 0 rgba(255, 255, 255, 0.03),
+    inset -1px 0 0 rgba(255, 255, 255, 0.02),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -31,8 +40,8 @@
   position: relative;
   width: 44px;
   height: 44px;
-  border-radius: 8px;
-  border: none;
+  border-radius: 10px;
+  border: 1px solid transparent;
   background-color: transparent;
   color: #565f89;
   cursor: pointer;
@@ -40,7 +49,7 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  transition: color 0.2s ease, background-color 0.2s ease, transform 0.15s ease;
+  transition: color 0.2s ease, background-color 0.2s ease, border-color 0.2s ease, transform 0.15s ease, box-shadow 0.2s ease;
 
   // CSS tooltip
   &::before {
@@ -49,9 +58,11 @@
     left: calc(100% + 14px);
     top: 50%;
     transform: translateY(-50%) translateX(-4px);
-    background: #1e2030;
-    border: 1px solid #292e42;
-    border-radius: 5px;
+    background: rgba(22, 24, 40, 0.88);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(122, 162, 247, 0.14);
+    border-radius: 7px;
     color: #a9b1d6;
     font-size: 11px;
     font-weight: 600;
@@ -62,11 +73,12 @@
     pointer-events: none;
     transition: opacity 0.18s ease, transform 0.18s ease;
     z-index: 200;
-    box-shadow: 0 4px 16px #00000050;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   }
 
   &:hover {
-    background-color: #7aa2f70c;
+    background-color: rgba(122, 162, 247, 0.07);
+    border-color: rgba(122, 162, 247, 0.1);
     color: #a9b1d6;
     transform: translateX(1px);
 
@@ -83,13 +95,27 @@
 
 .btnActive {
   composes: btn;
-  background: linear-gradient(135deg, #7aa2f718 0%, #7aa2f70c 100%);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, transparent 55%),
+    rgba(122, 162, 247, 0.1);
+  border-color: rgba(122, 162, 247, 0.22);
   color: #7aa2f7;
+  box-shadow:
+    0 2px 12px rgba(122, 162, 247, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.1);
 
   &:hover {
-    background: linear-gradient(135deg, #7aa2f722 0%, #7aa2f712 100%);
+    background:
+      linear-gradient(125deg, rgba(255, 255, 255, 0.13) 0%, transparent 52%),
+      rgba(122, 162, 247, 0.14);
+    border-color: rgba(122, 162, 247, 0.3);
     color: #7aa2f7;
     transform: none;
+    box-shadow:
+      0 2px 16px rgba(122, 162, 247, 0.16),
+      inset 0 1px 0 rgba(255, 255, 255, 0.16),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.1);
   }
 
   &:active {
@@ -106,7 +132,7 @@
   height: 22px;
   border-radius: 0 3px 3px 0;
   background: linear-gradient(180deg, #7aa2f7 0%, #bb9af7 100%);
-  box-shadow: 0 0 10px #7aa2f770;
+  box-shadow: 0 0 12px rgba(122, 162, 247, 0.6), 0 0 20px rgba(122, 162, 247, 0.2);
 }
 
 .runningDot {

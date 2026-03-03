@@ -20,16 +20,20 @@
 .input {
   flex: 1;
   padding: 7px 10px;
-  border-radius: 6px;
-  border: 1px solid #292e42;
-  background-color: #16161e;
+  border-radius: 8px;
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  background: rgba(12, 13, 24, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
   color: #c0caf5;
   font-size: 13px;
   outline: none;
   min-width: 0;
+  transition: border-color 0.15s, box-shadow 0.15s;
 
   &:focus {
-    border-color: #7aa2f7;
+    border-color: rgba(122, 162, 247, 0.5);
+    box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.08);
   }
 }
 
@@ -71,8 +75,11 @@
   align-items: center;
   gap: 8px;
   padding: 8px 10px;
-  border-radius: 8px;
-  background-color: #16161e;
+  border-radius: 10px;
+  background: rgba(12, 13, 24, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(41, 46, 66, 0.6);
 }
 
 .tagBadgeWrap {

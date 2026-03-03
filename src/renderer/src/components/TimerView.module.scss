@@ -1,9 +1,61 @@
 @use "../styles/mixins" as *;
 
 .container {
-  padding: 24px 0 0;
-  border-top: 1px solid #1e2030;
+  padding: 24px 22px 22px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.08) 0%, rgba(255, 255, 255, 0.02) 35%, transparent 58%),
+    linear-gradient(315deg, rgba(0, 0, 0, 0.08) 0%, transparent 38%),
+    rgba(16, 18, 36, 0.52);
+  backdrop-filter: blur(32px) saturate(1.6);
+  -webkit-backdrop-filter: blur(32px) saturate(1.6);
+  border: 1px solid rgba(122, 162, 247, 0.12);
+  border-radius: 18px;
+  box-shadow:
+    0 12px 40px rgba(0, 0, 0, 0.4),
+    0 4px 12px rgba(0, 0, 0, 0.25),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 1px 0 0 rgba(255, 255, 255, 0.06),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+    inset -1px 0 0 rgba(0, 0, 0, 0.06);
   position: relative;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+
+  &:hover {
+    background:
+      linear-gradient(125deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 30%, transparent 55%),
+      linear-gradient(305deg, rgba(0, 0, 0, 0.07) 0%, transparent 38%),
+      rgba(18, 20, 40, 0.55);
+    box-shadow:
+      0 16px 48px rgba(0, 0, 0, 0.45),
+      0 4px 12px rgba(0, 0, 0, 0.25),
+      inset 0 1px 0 rgba(255, 255, 255, 0.15),
+      inset 1px 0 0 rgba(255, 255, 255, 0.08),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.2),
+      inset -1px 0 0 rgba(0, 0, 0, 0.06);
+  }
+
+  &[data-timer-type="work"]:not([data-status="idle"]) {
+    border-color: rgba(122, 162, 247, 0.22);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.4),
+      0 0 50px rgba(122, 162, 247, 0.07),
+      inset 0 1px 0 rgba(122, 162, 247, 0.18),
+      inset 1px 0 0 rgba(122, 162, 247, 0.08),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+      inset -1px 0 0 rgba(0, 0, 0, 0.06);
+  }
+
+  &[data-timer-type="short-break"]:not([data-status="idle"]),
+  &[data-timer-type="long-break"]:not([data-status="idle"]) {
+    border-color: rgba(158, 206, 106, 0.2);
+    box-shadow:
+      0 12px 40px rgba(0, 0, 0, 0.4),
+      0 0 50px rgba(158, 206, 106, 0.06),
+      inset 0 1px 0 rgba(158, 206, 106, 0.16),
+      inset 1px 0 0 rgba(158, 206, 106, 0.07),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.18),
+      inset -1px 0 0 rgba(0, 0, 0, 0.06);
+  }
 }
 
 .sectionLabel {
@@ -18,11 +70,12 @@
 
 .error {
   padding: 10px 14px;
-  background: #12121d;
-  border: 1px solid #f7768e28;
-  border-radius: 4px;
+  background: rgba(247, 118, 142, 0.06);
+  border: 1px solid rgba(247, 118, 142, 0.2);
+  border-radius: 8px;
   color: #f7768e;
   font-size: 0.8125rem;
   margin-top: 10px;
   letter-spacing: 0.02em;
+  backdrop-filter: blur(8px);
 }
