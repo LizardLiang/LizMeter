@@ -12,6 +12,7 @@ import type {
   CreateTagInput,
   ListSessionsInput,
   ListSessionsResult,
+  NvimActivity,
   SaveSessionInput,
   SaveSessionWithTrackingInput,
   Session,
@@ -36,6 +37,7 @@ const DEFAULT_SETTINGS: TimerSettings = {
 const MIN_DURATION = 60;
 const MAX_DURATION = 7200;
 const MAX_TITLE_LENGTH = 5000;
+const MAX_NVIM_FIELD_LENGTH = 1000;
 
 export function initDatabase(dbPath?: string): void {
   // Close existing connection if any (supports re-initialization in tests)
@@ -109,6 +111,16 @@ export function initDatabase(dbPath?: string): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_cc_idle_cc_session_id ON claude_code_idle_periods(cc_session_id);
+
+    CREATE TABLE IF NOT EXISTS nvim_activity (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      project     TEXT NOT NULL,
+      file        TEXT NOT NULL,
+      recorded_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_nvim_activity_recorded_at ON nvim_activity(recorded_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_nvim_activity_project ON nvim_activity(project);
   `);
 
   // Idempotent migration: add issue columns if they don't exist yet
@@ -184,10 +196,7 @@ function sanitizeTitle(title: unknown): string {
   return trimmed.slice(0, MAX_TITLE_LENGTH);
 }
 
-export function saveSession(input: SaveSessionInput): Session {
-  const database = getDb();
-
-  // Input validation (trust boundary — main process validates all inputs)
+function validateSessionInput(input: SaveSessionInput): string {
   validateTimerType(input.timerType);
   validateIssueProvider(input.issueProvider);
   const title = sanitizeTitle(input.title);
@@ -204,6 +213,31 @@ export function saveSession(input: SaveSessionInput): Session {
   if (typeof input.actualDurationSeconds !== "number" || input.actualDurationSeconds < 0) {
     throw new Error(`Invalid actualDurationSeconds: ${String(input.actualDurationSeconds)}`);
   }
+  return title;
+}
+
+function buildSessionResult(id: string, title: string, input: SaveSessionInput, completedAt: string): Session {
+  return {
+    id,
+    title,
+    timerType: input.timerType,
+    plannedDurationSeconds: input.plannedDurationSeconds,
+    actualDurationSeconds: input.actualDurationSeconds,
+    completedAt,
+    tags: [],
+    issueNumber: input.issueNumber ?? null,
+    issueTitle: input.issueTitle ?? null,
+    issueUrl: input.issueUrl ?? null,
+    issueProvider: input.issueProvider ?? null,
+    issueId: input.issueId ?? null,
+    worklogStatus: "not_logged" as WorklogStatus,
+    worklogId: null,
+  };
+}
+
+export function saveSession(input: SaveSessionInput): Session {
+  const database = getDb();
+  const title = validateSessionInput(input);
 
   const id = crypto.randomUUID();
   const completedAt = new Date().toISOString();
@@ -230,22 +264,7 @@ export function saveSession(input: SaveSessionInput): Session {
     issueId,
   );
 
-  return {
-    id,
-    title,
-    timerType: input.timerType,
-    plannedDurationSeconds: input.plannedDurationSeconds,
-    actualDurationSeconds: input.actualDurationSeconds,
-    completedAt,
-    tags: [],
-    issueNumber: input.issueNumber ?? null,
-    issueTitle: input.issueTitle ?? null,
-    issueUrl: input.issueUrl ?? null,
-    issueProvider,
-    issueId,
-    worklogStatus: "not_logged" as WorklogStatus,
-    worklogId: null,
-  };
+  return buildSessionResult(id, title, input, completedAt);
 }
 
 interface SessionRow {
@@ -367,24 +386,7 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
 
 export function saveSessionWithTracking(input: SaveSessionWithTrackingInput): Session {
   const database = getDb();
-
-  // Input validation (same as saveSession)
-  validateTimerType(input.timerType);
-  validateIssueProvider(input.issueProvider);
-  const title = sanitizeTitle(input.title);
-
-  if (input.timerType === "stopwatch") {
-    if (typeof input.plannedDurationSeconds !== "number" || input.plannedDurationSeconds < 0) {
-      throw new Error(`Invalid plannedDurationSeconds: ${String(input.plannedDurationSeconds)}`);
-    }
-  } else {
-    if (typeof input.plannedDurationSeconds !== "number" || input.plannedDurationSeconds <= 0) {
-      throw new Error(`Invalid plannedDurationSeconds: ${String(input.plannedDurationSeconds)}`);
-    }
-  }
-  if (typeof input.actualDurationSeconds !== "number" || input.actualDurationSeconds < 0) {
-    throw new Error(`Invalid actualDurationSeconds: ${String(input.actualDurationSeconds)}`);
-  }
+  const title = validateSessionInput(input);
 
   const id = crypto.randomUUID();
   const completedAt = new Date().toISOString();
@@ -463,22 +465,7 @@ export function saveSessionWithTracking(input: SaveSessionWithTrackingInput): Se
 
   runTransaction();
 
-  return {
-    id,
-    title,
-    timerType: input.timerType,
-    plannedDurationSeconds: input.plannedDurationSeconds,
-    actualDurationSeconds: input.actualDurationSeconds,
-    completedAt,
-    tags: [],
-    issueNumber: input.issueNumber ?? null,
-    issueTitle: input.issueTitle ?? null,
-    issueUrl: input.issueUrl ?? null,
-    issueProvider,
-    issueId,
-    worklogStatus: "not_logged" as WorklogStatus,
-    worklogId: null,
-  };
+  return buildSessionResult(id, title, input, completedAt);
 }
 
 export function getClaudeCodeDataForSession(
@@ -794,4 +781,74 @@ export function saveSettings(settings: TimerSettings): void {
   });
 
   upsertMany();
+}
+
+// --- Neovim Activity Functions ---
+
+interface NvimActivityRow {
+  id: number;
+  project: string;
+  file: string;
+  recorded_at: string;
+}
+
+export function isDuplicateNvimActivity(project: string, file: string): boolean {
+  const database = getDb();
+  const cutoff = new Date(Date.now() - 60_000).toISOString();
+  const row = database
+    .prepare(
+      `SELECT id FROM nvim_activity
+       WHERE project = ? AND file = ? AND recorded_at >= ?
+       LIMIT 1`,
+    )
+    .get(project, file, cutoff) as { id: number } | undefined;
+  return row !== undefined;
+}
+
+export function insertNvimActivity(project: string, file: string): void {
+  if (
+    typeof project !== "string" ||
+    typeof file !== "string" ||
+    project.trim().length === 0 ||
+    file.trim().length === 0 ||
+    project.trim().length > MAX_NVIM_FIELD_LENGTH ||
+    file.trim().length > MAX_NVIM_FIELD_LENGTH
+  ) {
+    throw new Error("Invalid project or file value for nvim_activity insert");
+  }
+  const database = getDb();
+  const recordedAt = new Date().toISOString();
+  database
+    .prepare("INSERT INTO nvim_activity (project, file, recorded_at) VALUES (?, ?, ?)")
+    .run(project.trim(), file.trim(), recordedAt);
+}
+
+export function listNvimActivityByDate(date: string): { records: NvimActivity[] } {
+  const database = getDb();
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error(`Invalid date format: "${date}". Expected YYYY-MM-DD.`);
+  }
+
+  // Compute local day boundaries as ISO strings
+  const startOfDay = new Date(`${date}T00:00:00`).toISOString();
+  const nextDay = new Date(new Date(`${date}T00:00:00`).getTime() + 86400000).toISOString();
+
+  const rows = database
+    .prepare(
+      `SELECT id, project, file, recorded_at
+       FROM nvim_activity
+       WHERE recorded_at >= ? AND recorded_at < ?
+       ORDER BY recorded_at DESC`,
+    )
+    .all(startOfDay, nextDay) as NvimActivityRow[];
+
+  const records: NvimActivity[] = rows.map((row) => ({
+    id: row.id,
+    project: row.project,
+    file: row.file,
+    recordedAt: row.recorded_at,
+  }));
+
+  return { records };
 }

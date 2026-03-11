@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' file: data:" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@600;700&display=swap" rel="stylesheet" />
+    <title>LizMeter Widget</title>
+    <style>
+      :root {
+        --tn-bg: #1a1b2e;
+        --tn-panel: #16213e;
+        --tn-surface: #1f2335;
+        --tn-border: #292e42;
+        --tn-text: #c0caf5;
+        --tn-text-dim: #a9b1d6;
+        --tn-muted: #565f89;
+        --tn-blue: #7aa2f7;
+        --tn-purple: #bb9af7;
+        --tn-green: #9ece6a;
+        --tn-yellow: #e0af68;
+        --tn-red: #f7768e;
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      html,
+      body {
+        width: 240px;
+        min-height: 80px;
+        overflow: hidden;
+        background: transparent;
+        font-family:
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          Roboto,
+          sans-serif;
+      }
+
+      #root {
+        width: 240px;
+        min-height: 80px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="./index.tsx"></script>
+  </body>
+</html>

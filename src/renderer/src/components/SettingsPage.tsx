@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+  AvatarPaths,
   IssueProviderStatus,
   JiraAuthType,
   JiraProviderStatus,
@@ -7,6 +8,7 @@ import type {
   LinearTeam,
   StopwatchSettings,
   TimerSettings,
+  WidgetSettings,
 } from "../../../shared/types.ts";
 import styles from "./SettingsPage.module.scss";
 
@@ -79,10 +81,27 @@ export function SettingsPage({
   const [jiraTesting, setJiraTesting] = useState(false);
   const [jiraTestResult, setJiraTestResult] = useState<{ ok: boolean; message: string; } | null>(null);
 
+  // Widget state
+  const [widgetSettings, setWidgetSettings] = useState<WidgetSettings>({
+    enabled: false,
+    visibility: "always",
+    position: null,
+    avatars: { idle: null, thinking: null, tool_use: null },
+  });
+  const [widgetSaving, setWidgetSaving] = useState(false);
+
+  // Avatar state
+  const [avatarPaths, setAvatarPaths] = useState<AvatarPaths>({ idle: null, thinking: null, tool_use: null });
+  const [avatarNaturalSizes, setAvatarNaturalSizes] = useState<Record<string, number>>({});
+
   useEffect(() => {
     void window.electronAPI.issues.providerStatus().then(setTokenStatus);
     void window.electronAPI.linear.providerStatus().then(setLinearStatus);
     void window.electronAPI.jira.providerStatus().then(setJiraStatus);
+    void window.electronAPI.widget.getSettings().then((settings) => {
+      setWidgetSettings(settings);
+      setAvatarPaths(settings.avatars);
+    });
   }, []);
 
   async function handleSaveToken() {
@@ -265,6 +284,55 @@ export function SettingsPage({
     setJiraJqlFilter("");
     const providerStatus = await window.electronAPI.issues.providerStatus();
     setTokenStatus(providerStatus);
+  }
+
+  // Widget handlers
+
+  async function handleWidgetToggle(enabled: boolean) {
+    setWidgetSaving(true);
+    try {
+      await window.electronAPI.widget.saveSettings({ enabled });
+      setWidgetSettings((prev) => ({ ...prev, enabled }));
+    } finally {
+      setWidgetSaving(false);
+    }
+  }
+
+  async function handleWidgetVisibilityChange(visibility: WidgetSettings["visibility"]) {
+    setWidgetSaving(true);
+    try {
+      await window.electronAPI.widget.saveSettings({ visibility });
+      setWidgetSettings((prev) => ({ ...prev, visibility }));
+    } finally {
+      setWidgetSaving(false);
+    }
+  }
+
+  async function handleWidgetResetPosition() {
+    setWidgetSaving(true);
+    try {
+      await window.electronAPI.widget.saveSettings({ position: null });
+      setWidgetSettings((prev) => ({ ...prev, position: null }));
+    } finally {
+      setWidgetSaving(false);
+    }
+  }
+
+  async function handleAvatarUpload(slot: keyof AvatarPaths) {
+    const path = await window.electronAPI.widget.uploadAvatar(slot);
+    if (path) {
+      setAvatarPaths((prev) => ({ ...prev, [slot]: path }));
+    }
+  }
+
+  async function handleAvatarRemove(slot: keyof AvatarPaths) {
+    await window.electronAPI.widget.removeAvatar(slot);
+    setAvatarPaths((prev) => ({ ...prev, [slot]: null }));
+    setAvatarNaturalSizes((prev) => {
+      const next = { ...prev };
+      delete next[slot];
+      return next;
+    });
   }
 
   async function handleSave() {
@@ -683,6 +751,105 @@ export function SettingsPage({
             )}
           </>
         )}
+
+      {/* --- Widget Section --- */}
+      <div className={styles.sectionDivider} />
+      <h2 className={styles.sectionHeading}>Desktop Widget</h2>
+
+      <label className={styles.checkboxRow}>
+        <input
+          type="checkbox"
+          checked={widgetSettings.enabled}
+          disabled={widgetSaving}
+          onChange={(e) => void handleWidgetToggle(e.target.checked)}
+        />
+        <span className={styles.checkboxLabel}>Enable Widget</span>
+      </label>
+
+      {widgetSettings.enabled && (
+        <>
+          <label className={styles.label} style={{ marginTop: 16, display: "block" }}>
+            Visibility
+          </label>
+          <div className={styles.segmentedControl} style={{ marginTop: 8 }}>
+            <button
+              className={`${styles.segmentBtn} ${
+                widgetSettings.visibility === "always" ? styles.segmentBtnActive : ""
+              }`}
+              onClick={() => void handleWidgetVisibilityChange("always")}
+              disabled={widgetSaving}
+            >
+              Always visible
+            </button>
+            <button
+              className={`${styles.segmentBtn} ${
+                widgetSettings.visibility === "when-active" ? styles.segmentBtnActive : ""
+              }`}
+              onClick={() => void handleWidgetVisibilityChange("when-active")}
+              disabled={widgetSaving}
+            >
+              When active
+            </button>
+          </div>
+
+          <button
+            className={styles.testTokenBtn}
+            style={{ marginTop: 12 }}
+            onClick={() => void handleWidgetResetPosition()}
+            disabled={widgetSaving}
+          >
+            Reset Position
+          </button>
+
+          <label className={styles.label} style={{ marginTop: 16, display: "block" }}>
+            Avatar
+          </label>
+          <p className={styles.tokenHint}>
+            Upload GIF/PNG for each Claude session status. Pixel art auto-scales crispy.
+          </p>
+          <div className={styles.avatarGrid}>
+            {(["idle", "thinking", "tool_use"] as const).map((slot) => {
+              const src = avatarPaths[slot];
+              const isPixelArt = (avatarNaturalSizes[slot] ?? 0) <= 128 && (avatarNaturalSizes[slot] ?? 0) > 0;
+              const label = slot === "tool_use" ? "Working" : slot.charAt(0).toUpperCase() + slot.slice(1);
+              return (
+                <div key={slot} className={styles.avatarSlot}>
+                  <span className={styles.avatarSlotLabel}>{label}</span>
+                  <div
+                    className={styles.avatarPreview}
+                    onClick={() => void handleAvatarUpload(slot)}
+                    title={`Upload ${label} avatar`}
+                  >
+                    {src
+                      ? (
+                        <img
+                          src={src}
+                          className={isPixelArt ? styles.pixelArt : ""}
+                          onLoad={(e) => {
+                            const img = e.currentTarget as HTMLImageElement;
+                            setAvatarNaturalSizes((prev) => ({
+                              ...prev,
+                              [slot]: Math.max(img.naturalWidth, img.naturalHeight),
+                            }));
+                          }}
+                        />
+                      )
+                      : <span className={styles.avatarPlaceholder}>+</span>}
+                  </div>
+                  {src && (
+                    <button
+                      className={styles.avatarRemoveBtn}
+                      onClick={() => void handleAvatarRemove(slot)}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
 
       {/* --- Time Tracking Section --- */}
       {stopwatchSettings && onStopwatchSettingsChange && (

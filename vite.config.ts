@@ -5,6 +5,8 @@ import react from "@vitejs/plugin-react";
 import electron from "vite-plugin-electron/simple";
 import pkg from "./package.json";
 
+const __dirname = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, "$1"));
+
 export default defineConfig(({ command }) => {
   rmSync("dist-electron", { recursive: true, force: true });
 
@@ -42,7 +44,10 @@ export default defineConfig(({ command }) => {
           },
         },
         preload: {
-          input: "electron/preload/index.ts",
+          input: {
+            index: "electron/preload/index.ts",
+            widget: "electron/preload/widget.ts",
+          },
           vite: {
             build: {
               sourcemap: sourcemap ? "inline" : undefined,
@@ -50,12 +55,23 @@ export default defineConfig(({ command }) => {
               outDir: "dist-electron/preload",
               rollupOptions: {
                 external: Object.keys("dependencies" in pkg ? pkg.dependencies : {}),
+                output: {
+                  inlineDynamicImports: false,
+                },
               },
             },
           },
         },
       }),
     ],
+    build: {
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, "index.html"),
+          widget: path.resolve(__dirname, "src/renderer/widget/index.html"),
+        },
+      },
+    },
     server: {
       port: 5173,
       watch: {

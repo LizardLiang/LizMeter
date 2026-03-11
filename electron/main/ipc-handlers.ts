@@ -1,8 +1,11 @@
 // electron/main/ipc-handlers.ts
 // Registers all IPC handlers for the main process
 
-import { ipcMain, shell } from "electron";
+import { Notification, app, dialog, ipcMain, screen, shell } from "electron";
+import fs from "node:fs";
+import path from "node:path";
 import type {
+  AvatarPaths,
   AssignTagInput,
   CreateTagInput,
   IssueProviderStatus,
@@ -11,12 +14,19 @@ import type {
   JiraAuthType,
   JiraProviderStatus,
   LinearProviderStatus,
+  ListNvimActivityInput,
   ListSessionsInput,
   SaveSessionInput,
   SaveSessionWithTrackingInput,
   TimerSettings,
   UpdateTagInput,
+  WidgetControlAction,
+  WidgetSettings,
+  WidgetTimerSnapshot,
 } from "../../src/shared/types.ts";
+import { WIDGET_SETTINGS_KEYS } from "../../src/shared/types.ts";
+import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widget-window.ts";
+import { getMainWindow } from "./index.ts";
 import {
   assignTag,
   createTag,
@@ -27,6 +37,7 @@ import {
   getSessionById,
   getSettingValue,
   getSettings,
+  listNvimActivityByDate,
   listSessions,
   listTags,
   listTagsForSession,
@@ -403,6 +414,241 @@ export function registerIpcHandlers(): void {
     }
   });
 
+  // Neovim Activity handlers
+  ipcMain.handle("nvim-activity:list-by-date", (_event, input: ListNvimActivityInput) => {
+    return listNvimActivityByDate(input.date);
+  });
+
+  // Notification handler
+  ipcMain.handle("notification:timer-complete", (_event, title: string, body: string) => {
+    if (typeof title !== "string" || typeof body !== "string") return;
+    if (Notification.isSupported()) {
+      new Notification({ title, body }).show();
+    }
+  });
+
+  // --- Widget IPC handlers ---
+
+  // Cache of the latest snapshot for answering requestState
+  let cachedSnapshot: WidgetTimerSnapshot | null = null;
+
+  // Main renderer pushes state updates → relay to widget
+  ipcMain.on("widget:state-update", (_event, snapshot: WidgetTimerSnapshot) => {
+    cachedSnapshot = snapshot;
+    const widget = getWidgetWindow();
+    if (widget && !widget.isDestroyed()) {
+      widget.webContents.send("widget:state-push", snapshot);
+      // Show/hide widget based on "when-active" visibility setting
+      const visibility = getSettingValue(WIDGET_SETTINGS_KEYS.VISIBILITY) || "always";
+      if (visibility === "when-active") {
+        const isActive = snapshot.status === "running" || snapshot.status === "paused";
+        if (isActive) {
+          widget.show();
+        } else {
+          widget.hide();
+        }
+      }
+    }
+  });
+
+  // Widget sends a control action → relay to main renderer
+  ipcMain.on("widget:control", (_event, action: WidgetControlAction) => {
+    const main = getMainWindow();
+    if (main && !main.isDestroyed()) {
+      main.webContents.send("widget:control-relay", action);
+      // Bring main window to front on stop
+      if (action === "stop") {
+        if (main.isMinimized()) main.restore();
+        main.show();
+        main.focus();
+      }
+    }
+  });
+
+  // Widget requests current state → send cached snapshot and relay to main renderer
+  ipcMain.on("widget:request-state", () => {
+    const widget = getWidgetWindow();
+    if (cachedSnapshot && widget && !widget.isDestroyed()) {
+      widget.webContents.send("widget:state-push", cachedSnapshot);
+    }
+    const main = getMainWindow();
+    if (main && !main.isDestroyed()) {
+      main.webContents.send("widget:request-state-relay");
+    }
+  });
+
+  // Widget moved — persist position
+  ipcMain.on("widget:move", (_event, pos: { x: number; y: number }) => {
+    setSettingValue(WIDGET_SETTINGS_KEYS.POS_X, String(pos.x));
+    setSettingValue(WIDGET_SETTINGS_KEYS.POS_Y, String(pos.y));
+  });
+
+  // Helper: read avatar file and return as data URI, or null if missing
+  function fileToDataUri(filePath: string | null): string | null {
+    if (!filePath || !fs.existsSync(filePath)) return null;
+    const ext = path.extname(filePath).toLowerCase().replace(".", "");
+    const mimeMap: Record<string, string> = {
+      gif: "image/gif",
+      png: "image/png",
+      webp: "image/webp",
+      apng: "image/apng",
+    };
+    const mime = mimeMap[ext] ?? "image/png";
+    const data = fs.readFileSync(filePath);
+    return `data:${mime};base64,${data.toString("base64")}`;
+  }
+
+  // Helper: read avatar data URIs from settings
+  function getAvatarDataUris(): AvatarPaths {
+    return {
+      idle: fileToDataUri(getSettingValue(WIDGET_SETTINGS_KEYS.AVATAR_IDLE)),
+      thinking: fileToDataUri(getSettingValue(WIDGET_SETTINGS_KEYS.AVATAR_THINKING)),
+      tool_use: fileToDataUri(getSettingValue(WIDGET_SETTINGS_KEYS.AVATAR_TOOL_USE)),
+    };
+  }
+
+  // Helper: check if any avatar file path is stored
+  function hasAnyAvatar(): boolean {
+    return !!(
+      getSettingValue(WIDGET_SETTINGS_KEYS.AVATAR_IDLE)
+      || getSettingValue(WIDGET_SETTINGS_KEYS.AVATAR_THINKING)
+      || getSettingValue(WIDGET_SETTINGS_KEYS.AVATAR_TOOL_USE)
+    );
+  }
+
+  // Get all widget settings
+  ipcMain.handle("widget:settings-get", (): WidgetSettings => {
+    const enabled = getSettingValue(WIDGET_SETTINGS_KEYS.ENABLED) === "true";
+    const visibilityRaw = getSettingValue(WIDGET_SETTINGS_KEYS.VISIBILITY);
+    const visibility = (visibilityRaw === "when-active" ? "when-active" : "always") as WidgetSettings["visibility"];
+    const posXStr = getSettingValue(WIDGET_SETTINGS_KEYS.POS_X);
+    const posYStr = getSettingValue(WIDGET_SETTINGS_KEYS.POS_Y);
+    const position = posXStr && posYStr
+      ? { x: parseInt(posXStr, 10), y: parseInt(posYStr, 10) }
+      : null;
+    return { enabled, visibility, position, avatars: getAvatarDataUris() };
+  });
+
+  // Save widget settings — create or destroy widget window based on enabled flag
+  ipcMain.handle("widget:settings-save", (_event, settings: Partial<WidgetSettings>) => {
+    if (settings.enabled !== undefined) {
+      setSettingValue(WIDGET_SETTINGS_KEYS.ENABLED, settings.enabled ? "true" : "false");
+      if (settings.enabled) {
+        const posXStr = getSettingValue(WIDGET_SETTINGS_KEYS.POS_X);
+        const posYStr = getSettingValue(WIDGET_SETTINGS_KEYS.POS_Y);
+        const position = posXStr && posYStr
+          ? { x: parseInt(posXStr, 10), y: parseInt(posYStr, 10) }
+          : null;
+        createWidgetWindow(position);
+      } else {
+        destroyWidgetWindow();
+      }
+    }
+    if (settings.visibility !== undefined) {
+      setSettingValue(WIDGET_SETTINGS_KEYS.VISIBILITY, settings.visibility);
+      // Apply visibility immediately
+      const widget = getWidgetWindow();
+      if (widget && !widget.isDestroyed()) {
+        if (settings.visibility === "when-active") {
+          const isActive = cachedSnapshot?.status === "running" || cachedSnapshot?.status === "paused";
+          if (isActive) {
+            widget.show();
+          } else {
+            widget.hide();
+          }
+        } else {
+          widget.show();
+        }
+      }
+    }
+    if (settings.position !== undefined) {
+      if (settings.position === null) {
+        setSettingValue(WIDGET_SETTINGS_KEYS.POS_X, "");
+        setSettingValue(WIDGET_SETTINGS_KEYS.POS_Y, "");
+        // Move widget back to default position
+        const widget = getWidgetWindow();
+        if (widget && !widget.isDestroyed()) {
+          const primaryDisplay = screen.getPrimaryDisplay();
+          const { x, y, width } = primaryDisplay.workArea;
+          widget.setPosition(x + width - 240 - 20, y + 20);
+        }
+      } else {
+        setSettingValue(WIDGET_SETTINGS_KEYS.POS_X, String(settings.position.x));
+        setSettingValue(WIDGET_SETTINGS_KEYS.POS_Y, String(settings.position.y));
+      }
+    }
+  });
+
+  // --- Avatar IPC handlers ---
+
+  const AVATAR_SLOT_KEY_MAP: Record<keyof AvatarPaths, string> = {
+    idle: WIDGET_SETTINGS_KEYS.AVATAR_IDLE,
+    thinking: WIDGET_SETTINGS_KEYS.AVATAR_THINKING,
+    tool_use: WIDGET_SETTINGS_KEYS.AVATAR_TOOL_USE,
+  };
+
+  function getAvatarsDir(): string {
+    const dir = path.join(app.getPath("userData"), "avatars");
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    return dir;
+  }
+
+  function resizeWidgetForAvatars(): void {
+    const widget = getWidgetWindow();
+    if (!widget || widget.isDestroyed()) return;
+    const [w] = widget.getSize();
+    widget.setSize(w, hasAnyAvatar() ? 112 : 80);
+  }
+
+  ipcMain.handle("widget:avatar-upload", async (_event, slot: keyof AvatarPaths): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      title: `Select avatar for "${slot}" status`,
+      filters: [{ name: "Images", extensions: ["gif", "png", "webp", "apng"] }],
+      properties: ["openFile"],
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+
+    const srcPath = result.filePaths[0]!;
+    const ext = path.extname(srcPath);
+    const destName = `avatar-${slot}${ext}`;
+    const destPath = path.join(getAvatarsDir(), destName);
+    fs.copyFileSync(srcPath, destPath);
+
+    const settingsKey = AVATAR_SLOT_KEY_MAP[slot];
+    setSettingValue(settingsKey, destPath);
+
+    // Notify widget of updated avatars and resize
+    const widget = getWidgetWindow();
+    if (widget && !widget.isDestroyed()) {
+      widget.webContents.send("widget:avatars-updated", getAvatarDataUris());
+    }
+    resizeWidgetForAvatars();
+
+    return fileToDataUri(destPath);
+  });
+
+  ipcMain.handle("widget:avatar-remove", (_event, slot: keyof AvatarPaths) => {
+    const settingsKey = AVATAR_SLOT_KEY_MAP[slot];
+    const currentPath = getSettingValue(settingsKey);
+    if (currentPath && fs.existsSync(currentPath)) {
+      fs.unlinkSync(currentPath);
+    }
+    deleteSettingValue(settingsKey);
+
+    // Notify widget of updated avatars and resize
+    const widget = getWidgetWindow();
+    if (widget && !widget.isDestroyed()) {
+      widget.webContents.send("widget:avatars-updated", getAvatarDataUris());
+    }
+    resizeWidgetForAvatars();
+  });
+
+  ipcMain.handle("widget:avatar-get-paths", (): AvatarPaths => {
+    return getAvatarDataUris();
+  });
+
   // Mark sessions as logged without making a Jira API call (used for bulk combined worklogs)
   ipcMain.handle(
     "worklog:mark-logged",
@@ -413,7 +659,6 @@ export function registerIpcHandlers(): void {
     },
   );
 
-  // Worklog IPC handler
   ipcMain.handle(
     "worklog:log",
     async (

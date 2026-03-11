@@ -42,7 +42,7 @@ const frozenSessions: Map<string, SessionState> = new Map(); // removed mid-run 
 let discoveredSessions: ClaudeCodeSessionPreview[] = []; // scan results (v1.2)
 const trackedUuids: Set<string> = new Set(); // user-selected session UUIDs (v1.2)
 let targetWebContents: WebContents | null = null;
-let idleThresholdMs: number = 5 * 60 * 1000; // default 5 minutes
+let idleThresholdMs: number = 15 * 60 * 1000; // default 15 minutes
 // watchedProjectPath is set at scan time and cleared at stop; used as sentinel for active-scan state
 let watchedProjectPath: string | null = null; // resolved path for directory watcher (v1.2)
 let isPaused: boolean = false; // pause/resume state (v1.2)
@@ -184,6 +184,8 @@ export function readNewLines(filePath: string, startOffset: number, partialLineB
     const fileSize = stat.size;
 
     if (fileSize <= startOffset) {
+      fs.closeSync(fd);
+      fd = null;
       return { lines: [], newOffset: startOffset, newPartialLine: partialLineBuf };
     }
 
@@ -199,9 +201,13 @@ export function readNewLines(filePath: string, startOffset: number, partialLineB
     const incompleteEnd = rawLines.pop() ?? "";
 
     // Cap partial line buffer to prevent memory issues
-    const newPartialLine = incompleteEnd.length > MAX_PARTIAL_LINE_BYTES
-      ? (console.warn(`[claude-tracker] Partial line exceeds 1MB cap in ${filePath}, discarding`), "")
-      : incompleteEnd;
+    let newPartialLine: string;
+    if (incompleteEnd.length > MAX_PARTIAL_LINE_BYTES) {
+      console.warn(`[claude-tracker] Partial line exceeds 1MB cap in ${filePath}, discarding`);
+      newPartialLine = "";
+    } else {
+      newPartialLine = incompleteEnd;
+    }
 
     const lines: JsonlLine[] = [];
     for (const raw of rawLines) {
@@ -230,8 +236,9 @@ export function readNewLines(filePath: string, startOffset: number, partialLineB
 // --- Last Line Reader (for initial scan buffer check) ---
 
 function readLastLineTimestamp(filePath: string): string | null {
+  let fd: number | null = null;
   try {
-    const fd = fs.openSync(filePath, "r");
+    fd = fs.openSync(filePath, "r");
     const stat = fs.fstatSync(fd);
     const fileSize = stat.size;
     if (fileSize === 0) {
@@ -244,6 +251,7 @@ function readLastLineTimestamp(filePath: string): string | null {
     const buffer = Buffer.alloc(readSize);
     fs.readSync(fd, buffer, 0, readSize, fileSize - readSize);
     fs.closeSync(fd);
+    fd = null;
 
     const chunk = buffer.toString("utf8");
     const lines = chunk.split("\n").filter((l) => l.trim().length > 0);
@@ -254,6 +262,13 @@ function readLastLineTimestamp(filePath: string): string | null {
     }
     return null;
   } catch {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
     return null;
   }
 }
@@ -405,39 +420,39 @@ export function processLines(state: SessionState, lines: JsonlLine[], idleThresh
 // --- Aggregation ---
 
 /**
- * Derive session activity from the most recently active tracked session.
- * Uses the last JSONL line type to infer what Claude is doing.
+ * Derive session activity by aggregating across ALL tracked sessions.
+ * Priority: thinking > tool_use > idle. This ensures sub-agent activity
+ * is reflected even when the parent/orchestrator session is idle.
  */
 function deriveSessionActivity(states: SessionState[]): ClaudeSessionActivity | undefined {
   if (states.length === 0) return undefined;
 
-  // Find the session with the most recent activity
-  let mostRecent: SessionState | null = null;
+  // Collect activity from each session, then pick highest-priority
+  let hasThinking = false;
+  let bestToolUse: SessionState | null = null; // most recent tool_use session
+  let hasIdle = false;
+
   for (const s of states) {
-    if (!s.lastActivityAt) continue;
-    if (!mostRecent || s.lastActivityAt > mostRecent.lastActivityAt!) {
-      mostRecent = s;
+    if (!s.lastLineType || !s.lastActivityAt) continue;
+
+    if (s.lastLineType === "user") {
+      hasThinking = true;
+    } else if (s.lastLineType === "assistant") {
+      if (s.lastToolNames.length > 0) {
+        if (!bestToolUse || s.lastActivityAt > bestToolUse.lastActivityAt!) {
+          bestToolUse = s;
+        }
+      } else {
+        hasIdle = true;
+      }
     }
   }
 
-  if (!mostRecent || !mostRecent.lastLineType) return undefined;
+  // Priority: thinking > tool_use > idle
+  if (hasThinking) return { type: "thinking" };
+  if (bestToolUse) return { type: "tool_use", toolNames: bestToolUse.lastToolNames };
+  if (hasIdle) return { type: "idle" };
 
-  // Infer activity from last line type:
-  // - "user" line → Claude received input, is thinking/reasoning
-  // - "assistant" with tool_use → Claude just used tools
-  // - "assistant" without tool_use → Claude finished responding, idle
-  if (mostRecent.lastLineType === "user") {
-    return { type: "thinking" };
-  }
-
-  if (mostRecent.lastLineType === "assistant") {
-    if (mostRecent.lastToolNames.length > 0) {
-      return { type: "tool_use", toolNames: mostRecent.lastToolNames };
-    }
-    return { type: "idle" };
-  }
-
-  // Other line types (file-history-snapshot, system, etc.) — don't change activity
   return undefined;
 }
 
@@ -603,7 +618,8 @@ function watchDirectory(projectPath: string): void {
 
       if (trackedUuids.size > 0) {
         // Already tracking sessions — auto-add the new one silently
-        trackSelectedSessions([...Array.from(trackedUuids), ccSessionUuid]);
+        // readFromStart=true: read full history so sub-agent activity is captured immediately
+        trackSelectedSessions([...trackedUuids, ccSessionUuid], true);
         pushUpdate();
       } else {
         // Not tracking yet — notify the user so they can start
@@ -750,9 +766,11 @@ function scanAndBuildPreviews(projectPath: string): ClaudeCodeSessionPreview[] {
  * Phase 2 (v1.2): Begin tracking only user-selected Claude Code sessions.
  * Can be called multiple times mid-run to update the tracked set.
  * Sessions removed from the set are frozen (data preserved, watcher closed).
+ * @param readFromStart - If true, new sessions read from byte 0 (captures sub-agent history).
  */
 export function trackSelectedSessions(
   sessionUuids: string[],
+  readFromStart: boolean = false,
 ): { tracked: number } {
   const newUuidSet = new Set(sessionUuids);
 
@@ -813,7 +831,7 @@ export function trackSelectedSessions(
       firstActivityAt: null,
       lastActivityAt: null,
       idlePeriods: [],
-      bytesRead: fileSize, // start at current end (only track new activity)
+      bytesRead: readFromStart ? 0 : fileSize, // readFromStart=true for auto-added sub-agent sessions
       filePath: preview.filePath,
       partialLine: "",
       lastLineType: null,
@@ -851,14 +869,15 @@ export function resumeTracking(): void {
   isPaused = false;
 }
 
-function stopTracking(): ClaudeCodeSessionData[] {
-  // Clear debounce timers
+/**
+ * Releases all watchers, timers, and queues. Shared by stopTracking and destroyTracker.
+ */
+function releaseResources(): void {
   for (const timer of debounceTimers.values()) {
     clearTimeout(timer);
   }
   debounceTimers.clear();
 
-  // Close file watchers
   for (const watcher of fileWatchers.values()) {
     try {
       watcher.close();
@@ -868,7 +887,6 @@ function stopTracking(): ClaudeCodeSessionData[] {
   }
   fileWatchers.clear();
 
-  // Close directory watcher
   if (directoryWatcher) {
     try {
       directoryWatcher.close();
@@ -878,18 +896,20 @@ function stopTracking(): ClaudeCodeSessionData[] {
     directoryWatcher = null;
   }
 
-  // Clear fallback poll
   if (fallbackPollInterval) {
     clearInterval(fallbackPollInterval);
     fallbackPollInterval = null;
   }
 
-  // Clear new-session emit timer
   if (newSessionEmitTimer) {
     clearTimeout(newSessionEmitTimer);
     newSessionEmitTimer = null;
   }
   newSessionQueue.length = 0;
+}
+
+function stopTracking(): ClaudeCodeSessionData[] {
+  releaseResources();
 
   // Do final read of all active tracked files
   for (const uuid of sessionState.keys()) {
@@ -897,10 +917,7 @@ function stopTracking(): ClaudeCodeSessionData[] {
   }
 
   // Merge active sessions + frozen sessions into result
-  const allStates = [
-    ...Array.from(sessionState.values()),
-    ...Array.from(frozenSessions.values()),
-  ];
+  const allStates = [...sessionState.values(), ...frozenSessions.values()];
 
   const result: ClaudeCodeSessionData[] = allStates.map((s) => ({
     ccSessionUuid: s.ccSessionUuid,
@@ -1018,44 +1035,7 @@ export function getProjects(): { projects: ClaudeCodeProject[] } {
  * Safe to call multiple times (idempotent).
  */
 export function destroyTracker(): void {
-  // Clear debounce timers
-  for (const timer of debounceTimers.values()) {
-    clearTimeout(timer);
-  }
-  debounceTimers.clear();
-
-  // Close file watchers
-  for (const watcher of fileWatchers.values()) {
-    try {
-      watcher.close();
-    } catch {
-      // ignore
-    }
-  }
-  fileWatchers.clear();
-
-  // Close directory watcher
-  if (directoryWatcher) {
-    try {
-      directoryWatcher.close();
-    } catch {
-      // ignore
-    }
-    directoryWatcher = null;
-  }
-
-  // Clear fallback poll interval
-  if (fallbackPollInterval) {
-    clearInterval(fallbackPollInterval);
-    fallbackPollInterval = null;
-  }
-
-  // Clear new-session emit timer
-  if (newSessionEmitTimer) {
-    clearTimeout(newSessionEmitTimer);
-    newSessionEmitTimer = null;
-  }
-  newSessionQueue.length = 0;
+  releaseResources();
 
   // Clear in-memory state
   sessionState.clear();

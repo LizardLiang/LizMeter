@@ -289,6 +289,76 @@
   border-radius: 3px;
 }
 
+// --- Avatar upload section ---
+
+.avatarGrid {
+  display: flex;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.avatarSlot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.avatarSlotLabel {
+  font-size: 11px;
+  color: #565f89;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.avatarPreview {
+  width: 64px;
+  height: 64px;
+  border-radius: 8px;
+  border: 1px dashed rgba(122, 162, 247, 0.25);
+  background: rgba(12, 13, 24, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  overflow: hidden;
+
+  &:hover {
+    border-color: rgba(122, 162, 247, 0.5);
+    background: rgba(12, 13, 24, 0.7);
+  }
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+
+    &.pixelArt {
+      image-rendering: pixelated;
+    }
+  }
+}
+
+.avatarPlaceholder {
+  font-size: 20px;
+  color: #565f89;
+}
+
+.avatarRemoveBtn {
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #f7768e30;
+  background: transparent;
+  color: #f7768e;
+  font-size: 10px;
+  cursor: pointer;
+
+  &:hover {
+    background: #f7768e10;
+  }
+}
+
 // --- Time Tracking settings ---
 
 .checkboxRow {

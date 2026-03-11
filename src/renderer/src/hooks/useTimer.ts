@@ -10,6 +10,7 @@ import type {
   TimerStatus,
   TimerType,
 } from "../../../shared/types.ts";
+import { stripHtml } from "../utils/html.ts";
 
 // --- State ---
 
@@ -248,11 +249,7 @@ export function useTimer(
   const customSaveRef = useRef(customSave);
   useLayoutEffect(() => {
     onSavedRef.current = onSaved;
-  });
-  useLayoutEffect(() => {
     pendingIssueRef.current = pendingIssue;
-  });
-  useLayoutEffect(() => {
     customSaveRef.current = customSave;
   });
 
@@ -294,29 +291,36 @@ export function useTimer(
     const actualDurationSeconds = Math.round(state.accumulatedActiveMs / 1000);
 
     const issue = pendingIssueRef.current;
-    const issueFields = !issue
-      ? {}
-      : issue.provider === "github"
-      ? {
-        issueNumber: issue.number,
-        issueTitle: issue.title,
-        issueUrl: issue.url,
-        issueProvider: "github" as const,
-        issueId: String(issue.number),
+    let issueFields: Partial<SaveSessionInput> = {};
+    if (issue) {
+      switch (issue.provider) {
+        case "github":
+          issueFields = {
+            issueNumber: issue.number,
+            issueTitle: issue.title,
+            issueUrl: issue.url,
+            issueProvider: "github",
+            issueId: String(issue.number),
+          };
+          break;
+        case "linear":
+          issueFields = {
+            issueTitle: issue.title,
+            issueUrl: issue.url,
+            issueProvider: "linear",
+            issueId: issue.identifier,
+          };
+          break;
+        case "jira":
+          issueFields = {
+            issueTitle: issue.title,
+            issueUrl: issue.url,
+            issueProvider: "jira",
+            issueId: issue.key,
+          };
+          break;
       }
-      : issue.provider === "linear"
-      ? {
-        issueTitle: issue.title,
-        issueUrl: issue.url,
-        issueProvider: "linear" as const,
-        issueId: issue.identifier,
-      }
-      : {
-        issueTitle: issue.title,
-        issueUrl: issue.url,
-        issueProvider: "jira" as const,
-        issueId: issue.key,
-      };
+    }
     const saveInput: SaveSessionInput = {
       title: state.title,
       timerType: state.timerType,
@@ -324,6 +328,26 @@ export function useTimer(
       actualDurationSeconds,
       ...issueFields,
     };
+
+    // Fire OS notification (best-effort, don't block save)
+    const plainTitle = stripHtml(state.title);
+    let notifTitle: string;
+    let notifBody: string;
+    switch (state.timerType) {
+      case "work":
+        notifTitle = "Pomodoro Complete!";
+        notifBody = plainTitle ? `"${plainTitle}" is done. Time for a break!` : "Time for a break!";
+        break;
+      case "stopwatch":
+        notifTitle = "Session Complete!";
+        notifBody = plainTitle ? `"${plainTitle}" is done.` : "Session ended.";
+        break;
+      default:
+        notifTitle = "Break Complete!";
+        notifBody = "Ready to focus?";
+        break;
+    }
+    window.electronAPI.notification?.timerComplete(notifTitle, notifBody)?.catch(() => {});
 
     const saveFn = customSaveRef.current ?? window.electronAPI.session.save;
     saveFn(saveInput)

@@ -286,6 +286,28 @@ export const IDLE_THRESHOLD_MIN = 1; // minutes
 export const IDLE_THRESHOLD_MAX = 60; // minutes
 export const IDLE_THRESHOLD_DEFAULT = 5; // minutes
 
+// --- Neovim Activity Types ---
+
+export interface NvimActivity {
+  id: number;
+  project: string;
+  file: string;
+  recordedAt: string; // ISO 8601
+}
+
+export interface NvimActivityGroup {
+  project: string;
+  activities: NvimActivity[];
+}
+
+export interface ListNvimActivityInput {
+  date: string; // "YYYY-MM-DD" local date string
+}
+
+export interface ListNvimActivityResult {
+  records: NvimActivity[];
+}
+
 // Input type for the atomic save
 export interface SaveSessionWithTrackingInput {
   // Timer session fields (same as SaveSessionInput)
@@ -372,6 +394,9 @@ export interface ElectronAPI {
   shell: {
     openExternal: (url: string) => Promise<void>;
   };
+  notification: {
+    timerComplete: (title: string, body: string) => Promise<void>;
+  };
   claudeTracker: {
     // Phase 1: Scan (v1.2) -- discover sessions, return previews for picker
     scan: (input: { projectDirName: string; }) => Promise<{
@@ -395,4 +420,67 @@ export interface ElectronAPI {
     onUpdate: (callback: (stats: ClaudeCodeLiveStats) => void) => () => void;
     onNewSession: (callback: (data: { session: ClaudeCodeSessionPreview; }) => void) => () => void; // v1.2
   };
+  nvimActivity: {
+    listByDate: (input: ListNvimActivityInput) => Promise<ListNvimActivityResult>;
+  };
+  widget: {
+    sendStateUpdate: (snapshot: WidgetTimerSnapshot) => void;
+    onControlRelay: (callback: (action: WidgetControlAction) => void) => () => void;
+    onRequestStateRelay: (callback: () => void) => () => void;
+    getSettings: () => Promise<WidgetSettings>;
+    saveSettings: (settings: Partial<WidgetSettings>) => Promise<void>;
+    uploadAvatar: (slot: keyof AvatarPaths) => Promise<string | null>;
+    removeAvatar: (slot: keyof AvatarPaths) => Promise<void>;
+    getAvatarPaths: () => Promise<AvatarPaths>;
+  };
+}
+
+// --- Widget Types ---
+
+/** Timer state snapshot pushed from main renderer to widget */
+export interface WidgetTimerSnapshot {
+  mode: AppMode;
+  status: TimerStatus;
+  timerType: TimerType;
+  displaySeconds: number;
+  title: string;
+  plannedDurationSeconds: number | null;
+  claudeActivity?: ClaudeSessionActivityType;
+}
+
+/** Avatar file paths per Claude session activity status */
+export interface AvatarPaths {
+  idle: string | null;
+  thinking: string | null;
+  tool_use: string | null;
+}
+
+/** Widget visibility and position settings */
+export interface WidgetSettings {
+  enabled: boolean;
+  visibility: "always" | "when-active";
+  position: { x: number; y: number; } | null;
+  avatars: AvatarPaths;
+}
+
+/** Control actions the widget can send to the main renderer */
+export type WidgetControlAction = "play-pause" | "stop";
+
+/** Settings KV store key constants for widget */
+export const WIDGET_SETTINGS_KEYS = {
+  ENABLED: "widget_enabled",
+  VISIBILITY: "widget_visibility",
+  POS_X: "widget_pos_x",
+  POS_Y: "widget_pos_y",
+  AVATAR_IDLE: "widget_avatar_idle",
+  AVATAR_THINKING: "widget_avatar_thinking",
+  AVATAR_TOOL_USE: "widget_avatar_tool_use",
+} as const;
+
+/** Widget preload API exposed via contextBridge as window.widgetAPI */
+export interface WidgetAPI {
+  onStateUpdate: (callback: (snapshot: WidgetTimerSnapshot) => void) => () => void;
+  sendControl: (action: WidgetControlAction) => void;
+  requestState: () => void;
+  getAvatarPaths: () => Promise<AvatarPaths>;
 }

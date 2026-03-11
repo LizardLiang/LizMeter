@@ -1,16 +1,21 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   AssignTagInput,
+  AvatarPaths,
   ClaudeCodeLiveStats,
   ClaudeCodeSessionPreview,
   CreateTagInput,
   IssuesListInput,
   IssuesSetTokenInput,
+  ListNvimActivityInput,
   ListSessionsInput,
   SaveSessionInput,
   SaveSessionWithTrackingInput,
   TimerSettings,
   UpdateTagInput,
+  WidgetControlAction,
+  WidgetSettings,
+  WidgetTimerSnapshot,
   WorklogLogInput,
 } from "../../src/shared/types.ts";
 
@@ -86,6 +91,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
   },
+  notification: {
+    timerComplete: (title: string, body: string) =>
+      ipcRenderer.invoke("notification:timer-complete", title, body),
+  },
   claudeTracker: {
     // Phase 1: Scan (v1.2)
     scan: (input: { projectDirName: string }) => ipcRenderer.invoke("claude-tracker:scan", input),
@@ -123,5 +132,33 @@ contextBridge.exposeInMainWorld("electronAPI", {
         ipcRenderer.removeListener("claude-tracker:new-session", handler);
       };
     },
+  },
+  nvimActivity: {
+    listByDate: (input: ListNvimActivityInput) =>
+      ipcRenderer.invoke("nvim-activity:list-by-date", input),
+  },
+  widget: {
+    sendStateUpdate: (snapshot: WidgetTimerSnapshot) => {
+      ipcRenderer.send("widget:state-update", snapshot);
+    },
+    onControlRelay: (callback: (action: WidgetControlAction) => void) => {
+      const handler = (_event: IpcRendererEvent, action: WidgetControlAction) => callback(action);
+      ipcRenderer.on("widget:control-relay", handler);
+      return () => ipcRenderer.removeListener("widget:control-relay", handler);
+    },
+    onRequestStateRelay: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on("widget:request-state-relay", handler);
+      return () => ipcRenderer.removeListener("widget:request-state-relay", handler);
+    },
+    getSettings: (): Promise<WidgetSettings> => ipcRenderer.invoke("widget:settings-get"),
+    saveSettings: (settings: Partial<WidgetSettings>): Promise<void> =>
+      ipcRenderer.invoke("widget:settings-save", settings),
+    uploadAvatar: (slot: keyof AvatarPaths): Promise<string | null> =>
+      ipcRenderer.invoke("widget:avatar-upload", slot),
+    removeAvatar: (slot: keyof AvatarPaths): Promise<void> =>
+      ipcRenderer.invoke("widget:avatar-remove", slot),
+    getAvatarPaths: (): Promise<AvatarPaths> =>
+      ipcRenderer.invoke("widget:avatar-get-paths"),
   },
 });

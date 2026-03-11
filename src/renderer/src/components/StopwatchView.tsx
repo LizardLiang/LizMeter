@@ -8,6 +8,7 @@ import { formatElapsed } from "../utils/format.ts";
 import { stripHtml } from "../utils/html.ts";
 import type { SelectedClaudeSession } from "./ClaudeSessionSelect.tsx";
 import { ClaudeSessionSelect } from "./ClaudeSessionSelect.tsx";
+import { IssuePickerDropdown } from "./IssuePickerDropdown.tsx";
 import { IssuePromptDialog } from "./IssuePromptDialog.tsx";
 import { RichTextInput } from "./RichTextInput.tsx";
 import styles from "./StopwatchView.module.scss";
@@ -26,12 +27,12 @@ export function StopwatchView(
   const [showIssuePrompt, setShowIssuePrompt] = useState(false);
 
   const handleStart = useCallback(() => {
-    if (promptForIssue) {
+    if (promptForIssue && !state.linkedIssue) {
       setShowIssuePrompt(true);
     } else {
       start();
     }
-  }, [promptForIssue, start]);
+  }, [promptForIssue, start, state.linkedIssue]);
 
   const handleIssueSelected = useCallback((issue: IssueRef) => {
     setLinkedIssue(issue);
@@ -65,9 +66,15 @@ export function StopwatchView(
         onSelect={onClaudeSessionSelect}
       />
 
+      {isIdle && (
+        <div className={styles.issuePickerRow}>
+          <IssuePickerDropdown selectedIssue={state.linkedIssue} onSelect={setLinkedIssue} />
+        </div>
+      )}
+
       <div className={styles.elapsed}>{formatElapsed(state.elapsedSeconds)}</div>
 
-      {state.linkedIssue && (
+      {isActive && state.linkedIssue && (
         <div className={styles.issueBadge}>
           <span className={styles.issueId}>
             {state.linkedIssue.provider === "github"

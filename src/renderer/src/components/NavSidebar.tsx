@@ -1,7 +1,7 @@
 import type { TimerStatus } from "../../../shared/types.ts";
 import styles from "./NavSidebar.module.scss";
 
-export type NavPage = "timer" | "history" | "stats" | "tags" | "settings" | "issues" | "claude";
+export type NavPage = "timer" | "history" | "stats" | "tags" | "settings" | "issues" | "claude" | "activity";
 
 interface Props {
   activePage: NavPage;
@@ -140,11 +140,30 @@ function ClaudeIcon() {
   );
 }
 
+function ActivityIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="4 17 10 11 13 14 20 7" />
+      <polyline points="15 7 20 7 20 12" />
+    </svg>
+  );
+}
+
 const NAV_ITEMS: Array<{ id: NavPage; label: string; Icon: () => React.JSX.Element; }> = [
   { id: "timer", label: "Timer", Icon: ClockIcon },
   { id: "history", label: "History", Icon: ListIcon },
   { id: "issues", label: "Issues", Icon: IssuesIcon },
   { id: "claude", label: "Claude", Icon: ClaudeIcon },
+  { id: "activity", label: "Activity", Icon: ActivityIcon },
   { id: "stats", label: "Stats", Icon: ChartIcon },
   { id: "tags", label: "Tags", Icon: TagIcon },
   { id: "settings", label: "Settings", Icon: GearIcon },

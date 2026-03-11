@@ -2,6 +2,14 @@
 
 ## Planned Features
 
+### Desktop Widget
+Always-on-top mini overlay on the desktop showing the active timer or stopwatch state, so you can track time without switching to the main window.
+
+### System Notifications
+OS-level notifications when a timer completes or a session ends — uses Electron's `Notification` API to alert you even when the app is in the background.
+
+---
+
 ### 🏙️ Town / Avatar Room
 A personal cyber-office canvas scene where your avatar lives while you work.
 

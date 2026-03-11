@@ -1,0 +1,200 @@
+@use "../styles/mixins" as *;
+
+.page {
+  @include page-container;
+  max-width: 600px;
+}
+
+.heading {
+  @include page-heading;
+  margin-bottom: 16px;
+}
+
+// --- Date Navigation ---
+.dateNav {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.navBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: rgba(16, 18, 36, 0.35);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  color: #a9b1d6;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+
+  &:hover {
+    background: rgba(22, 24, 44, 0.55);
+    border-color: rgba(122, 162, 247, 0.15);
+    color: #c0caf5;
+  }
+}
+
+.dateDisplay {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.dateText {
+  font-size: 14px;
+  font-weight: 600;
+  color: #c0caf5;
+}
+
+.todayBtn {
+  padding: 2px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  background: rgba(122, 162, 247, 0.12);
+  border: 1px solid rgba(122, 162, 247, 0.3);
+  color: #7aa2f7;
+  cursor: pointer;
+  transition: background 0.15s ease;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.2);
+  }
+}
+
+// --- Project Group (glass card) ---
+.groupList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.projectGroup {
+  border: 1px solid rgba(41, 46, 66, 0.85);
+  border-radius: 14px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.01) 32%, transparent 56%),
+    linear-gradient(315deg, rgba(0, 0, 0, 0.07) 0%, transparent 36%),
+    rgba(15, 17, 34, 0.48);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow:
+    0 4px 16px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.09),
+    inset 1px 0 0 rgba(255, 255, 255, 0.04),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.12);
+  overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+
+  &:hover {
+    border-color: rgba(122, 162, 247, 0.18);
+    background:
+      linear-gradient(125deg, rgba(255, 255, 255, 0.09) 0%, rgba(255, 255, 255, 0.02) 28%, transparent 52%),
+      linear-gradient(305deg, rgba(0, 0, 0, 0.06) 0%, transparent 36%),
+      rgba(18, 20, 42, 0.54);
+    box-shadow:
+      0 8px 28px rgba(0, 0, 0, 0.35),
+      inset 0 1px 0 rgba(255, 255, 255, 0.12),
+      inset 1px 0 0 rgba(255, 255, 255, 0.06),
+      inset 0 -1px 0 rgba(0, 0, 0, 0.14);
+  }
+}
+
+.projectHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 12px 16px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #c0caf5;
+  text-align: left;
+}
+
+.chevron {
+  display: flex;
+  align-items: center;
+  color: #565f89;
+  transition: transform 0.15s ease;
+}
+
+.projectName {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7aa2f7;
+}
+
+.projectCount {
+  font-size: 11px;
+  font-weight: 700;
+  color: #565f89;
+  background: rgba(122, 162, 247, 0.1);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+// --- File List ---
+.fileList {
+  border-top: 1px solid rgba(41, 46, 66, 0.5);
+  padding: 4px 0;
+}
+
+.fileRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px 6px 38px;
+  transition: background 0.1s ease;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.04);
+  }
+}
+
+.fileName {
+  font-size: 12px;
+  color: #a9b1d6;
+  font-family: "JetBrains Mono", "Fira Code", monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  margin-right: 12px;
+}
+
+.fileTime {
+  font-size: 11px;
+  color: #565f89;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+// --- Empty State ---
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 48px 16px;
+}
+
+.emptyIcon {
+  color: #565f89;
+  opacity: 0.5;
+}
+
+.emptyText {
+  font-size: 13px;
+  color: #565f89;
+}

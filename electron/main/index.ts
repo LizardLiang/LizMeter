@@ -1,24 +1,52 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { closeDatabase, initDatabase } from "./database.ts";
+import { closeDatabase, getSettingValue, initDatabase } from "./database.ts";
 import { destroyTracker } from "./claude-code-tracker.ts";
 import { registerIpcHandlers } from "./ipc-handlers.ts";
+import { destroyNvimPipeServer, startNvimPipeServer } from "./nvim-pipe-server.ts";
 import {
   initJiraProviderFromDisk,
   initLinearProviderFromDisk,
   initProviderFromDisk,
 } from "./issue-providers/index.ts";
+import { createWidgetWindow, destroyWidgetWindow } from "./widget-window.ts";
+import { WIDGET_SETTINGS_KEYS } from "../../src/shared/types.ts";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 
-function createWindow() {
+let mainWindow: BrowserWindow | null = null;
+
+export function getMainWindow(): BrowserWindow | null {
+  return mainWindow;
+}
+
+// Register window control IPC handlers scoped to the sender window
+function registerWindowControlHandlers(): void {
+  ipcMain.on("window:minimize", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    win?.minimize();
+  });
+  ipcMain.on("window:maximize", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) return;
+    if (win.isMaximized()) {
+      win.unmaximize();
+    } else {
+      win.maximize();
+    }
+  });
+  ipcMain.on("window:close", (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    win?.close();
+  });
+}
+
+function createWindow(): BrowserWindow {
   Menu.setApplicationMenu(null);
 
-  const iconPath = VITE_DEV_SERVER_URL
-    ? path.join(__dirname, "../../assets/icon.png")
-    : path.join(__dirname, "../../assets/icon.png");
+  const iconPath = path.join(__dirname, "../../assets/icon.png");
 
   const win = new BrowserWindow({
     width: 1200,
@@ -33,26 +61,24 @@ function createWindow() {
     },
   });
 
-  ipcMain.on("window:minimize", () => win.minimize());
-  ipcMain.on("window:maximize", () => {
-    if (win.isMaximized()) {
-      win.unmaximize();
-    } else {
-      win.maximize();
-    }
-  });
-  ipcMain.on("window:close", () => win.close());
+  mainWindow = win;
 
   win.webContents.on("render-process-gone", () => {
     destroyTracker();
   });
 
+  win.on("close", () => {
+    destroyWidgetWindow();
+  });
+
   if (VITE_DEV_SERVER_URL) {
-    win.loadURL(VITE_DEV_SERVER_URL);
+    void win.loadURL(VITE_DEV_SERVER_URL);
     win.webContents.openDevTools();
   } else {
-    win.loadFile(path.join(__dirname, "../../dist/index.html"));
+    void win.loadFile(path.join(__dirname, "../../dist/index.html"));
   }
+
+  return win;
 }
 
 app.whenReady().then(() => {
@@ -70,10 +96,23 @@ app.whenReady().then(() => {
   }
 
   registerIpcHandlers();
+  registerWindowControlHandlers();
+  startNvimPipeServer();
   initProviderFromDisk();
   initLinearProviderFromDisk();
   initJiraProviderFromDisk();
   createWindow();
+
+  // Create widget if enabled in settings
+  const widgetEnabled = getSettingValue(WIDGET_SETTINGS_KEYS.ENABLED);
+  if (widgetEnabled === "true") {
+    const posXStr = getSettingValue(WIDGET_SETTINGS_KEYS.POS_X);
+    const posYStr = getSettingValue(WIDGET_SETTINGS_KEYS.POS_Y);
+    const position = posXStr && posYStr
+      ? { x: parseInt(posXStr, 10), y: parseInt(posYStr, 10) }
+      : null;
+    createWidgetWindow(position);
+  }
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -89,6 +128,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  destroyNvimPipeServer();
   destroyTracker();
   closeDatabase();
 });

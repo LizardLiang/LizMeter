@@ -1,0 +1,342 @@
+// Widget — Holographic HUD style
+// Cyberpunk instrument panel with scan-line shimmer, angular chamfers,
+// and status-driven accent glow.
+
+// ---------- Keyframes ----------
+
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(200%); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+@keyframes breathe {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes statusBarRun {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+// ---------- Root ----------
+
+.widget {
+  width: 240px;
+  height: 80px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  padding: 0;
+  // Angular chamfered corners — tactical HUD shape
+  clip-path: polygon(
+    10px 0, calc(100% - 10px) 0,
+    100% 10px, 100% calc(100% - 10px),
+    calc(100% - 10px) 100%, 10px 100%,
+    0 calc(100% - 10px), 0 10px
+  );
+  background:
+    linear-gradient(170deg, rgba(122, 162, 247, 0.06) 0%, rgba(187, 154, 247, 0.03) 40%, transparent 70%),
+    rgba(8, 10, 22, 0.88);
+  backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-backdrop-filter: blur(28px) saturate(1.4);
+  -webkit-app-region: drag;
+  user-select: none;
+  overflow: hidden;
+  animation: fadeIn 0.3s ease both;
+
+  // Faint border glow via box-shadow (clip-path hides regular border)
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    clip-path: polygon(
+      10px 0, calc(100% - 10px) 0,
+      100% 10px, 100% calc(100% - 10px),
+      calc(100% - 10px) 100%, 10px 100%,
+      0 calc(100% - 10px), 0 10px
+    );
+    background: linear-gradient(
+      135deg,
+      rgba(122, 162, 247, 0.18) 0%,
+      rgba(187, 154, 247, 0.08) 50%,
+      rgba(122, 162, 247, 0.12) 100%
+    );
+    mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    mask-composite: exclude;
+    -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+    -webkit-mask-composite: xor;
+    padding: 1px;
+    pointer-events: none;
+    z-index: 1;
+  }
+
+  &.withAvatar {
+    height: 112px;
+  }
+}
+
+// ---------- Status accent bar (bottom edge) ----------
+
+.statusBar {
+  position: absolute;
+  bottom: 0;
+  left: 16px;
+  right: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(86, 95, 137, 0.3);
+  overflow: hidden;
+  z-index: 2;
+
+  &::after {
+    content: "";
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  &.running {
+    background: transparent;
+    &::after {
+      background: linear-gradient(90deg, transparent, #9ece6a, #7dcfff, #9ece6a, transparent);
+      background-size: 200% 100%;
+      animation: statusBarRun 2s linear infinite;
+    }
+  }
+
+  &.paused::after {
+    background: #e0af68;
+    animation: breathe 2.4s ease-in-out infinite;
+  }
+
+  &.completed::after {
+    background: #7aa2f7;
+    animation: pulseGlow 1.6s ease-in-out infinite;
+  }
+}
+
+// ---------- Left: Avatar / Mode icon ----------
+
+.left {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0 0 0 14px;
+  position: relative;
+}
+
+.avatarFrame {
+  width: 72px;
+  height: 72px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  // Hexagonal mask for the avatar viewport
+  clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
+  background: rgba(122, 162, 247, 0.06);
+
+  // Scan-line shimmer overlay
+  &::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(122, 162, 247, 0.06) 45%,
+      rgba(122, 162, 247, 0.12) 50%,
+      rgba(122, 162, 247, 0.06) 55%,
+      transparent 100%
+    );
+    animation: scanline 3.5s linear infinite;
+    pointer-events: none;
+    z-index: 1;
+  }
+}
+
+.avatar {
+  width: 64px;
+  height: 64px;
+  object-fit: contain;
+  flex-shrink: 0;
+
+  &.pixelArt {
+    image-rendering: pixelated;
+  }
+}
+
+.modeIconWrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.modeIcon {
+  font-size: 20px;
+  line-height: 1;
+  filter: drop-shadow(0 0 4px rgba(122, 162, 247, 0.3));
+}
+
+// ---------- Status indicator ----------
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #3b4261;
+  transition: background 0.3s, box-shadow 0.3s;
+
+  &.running {
+    background: #9ece6a;
+    box-shadow: 0 0 8px rgba(158, 206, 106, 0.6);
+    animation: pulseGlow 2s ease-in-out infinite;
+  }
+
+  &.paused {
+    background: #e0af68;
+    box-shadow: 0 0 6px rgba(224, 175, 104, 0.35);
+  }
+
+  &.completed {
+    background: #7aa2f7;
+    box-shadow: 0 0 8px rgba(122, 162, 247, 0.5);
+  }
+}
+
+// ---------- Center: Time + title ----------
+
+.center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 0 4px;
+  gap: 2px;
+}
+
+.timeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.time {
+  font-family: "JetBrains Mono", "Cascadia Code", "Fira Code", "SF Mono", "Consolas", monospace;
+  font-size: 24px;
+  font-weight: 700;
+  color: #c0caf5;
+  letter-spacing: 0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 0 12px rgba(122, 162, 247, 0.2);
+}
+
+.title {
+  font-size: 10px;
+  font-weight: 500;
+  color: #565f89;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+// ---------- Right: Controls ----------
+
+.right {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex-shrink: 0;
+  padding-right: 14px;
+  -webkit-app-region: no-drag;
+}
+
+.btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  border: 1px solid rgba(122, 162, 247, 0.12);
+  background: rgba(122, 162, 247, 0.04);
+  color: #7aa2f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all 0.15s ease;
+  position: relative;
+  overflow: hidden;
+
+  // Subtle top-light
+  &::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 20%;
+    right: 20%;
+    height: 1px;
+    background: linear-gradient(90deg, transparent, rgba(122, 162, 247, 0.2), transparent);
+  }
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.12);
+    border-color: rgba(122, 162, 247, 0.3);
+    box-shadow: 0 0 10px rgba(122, 162, 247, 0.12);
+    transform: scale(1.05);
+  }
+
+  &:active {
+    background: rgba(122, 162, 247, 0.2);
+    transform: scale(0.94);
+  }
+
+  &.stopBtn {
+    border-color: rgba(247, 118, 142, 0.15);
+    background: rgba(247, 118, 142, 0.04);
+    color: #f7768e;
+
+    &::before {
+      background: linear-gradient(90deg, transparent, rgba(247, 118, 142, 0.2), transparent);
+    }
+
+    &:hover {
+      background: rgba(247, 118, 142, 0.12);
+      border-color: rgba(247, 118, 142, 0.3);
+      box-shadow: 0 0 10px rgba(247, 118, 142, 0.12);
+    }
+  }
+
+  &:disabled {
+    opacity: 0.25;
+    cursor: default;
+    transform: none;
+
+    &:hover {
+      background: rgba(122, 162, 247, 0.04);
+      border-color: rgba(122, 162, 247, 0.12);
+      box-shadow: none;
+      transform: none;
+    }
+  }
+}

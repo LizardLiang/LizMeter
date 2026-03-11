@@ -26,6 +26,9 @@ const mockElectronAPI = {
     get: vi.fn().mockResolvedValue(defaultSettings),
     save: vi.fn().mockResolvedValue(undefined),
   },
+  notification: {
+    timerComplete: vi.fn().mockResolvedValue(undefined),
+  },
 };
 
 beforeEach(() => {

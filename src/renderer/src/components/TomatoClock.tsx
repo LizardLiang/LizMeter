@@ -16,6 +16,8 @@ import { useSettings } from "../hooks/useSettings.ts";
 import { useStopwatch } from "../hooks/useStopwatch.ts";
 import { useTagManager } from "../hooks/useTagManager.ts";
 import { useTimer } from "../hooks/useTimer.ts";
+import { useWidgetBridge } from "../hooks/useWidgetBridge.ts";
+import { ActivityPage } from "./ActivityPage.tsx";
 import { ClaudeCodeStats } from "./ClaudeCodeStats.tsx";
 import { ClaudePage } from "./ClaudePage.tsx";
 import { ClaudeSessionSelect, type SelectedClaudeSession } from "./ClaudeSessionSelect.tsx";
@@ -189,8 +191,7 @@ export function TomatoClock() {
   }, [claudeTracker]);
 
   const handleStopwatchSaved = useCallback(
-    (session: Session) => {
-      void session;
+    () => {
       setLinkedStopwatchClaudeSession(null);
       stopwatchIsTrackingRef.current = false;
       refresh();
@@ -409,6 +410,18 @@ export function TomatoClock() {
       });
     }
   }, []);
+
+  // Widget bridge — syncs timer/stopwatch state to the desktop widget overlay.
+  // Placed here after all callback dependencies (handlePause, handleResume, handleReset,
+  // handleStopwatchPause, handleStopwatchResume, stopwatch.stop) are defined.
+  useWidgetBridge(appMode, state, stopwatch.state, {
+    timerPause: handlePause,
+    timerResume: handleResume,
+    timerReset: handleReset,
+    stopwatchPause: () => handleStopwatchPause(stopwatch.pause),
+    stopwatchResume: () => handleStopwatchResume(stopwatch.resume),
+    stopwatchStop: stopwatch.stop,
+  }, claudeTracker.liveStats?.sessionActivity?.type);
 
   const handleResumeSession = useCallback(
     (session: Session) => {
@@ -646,6 +659,8 @@ export function TomatoClock() {
         {activePage === "issues" && <IssuesPage onNavigate={setActivePage} />}
 
         {activePage === "claude" && <ClaudePage />}
+
+        {activePage === "activity" && <ActivityPage />}
 
         {activePage === "settings" && (
           <SettingsPage
