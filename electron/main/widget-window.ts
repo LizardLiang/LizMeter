@@ -34,7 +34,7 @@ function getDefaultPosition(): { x: number; y: number } {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { x, y, width } = primaryDisplay.workArea;
   return {
-    x: x + width - 240 - 20,
+    x: x + width - 260 - 20,
     y: y + 20,
   };
 }
@@ -60,7 +60,7 @@ export function createWidgetWindow(position?: { x: number; y: number } | null): 
   );
 
   widgetWindow = new BrowserWindow({
-    width: 240,
+    width: 260,
     height: hasAvatar ? 112 : 80,
     x: pos.x,
     y: pos.y,

@@ -143,6 +143,10 @@ export function Widget() {
 
   const playPauseLabel = status === "running" ? "⏸" : "▶";
 
+  const timeClass = [styles.time, displaySeconds >= 3600 ? styles.timeWithHours : ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div className={`${styles.widget} ${hasAvatar ? styles.withAvatar : ""}`}>
       {/* Status accent bar */}
@@ -175,7 +179,7 @@ export function Widget() {
       {/* Center: Timer + title */}
       <div className={styles.center}>
         <div className={styles.timeRow}>
-          <span className={styles.time}>{formatTime(displaySeconds)}</span>
+          <span className={timeClass}>{formatTime(displaySeconds)}</span>
           {hasAvatar && <span className={statusDotClass} />}
         </div>
         {title && <span className={styles.title}>{title}</span>}

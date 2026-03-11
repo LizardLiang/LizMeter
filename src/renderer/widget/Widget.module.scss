@@ -32,7 +32,7 @@
 // ---------- Root ----------
 
 .widget {
-  width: 240px;
+  width: 260px;
   height: 80px;
   position: relative;
   display: flex;
@@ -247,6 +247,10 @@
   line-height: 1;
   font-variant-numeric: tabular-nums;
   text-shadow: 0 0 12px rgba(122, 162, 247, 0.2);
+
+  &.timeWithHours {
+    font-size: 18px;
+  }
 }
 
 .title {
