@@ -17,7 +17,7 @@ function formatRelativeTime(isoTimestamp: string): string {
 
 function lastSegment(displayPath: string): string {
   const parts = displayPath.replace(/\\/g, "/").split("/").filter(Boolean);
-  return parts.length > 0 ? parts[parts.length - 1] : displayPath;
+  return parts.at(-1) ?? displayPath;
 }
 
 export interface SelectedClaudeSession {
@@ -82,7 +82,7 @@ export function ClaudeSessionSelect({ selected, onSelect, disabled }: ClaudeSess
     border: "1px solid rgba(122, 162, 247, 0.25)",
     borderRadius: 6,
     background: "rgba(26, 27, 38, 0.8)",
-    color: selected ? "#c0caf5" : "#565f89",
+    color: selected ? "#c0caf5" : "#a9b1d6",
     fontSize: 13,
     cursor: disabled ? "not-allowed" : "pointer",
     opacity: disabled ? 0.5 : 1,
@@ -142,19 +142,19 @@ export function ClaudeSessionSelect({ selected, onSelect, disabled }: ClaudeSess
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>
           {displayText}
         </span>
-        <span style={{ color: "#565f89", fontSize: 10, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
+        <span style={{ color: "#a9b1d6", fontSize: 10, flexShrink: 0 }}>{open ? "▲" : "▼"}</span>
       </button>
 
       {open && (
         <div style={dropdownStyle}>
           {loading && (
-            <div style={{ padding: "12px", color: "#565f89", fontSize: 12, textAlign: "center" }}>
+            <div style={{ padding: "12px", color: "#a9b1d6", fontSize: 12, textAlign: "center" }}>
               Scanning…
             </div>
           )}
 
           {!loading && sessions.length === 0 && (
-            <div style={{ padding: "12px", color: "#565f89", fontSize: 12, textAlign: "center" }}>
+            <div style={{ padding: "12px", color: "#a9b1d6", fontSize: 12, textAlign: "center" }}>
               No active Claude Code sessions
             </div>
           )}
@@ -197,10 +197,10 @@ export function ClaudeSessionSelect({ selected, onSelect, disabled }: ClaudeSess
                   <span style={{ fontFamily: "monospace", color: "#7aa2f7", fontSize: 12, fontWeight: 600 }}>
                     {session.ccSessionUuid.substring(0, 8)}
                   </span>
-                  <span style={{ color: "#565f89", fontSize: 11 }}>
+                  <span style={{ color: "#a9b1d6", fontSize: 11 }}>
                     {formatRelativeTime(session.lastActivityAt)}
                   </span>
-                  <span style={{ color: "#565f89", fontSize: 11, marginLeft: "auto" }}>
+                  <span style={{ color: "#a9b1d6", fontSize: 11, marginLeft: "auto" }}>
                     {lastSegment(session.projectDisplayPath)}
                   </span>
                 </div>

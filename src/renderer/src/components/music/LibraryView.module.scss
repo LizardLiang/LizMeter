@@ -1,0 +1,408 @@
+// LibraryView.module.scss — Phase 2 library tab glass styling
+
+.libraryContainer {
+  width: 100%;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+// ---- Search ----
+
+.searchWrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  background: rgba(12, 13, 24, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  border-radius: 8px;
+  overflow: hidden;
+  transition: border-color 0.2s;
+
+  &:focus-within {
+    border-color: rgba(122, 162, 247, 0.4);
+    box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.08);
+  }
+}
+
+.searchIcon {
+  flex-shrink: 0;
+  color: #7a8194;
+  margin-left: 12px;
+  pointer-events: none;
+}
+
+.searchInput {
+  flex: 1;
+  padding: 9px 10px 9px 8px;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #c0caf5;
+  font-size: 13px;
+  font-family: inherit;
+
+  &::placeholder {
+    color: #7a8194;
+  }
+}
+
+.clearSearch {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  flex-shrink: 0;
+  margin-right: 4px;
+  background: transparent;
+  border: none;
+  color: #a9b1d6;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.12s, background 0.12s;
+
+  &:hover {
+    color: #7aa2f7;
+    background: rgba(122, 162, 247, 0.1);
+  }
+}
+
+// ---- Controls row (filters + sort) ----
+
+.controlsRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+// ---- Filter chips ----
+
+.filterChips {
+  display: flex;
+  gap: 6px;
+}
+
+.filterChip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 20px;
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  background: rgba(12, 13, 24, 0.4);
+  color: #a9b1d6;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.06);
+    border-color: rgba(122, 162, 247, 0.15);
+    color: #a9b1d6;
+  }
+}
+
+.filterChipActive {
+  background: rgba(122, 162, 247, 0.12);
+  border-color: rgba(122, 162, 247, 0.3);
+  color: #7aa2f7;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.18);
+    color: #7aa2f7;
+  }
+}
+
+// ---- Sort controls ----
+
+.sortControls {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.sortBtn {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 5px 9px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #a9b1d6;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s, border-color 0.12s;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.05);
+    color: #a9b1d6;
+  }
+}
+
+.sortBtnActive {
+  background: rgba(122, 162, 247, 0.08);
+  border-color: rgba(122, 162, 247, 0.15);
+  color: #7aa2f7;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.12);
+    color: #7aa2f7;
+  }
+}
+
+// ---- Track count + Add All ----
+
+.trackCountRow {
+  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.trackCount {
+  font-size: 11px;
+  color: #a9b1d6;
+  letter-spacing: 0.05em;
+}
+
+.addAllBtn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  font-family: inherit;
+  border-radius: 20px;
+  border: 1px solid rgba(122, 162, 247, 0.25);
+  background: rgba(122, 162, 247, 0.08);
+  color: #7aa2f7;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s;
+
+  &:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.16);
+    border-color: rgba(122, 162, 247, 0.4);
+    box-shadow: 0 0 8px rgba(122, 162, 247, 0.12);
+  }
+
+  &:active:not(:disabled) {
+    background: rgba(122, 162, 247, 0.22);
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.7;
+  }
+}
+
+.addAllBtnLoading {
+  color: rgba(122, 162, 247, 0.7);
+}
+
+.addAllSpinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid rgba(122, 162, 247, 0.25);
+  border-top-color: #7aa2f7;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+// ---- Track list ----
+
+.trackList {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+// ---- Track row ----
+
+.trackRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, border-color 0.12s;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.06);
+    border-color: rgba(122, 162, 247, 0.1);
+  }
+
+  &:active {
+    background: rgba(122, 162, 247, 0.1);
+  }
+}
+
+// ---- Thumbnail ----
+
+.thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgba(41, 46, 66, 0.6);
+}
+
+.thumbPlaceholder {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: rgba(41, 46, 66, 0.5);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7a8194;
+}
+
+// ---- Track text ----
+
+.trackText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trackTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #c0caf5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.trackArtist {
+  font-size: 11px;
+  color: #a9b1d6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// ---- Track meta ----
+
+.trackMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.siteBadge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(41, 46, 66, 0.6);
+  border: 1px solid rgba(86, 95, 137, 0.3);
+  color: #a9b1d6;
+  text-transform: capitalize;
+}
+
+.cachedIcon {
+  color: #9ece6a;
+  display: flex;
+  align-items: center;
+}
+
+.trackDuration {
+  font-size: 11px;
+  color: #a9b1d6;
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+
+// ---- Infinite scroll sentinel ----
+
+.sentinel {
+  height: 1px;
+  width: 100%;
+}
+
+// ---- Loading states ----
+
+.loadingRow {
+  display: flex;
+  justify-content: center;
+  padding: 12px;
+}
+
+.loadingState {
+  display: flex;
+  justify-content: center;
+  padding: 48px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(122, 162, 247, 0.2);
+  border-top-color: #7aa2f7;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// ---- Empty states ----
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: #a9b1d6;
+  text-align: center;
+}
+
+.emptyIcon {
+  display: flex;
+  margin-bottom: 4px;
+}
+
+.emptyText {
+  font-size: 14px;
+  color: #c0caf5;
+  margin: 0;
+  font-weight: 500;
+}
+
+.emptyHint {
+  font-size: 12px;
+  color: #a9b1d6;
+  margin: 0;
+}

@@ -24,7 +24,7 @@
   border-radius: 6px;
   border: 1px solid #292e42;
   background: transparent;
-  color: #565f89;
+  color: #a9b1d6;
   font-size: 12px;
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s;
@@ -41,7 +41,7 @@
 }
 
 .stateMsg {
-  color: #565f89;
+  color: #a9b1d6;
   font-size: 13px;
   padding: 24px 0;
   text-align: center;
@@ -82,19 +82,19 @@
 }
 
 .emptyIcon {
-  color: #565f89;
+  color: #7a8194;
   margin-bottom: 8px;
 }
 
 .emptyTitle {
-  color: #a9b1d6;
+  color: #c0caf5;
   font-size: 14px;
   font-weight: 500;
   margin: 0;
 }
 
 .emptyDesc {
-  color: #565f89;
+  color: #a9b1d6;
   font-size: 12px;
   margin: 0;
 }
@@ -231,7 +231,7 @@
   }
 
   &::placeholder {
-    color: #565f89;
+    color: #7a8194;
   }
 }
 
@@ -256,9 +256,9 @@
 }
 
 .stateBacklog {
-  color: #565f89;
-  background: #565f8918;
-  border: 1px solid #565f8940;
+  color: #a9b1d6;
+  background: #a9b1d618;
+  border: 1px solid #a9b1d640;
 }
 
 .priorityBadge {
@@ -289,9 +289,9 @@
   }
 
   &[data-priority="4"] {
-    color: #565f89;
-    background: #565f8918;
-    border-color: #565f8940;
+    color: #a9b1d6;
+    background: #a9b1d618;
+    border-color: #a9b1d640;
   }
 }
 
@@ -336,7 +336,7 @@
 }
 
 .commentsLoading {
-  color: #565f89;
+  color: #a9b1d6;
   font-size: 12px;
   padding: 8px 0;
 }
@@ -348,7 +348,7 @@
 }
 
 .commentsEmpty {
-  color: #565f89;
+  color: #a9b1d6;
   font-size: 12px;
   padding: 8px 0;
   font-style: italic;
@@ -385,13 +385,13 @@
 }
 
 .commentDate {
-  color: #565f89;
+  color: #a9b1d6;
   font-size: 11px;
   margin-left: auto;
 }
 
 .commentBody {
-  color: #a9b1d6;
+  color: #c0caf5;
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;

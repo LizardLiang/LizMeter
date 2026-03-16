@@ -10,7 +10,9 @@ import type {
   StopwatchSettings,
   TimerSettings,
 } from "../../../shared/types.ts";
+import { MusicPlayerProvider, useMusicPlayer } from "../contexts/MusicPlayerContext.tsx";
 import { useClaudeTracker } from "../hooks/useClaudeTracker.ts";
+import { useNotificationSound } from "../hooks/useNotificationSound.ts";
 import { useSessionHistory } from "../hooks/useSessionHistory.ts";
 import { useSettings } from "../hooks/useSettings.ts";
 import { useStopwatch } from "../hooks/useStopwatch.ts";
@@ -24,6 +26,8 @@ import { ClaudeSessionSelect, type SelectedClaudeSession } from "./ClaudeSession
 import { HistoryPage } from "./HistoryPage.tsx";
 import { IssuesPage } from "./IssuesPage.tsx";
 import { ModeToggle } from "./ModeToggle.tsx";
+import { MusicBottomBar } from "./music/MusicBottomBar.tsx";
+import { MusicPage } from "./music/MusicPage.tsx";
 import type { NavPage } from "./NavSidebar.tsx";
 import { NavSidebar } from "./NavSidebar.tsx";
 import type { SessionPickerState } from "./SessionPicker.tsx";
@@ -71,6 +75,7 @@ function reconstructIssueRef(session: Session): IssueRef | null {
 export function TomatoClock() {
   const { settings, isLoading: settingsLoading, saveSettings } = useSettings();
   const effectiveSettings = settings ?? DEFAULT_SETTINGS;
+  const { playSound, soundEnabled, setSoundEnabled } = useNotificationSound();
 
   const {
     sessions,
@@ -270,6 +275,13 @@ export function TomatoClock() {
     restore,
     saveError,
   } = useTimer(effectiveSettings, handleSessionSaved, pendingIssue, customSaveSession);
+
+  // Play notification sound when the timer transitions to "completed"
+  useEffect(() => {
+    if (state.status === "completed") {
+      playSound();
+    }
+  }, [state.status, playSound]);
 
   // Wrap start to also scan for Claude sessions if a project is configured
   const start = useCallback(async () => {
@@ -521,10 +533,218 @@ export function TomatoClock() {
   const isAnyTimerActive = isPomodoroActive || isStopwatchActive;
 
   return (
-    <div className={styles.root}>
-      <NavSidebar activePage={activePage} onNavigate={setActivePage} timerStatus={state.status} />
+    <MusicPlayerProvider>
+      <TomatoClockInner
+        activePage={activePage}
+        onNavigate={setActivePage}
+        onTimerStart={() => void start()}
+        timerStatus={state.status}
+        isAnyTimerActive={isAnyTimerActive}
+        isPomodoroActive={isPomodoroActive}
+        isStopwatchActive={isStopwatchActive}
+        state={state}
+        stopwatch={stopwatch}
+        appMode={appMode}
+        handleModeChange={handleModeChange}
+        pendingIssue={pendingIssue}
+        saveError={saveError}
+        handlePause={handlePause}
+        handleResume={handleResume}
+        handleReset={handleReset}
+        dismissCompletion={dismissCompletion}
+        setTimerType={setTimerType}
+        setTitle={setTitle}
+        setRemaining={setRemaining}
+        handleIssueSelect={handleIssueSelect}
+        pickerState={pickerState}
+        pickerOpenKey={pickerOpenKey}
+        claudeTracker={claudeTracker}
+        handlePickerConfirm={handlePickerConfirm}
+        handlePickerSkip={handlePickerSkip}
+        handlePickerToggleCollapse={handlePickerToggleCollapse}
+        showPicker={showPicker}
+        showStats={showStats}
+        claudeIdleThresholdMinutes={claudeIdleThresholdMinutes}
+        handleManageSessions={handleManageSessions}
+        handleAddNewSession={handleAddNewSession}
+        tagManager={tagManager}
+        pendingTagIds={pendingTagIds}
+        handlePendingTagAdd={handlePendingTagAdd}
+        handlePendingTagRemove={handlePendingTagRemove}
+        handleStopwatchStart={handleStopwatchStart}
+        handleStopwatchPause={handleStopwatchPause}
+        handleStopwatchResume={handleStopwatchResume}
+        stopwatchSettings={stopwatchSettings}
+        linkedStopwatchClaudeSession={linkedStopwatchClaudeSession}
+        handleLinkedStopwatchClaudeSessionChange={handleLinkedStopwatchClaudeSessionChange}
+        linkedPomodoroClaudeSession={linkedPomodoroClaudeSession}
+        handlePomodoroClaudeSessionSelect={handlePomodoroClaudeSessionSelect}
+        sessions={sessions}
+        total={total}
+        historyLoading={historyLoading}
+        historyError={historyError}
+        activeTagFilter={activeTagFilter}
+        setTagFilter={setTagFilter}
+        deleteSession={deleteSession}
+        loadMore={loadMore}
+        logWork={logWork}
+        refresh={refresh}
+        worklogLoading={worklogLoading}
+        handleResumeSession={handleResumeSession}
+        effectiveSettings={effectiveSettings}
+        saveSettings={saveSettings}
+        setStopwatchSettings={setStopwatchSettings}
+        soundEnabled={soundEnabled}
+        onSoundEnabledChange={setSoundEnabled}
+      />
+    </MusicPlayerProvider>
+  );
+}
 
-      <div className={styles.main}>
+// ---- Inner layout component — can consume MusicPlayerContext ----
+
+interface TomatoClockInnerProps {
+  activePage: NavPage;
+  onNavigate: (page: NavPage) => void;
+  onTimerStart: () => void;
+  timerStatus: ReturnType<typeof import("../hooks/useTimer.ts").useTimer>["state"]["status"];
+  isAnyTimerActive: boolean;
+  isPomodoroActive: boolean;
+  isStopwatchActive: boolean;
+  state: ReturnType<typeof import("../hooks/useTimer.ts").useTimer>["state"];
+  stopwatch: ReturnType<typeof import("../hooks/useStopwatch.ts").useStopwatch>;
+  appMode: import("../../../shared/types.ts").AppMode;
+  handleModeChange: (mode: import("../../../shared/types.ts").AppMode) => void;
+  pendingIssue: import("../../../shared/types.ts").IssueRef | null;
+  saveError: string | null;
+  handlePause: () => void;
+  handleResume: () => void;
+  handleReset: () => void;
+  dismissCompletion: () => void;
+  setTimerType: ReturnType<typeof import("../hooks/useTimer.ts").useTimer>["setTimerType"];
+  setTitle: ReturnType<typeof import("../hooks/useTimer.ts").useTimer>["setTitle"];
+  setRemaining: ReturnType<typeof import("../hooks/useTimer.ts").useTimer>["setRemaining"];
+  handleIssueSelect: (issue: import("../../../shared/types.ts").IssueRef | null) => void;
+  pickerState: SessionPickerState;
+  pickerOpenKey: number;
+  claudeTracker: ReturnType<typeof import("../hooks/useClaudeTracker.ts").useClaudeTracker>;
+  handlePickerConfirm: (uuids: string[]) => void;
+  handlePickerSkip: () => void;
+  handlePickerToggleCollapse: () => void;
+  showPicker: boolean;
+  showStats: boolean;
+  claudeIdleThresholdMinutes: number;
+  handleManageSessions: () => void;
+  handleAddNewSession: () => void;
+  tagManager: ReturnType<typeof import("../hooks/useTagManager.ts").useTagManager>;
+  pendingTagIds: number[];
+  handlePendingTagAdd: (tagId: number) => void;
+  handlePendingTagRemove: (tagId: number) => void;
+  handleStopwatchStart: (base: () => void) => Promise<void>;
+  handleStopwatchPause: (base: () => void) => void;
+  handleStopwatchResume: (base: () => void) => void;
+  stopwatchSettings: import("../../../shared/types.ts").StopwatchSettings;
+  linkedStopwatchClaudeSession: SelectedClaudeSession | null;
+  handleLinkedStopwatchClaudeSessionChange: (session: SelectedClaudeSession | null) => Promise<void>;
+  linkedPomodoroClaudeSession: SelectedClaudeSession | null;
+  handlePomodoroClaudeSessionSelect: (session: SelectedClaudeSession | null) => Promise<void>;
+  sessions: import("../../../shared/types.ts").Session[];
+  total: number;
+  historyLoading: boolean;
+  historyError: string | null;
+  activeTagFilter: number | undefined;
+  setTagFilter: (tagId: number | undefined) => void;
+  deleteSession: (id: string) => void;
+  loadMore: () => void;
+  logWork: (
+    sessionId: string,
+    issueKey: string,
+    overrides?: { startTime: string; endTime: string; description: string; },
+  ) => Promise<void>;
+  refresh: () => void;
+  worklogLoading: Record<string, boolean>;
+  handleResumeSession: (session: import("../../../shared/types.ts").Session) => void;
+  effectiveSettings: import("../../../shared/types.ts").TimerSettings;
+  saveSettings: (settings: import("../../../shared/types.ts").TimerSettings) => Promise<void>;
+  setStopwatchSettings: (settings: import("../../../shared/types.ts").StopwatchSettings) => void;
+  soundEnabled: boolean;
+  onSoundEnabledChange: (enabled: boolean) => void;
+}
+
+function TomatoClockInner(props: TomatoClockInnerProps) {
+  const { isBottomBarVisible } = useMusicPlayer();
+  const {
+    activePage,
+    onNavigate,
+    onTimerStart,
+    timerStatus,
+    isAnyTimerActive,
+    isPomodoroActive,
+    isStopwatchActive,
+    state,
+    stopwatch,
+    appMode,
+    handleModeChange,
+    pendingIssue,
+    saveError,
+    handlePause,
+    handleResume,
+    handleReset,
+    dismissCompletion,
+    setTimerType,
+    setTitle,
+    setRemaining,
+    handleIssueSelect,
+    pickerState,
+    pickerOpenKey,
+    claudeTracker,
+    handlePickerConfirm,
+    handlePickerSkip,
+    handlePickerToggleCollapse,
+    showPicker,
+    showStats,
+    claudeIdleThresholdMinutes,
+    handleManageSessions,
+    handleAddNewSession,
+    tagManager,
+    pendingTagIds,
+    handlePendingTagAdd,
+    handlePendingTagRemove,
+    handleStopwatchStart,
+    handleStopwatchPause,
+    handleStopwatchResume,
+    stopwatchSettings,
+    linkedStopwatchClaudeSession,
+    handleLinkedStopwatchClaudeSessionChange,
+    linkedPomodoroClaudeSession,
+    handlePomodoroClaudeSessionSelect,
+    sessions,
+    total,
+    historyLoading,
+    historyError,
+    activeTagFilter,
+    setTagFilter,
+    deleteSession,
+    loadMore,
+    logWork,
+    refresh,
+    worklogLoading,
+    handleResumeSession,
+    effectiveSettings,
+    saveSettings,
+    setStopwatchSettings,
+    soundEnabled,
+    onSoundEnabledChange,
+  } = props;
+
+  return (
+    <div className={styles.root}>
+      <NavSidebar activePage={activePage} onNavigate={onNavigate} timerStatus={timerStatus} />
+
+      <div
+        className={styles.main}
+        style={isBottomBarVisible ? { paddingBottom: "var(--music-bar-height)" } : undefined}
+      >
         {activePage === "timer" && (
           <div className={styles.timerPage}>
             <ModeToggle mode={appMode} onModeChange={handleModeChange} disabled={isAnyTimerActive} />
@@ -539,7 +759,7 @@ export function TomatoClock() {
                   saveError={saveError}
                   selectedIssue={pendingIssue}
                   isRestored={state.originalPlannedDuration !== null}
-                  onStart={() => void start()}
+                  onStart={onTimerStart}
                   onPause={handlePause}
                   onResume={handleResume}
                   onReset={handleReset}
@@ -656,11 +876,13 @@ export function TomatoClock() {
           />
         )}
 
-        {activePage === "issues" && <IssuesPage onNavigate={setActivePage} />}
+        {activePage === "issues" && <IssuesPage onNavigate={onNavigate} />}
 
         {activePage === "claude" && <ClaudePage />}
 
         {activePage === "activity" && <ActivityPage />}
+
+        {activePage === "music" && <MusicPage />}
 
         {activePage === "settings" && (
           <SettingsPage
@@ -668,9 +890,14 @@ export function TomatoClock() {
             onSave={saveSettings}
             stopwatchSettings={stopwatchSettings}
             onStopwatchSettingsChange={setStopwatchSettings}
+            soundEnabled={soundEnabled}
+            onSoundEnabledChange={onSoundEnabledChange}
           />
         )}
       </div>
+
+      {/* Music bottom bar renders outside the scrollable main area so it is always visible */}
+      <MusicBottomBar />
     </div>
   );
 }

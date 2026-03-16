@@ -41,7 +41,7 @@
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 1.5px;
-  color: var(--tokyoNight-comment, #565f89);
+  color: #c0caf5;
   align-self: flex-start;
 }
 
@@ -133,8 +133,8 @@
 
 .cancelBtn {
   background: transparent;
-  color: var(--tokyoNight-comment, #565f89);
-  border: 1px solid var(--tokyoNight-comment, #565f89);
+  color: #a9b1d6;
+  border: 1px solid rgba(169, 177, 214, 0.4);
 
   &:hover {
     color: var(--tokyoNight-red, #f7768e);

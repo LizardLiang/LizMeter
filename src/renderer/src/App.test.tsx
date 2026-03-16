@@ -2,6 +2,26 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 import { App } from "./App.tsx";
 
+// jsdom's Audio stub doesn't implement EventTarget methods on instances.
+// Mock the Audio constructor globally so useAudioPlayer works in tests.
+const mockAudio = {
+  preload: "",
+  src: "",
+  currentTime: 0,
+  duration: 0,
+  volume: 1,
+  muted: false,
+  playbackRate: 1,
+  paused: true,
+  ended: false,
+  buffered: { length: 0, end: () => 0 },
+  addEventListener: vi.fn(),
+  removeEventListener: vi.fn(),
+  play: vi.fn().mockResolvedValue(undefined),
+  pause: vi.fn(),
+};
+vi.stubGlobal("Audio", vi.fn(() => mockAudio));
+
 const mockElectronAPI = {
   platform: "linux",
   session: {
@@ -91,6 +111,56 @@ const mockElectronAPI = {
     getForSession: vi.fn().mockResolvedValue(null),
     onUpdate: vi.fn().mockReturnValue(() => {}),
     onNewSession: vi.fn().mockReturnValue(() => {}),
+  },
+  music: {
+    play: vi.fn().mockResolvedValue({ streamUrl: "", track: null, fromCache: false }),
+    stop: vi.fn().mockResolvedValue(undefined),
+    meta: vi.fn().mockResolvedValue({ track: null }),
+    libraryList: vi.fn().mockResolvedValue({ tracks: [], total: 0 }),
+    libraryDelete: vi.fn().mockResolvedValue(undefined),
+    playlistCreate: vi.fn().mockResolvedValue({
+      id: 1,
+      name: "test",
+      source: "user_created",
+      trackCount: 0,
+      createdAt: "",
+      updatedAt: "",
+    }),
+    playlistRename: vi.fn().mockResolvedValue(undefined),
+    playlistDelete: vi.fn().mockResolvedValue(undefined),
+    playlistList: vi.fn().mockResolvedValue([]),
+    playlistTracks: vi.fn().mockResolvedValue([]),
+    playlistAddTrack: vi.fn().mockResolvedValue({}),
+    playlistRemoveTrack: vi.fn().mockResolvedValue(undefined),
+    playlistReorder: vi.fn().mockResolvedValue(undefined),
+    cacheStats: vi.fn().mockResolvedValue({ currentBytes: 0, maxBytes: 0, trackCount: 0 }),
+    cacheClear: vi.fn().mockResolvedValue(undefined),
+    cacheSetLimit: vi.fn().mockResolvedValue(undefined),
+    binaryStatus: vi.fn().mockResolvedValue({
+      ytDlpInstalled: false,
+      ffmpegInstalled: false,
+      ytDlpVersion: null,
+      ytDlpPath: null,
+      ffmpegPath: null,
+    }),
+    binaryInfo: vi.fn().mockResolvedValue({
+      ytDlpSize: null,
+      ffmpegSize: null,
+      storagePath: "",
+      ytDlpFilename: "yt-dlp",
+      ffmpegFilename: "ffmpeg",
+      ytDlpUrl: null,
+      ffmpegUrl: null,
+      error: null,
+    }),
+    binaryDownload: vi.fn().mockResolvedValue(undefined),
+    importCancel: vi.fn().mockResolvedValue(undefined),
+    reset: vi.fn().mockResolvedValue(undefined),
+    onImportProgress: vi.fn().mockReturnValue(() => {}),
+    onDownloadProgress: vi.fn().mockReturnValue(() => {}),
+    onStreamCached: vi.fn().mockReturnValue(() => {}),
+    onMediaKey: vi.fn().mockReturnValue(() => {}),
+    onPlaylistImported: vi.fn().mockReturnValue(() => {}),
   },
 };
 

@@ -2,13 +2,21 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
   AssignTagInput,
   AvatarPaths,
+  BinaryDownloadProgress,
   ClaudeCodeLiveStats,
   ClaudeCodeSessionPreview,
   CreateTagInput,
+  ImportProgress,
   IssuesListInput,
   IssuesSetTokenInput,
   ListNvimActivityInput,
   ListSessionsInput,
+  MusicLibraryListInput,
+  MusicMetaResult,
+  MusicPlayRequest,
+  MusicPlayResult,
+  MusicTrack,
+  PlaylistAddTrackInput,
   SaveSessionInput,
   SaveSessionWithTrackingInput,
   TimerSettings,
@@ -136,6 +144,74 @@ contextBridge.exposeInMainWorld("electronAPI", {
   nvimActivity: {
     listByDate: (input: ListNvimActivityInput) =>
       ipcRenderer.invoke("nvim-activity:list-by-date", input),
+  },
+  music: {
+    // Playback
+    play: (input: MusicPlayRequest): Promise<MusicPlayResult> => ipcRenderer.invoke("music:play", input),
+    stop: (): Promise<void> => ipcRenderer.invoke("music:stop"),
+    meta: (input: { url: string }): Promise<MusicMetaResult> => ipcRenderer.invoke("music:meta", input),
+
+    // Library
+    libraryList: (input: MusicLibraryListInput) => ipcRenderer.invoke("music:library:list", input),
+    libraryDelete: (trackId: string) => ipcRenderer.invoke("music:library:delete", trackId),
+
+    // Playlists
+    playlistCreate: (input: { name: string; trackIds?: string[] }) =>
+      ipcRenderer.invoke("music:playlist:create", input),
+    playlistRename: (input: { id: number; name: string }) =>
+      ipcRenderer.invoke("music:playlist:rename", input),
+    playlistDelete: (id: number) => ipcRenderer.invoke("music:playlist:delete", id),
+    playlistList: () => ipcRenderer.invoke("music:playlist:list"),
+    playlistTracks: (playlistId: number) => ipcRenderer.invoke("music:playlist:tracks", playlistId),
+    playlistAddTrack: (input: PlaylistAddTrackInput) =>
+      ipcRenderer.invoke("music:playlist:add-track", input),
+    playlistRemoveTrack: (playlistTrackId: number) =>
+      ipcRenderer.invoke("music:playlist:remove-track", playlistTrackId),
+    playlistReorder: (input: { playlistId: number; trackEntryId: number; toPosition: number }) =>
+      ipcRenderer.invoke("music:playlist:reorder", input),
+
+    // Cache
+    cacheStats: () => ipcRenderer.invoke("music:cache:stats"),
+    cacheClear: () => ipcRenderer.invoke("music:cache:clear"),
+    cacheSetLimit: (maxBytes: number) => ipcRenderer.invoke("music:cache:set-limit", maxBytes),
+
+    // Binary management
+    binaryStatus: () => ipcRenderer.invoke("music:binary:status"),
+    binaryInfo: () => ipcRenderer.invoke("music:binary:info"),
+    binaryDownload: () => ipcRenderer.invoke("music:binary:download"),
+
+    // Import
+    importCancel: () => ipcRenderer.invoke("music:import:cancel"),
+
+    // Reset
+    reset: (input: { deleteBinaries: boolean }) => ipcRenderer.invoke("music:reset", input),
+
+    // Push event listeners (each returns an unsubscribe function)
+    onImportProgress: (callback: (progress: ImportProgress) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, progress: ImportProgress) => callback(progress);
+      ipcRenderer.on("music:import:progress", handler);
+      return () => ipcRenderer.removeListener("music:import:progress", handler);
+    },
+    onDownloadProgress: (callback: (progress: BinaryDownloadProgress) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, progress: BinaryDownloadProgress) => callback(progress);
+      ipcRenderer.on("music:binary:download-progress", handler);
+      return () => ipcRenderer.removeListener("music:binary:download-progress", handler);
+    },
+    onStreamCached: (callback: (data: { trackId: string }) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, data: { trackId: string }) => callback(data);
+      ipcRenderer.on("music:stream:cached", handler);
+      return () => ipcRenderer.removeListener("music:stream:cached", handler);
+    },
+    onMediaKey: (callback: (action: string) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, action: string) => callback(action);
+      ipcRenderer.on("music:media-key", handler);
+      return () => ipcRenderer.removeListener("music:media-key", handler);
+    },
+    onPlaylistImported: (callback: (data: { tracks: MusicTrack[] }) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, data: { tracks: MusicTrack[] }) => callback(data);
+      ipcRenderer.on("music:playlist:imported", handler);
+      return () => ipcRenderer.removeListener("music:playlist:imported", handler);
+    },
   },
   widget: {
     sendStateUpdate: (snapshot: WidgetTimerSnapshot) => {

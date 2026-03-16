@@ -1,7 +1,7 @@
 // electron/main/ipc-handlers.ts
 // Registers all IPC handlers for the main process
 
-import { Notification, app, dialog, ipcMain, screen, shell } from "electron";
+import { Notification, app, dialog, globalShortcut, ipcMain, screen, shell } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import type {
@@ -72,8 +72,10 @@ import { JiraProvider } from "./issue-providers/jira-provider.ts";
 import { LinearProvider } from "./issue-providers/linear-provider.ts";
 import { IssueProviderError } from "./issue-providers/types.ts";
 import { deleteToken, hasToken, loadToken, saveToken } from "./issue-providers/token-storage.ts";
+import { registerMusicIpcHandlers } from "./music/music-ipc.ts";
 
 export function registerIpcHandlers(): void {
+  registerMusicIpcHandlers();
   ipcMain.handle("session:save", (_event, input: SaveSessionInput) => {
     return saveSession(input);
   });
@@ -722,4 +724,32 @@ export function registerIpcHandlers(): void {
       }
     },
   );
+
+  // ---- Media key globalShortcut fallback (T3.8) ----
+  // Registers system-level media key shortcuts to relay play/pause/next/prev to the renderer.
+  // Falls back gracefully if the shortcut is already registered by another app.
+  app.whenReady().then(() => {
+    const mediaKeys: Array<{ shortcut: string; action: string }> = [
+      { shortcut: "MediaPlayPause", action: "MediaPlayPause" },
+      { shortcut: "MediaNextTrack", action: "MediaNextTrack" },
+      { shortcut: "MediaPreviousTrack", action: "MediaPreviousTrack" },
+    ];
+
+    for (const { shortcut, action } of mediaKeys) {
+      try {
+        const registered = globalShortcut.register(shortcut, () => {
+          const win = getMainWindow();
+          if (win && !win.isDestroyed()) {
+            win.webContents.send("music:media-key", action);
+          }
+        });
+        if (!registered) {
+          console.warn(`[media-keys] Failed to register shortcut: ${shortcut}`);
+        }
+      } catch (err) {
+        // Non-fatal — mediaSession in renderer handles it when the app is focused
+        console.warn(`[media-keys] Could not register ${shortcut}:`, err);
+      }
+    }
+  }).catch(() => {});
 }

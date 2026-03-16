@@ -16,6 +16,17 @@ import { WIDGET_SETTINGS_KEYS } from "../../src/shared/types.ts";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 
+// Enable remote debugging for agent-browser testing in dev mode
+if (VITE_DEV_SERVER_URL) {
+  app.commandLine.appendSwitch("remote-debugging-port", "9222");
+}
+
+// Prevent music subsystem errors from crashing the app
+process.on("uncaughtException", (err) => {
+  console.error("[uncaughtException]", err);
+  // Don't crash the app for non-fatal errors — just log them
+});
+
 let mainWindow: BrowserWindow | null = null;
 
 export function getMainWindow(): BrowserWindow | null {

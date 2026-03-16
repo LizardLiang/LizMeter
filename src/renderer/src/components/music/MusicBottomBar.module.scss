@@ -1,0 +1,377 @@
+// MusicBottomBar.module.scss
+// Glass bottom bar for persistent music playback controls.
+// Fixed to the bottom of the app window.
+// Slides up with 200ms ease-out on first track play.
+
+// CSS variable for bar height — consumed by TomatoClock to add padding-bottom
+:root {
+  --music-bar-height: 76px;
+}
+
+// ---- Bar shell ----
+
+.bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: var(--music-bar-height);
+  z-index: 500;
+
+  // Glass formula
+  background: rgba(10, 12, 24, 0.85);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border-top: 1px solid rgba(122, 162, 247, 0.12);
+  box-shadow:
+    0 -4px 32px rgba(0, 0, 0, 0.5),
+    0 -1px 0 rgba(255, 255, 255, 0.04),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+
+  // Slide-up animation — hidden below viewport until visible
+  transform: translateY(100%);
+  transition: transform 200ms ease-out;
+
+  display: flex;
+  align-items: center;
+  padding: 0 16px;
+  gap: 16px;
+}
+
+.barVisible {
+  transform: translateY(0);
+}
+
+// ---- Left section: thumbnail + track info ----
+
+.left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 240px;
+  min-width: 0;
+}
+
+.thumbnail {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  background: rgba(122, 162, 247, 0.1);
+  border: 1px solid rgba(122, 162, 247, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(122, 162, 247, 0.6);
+}
+
+.trackInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.trackTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #c0caf5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+.trackArtist {
+  font-size: 11px;
+  color: #a9b1d6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.3;
+}
+
+// ---- Center section: controls + seek ----
+
+.center {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.controlBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #a9b1d6;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+  padding: 0;
+
+  &:hover:not(:disabled) {
+    color: #a9b1d6;
+    background: rgba(122, 162, 247, 0.08);
+  }
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(122, 162, 247, 0.8);
+    outline-offset: 2px;
+  }
+}
+
+.playPauseBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(122, 162, 247, 0.15);
+  border: 1px solid rgba(122, 162, 247, 0.25);
+  color: #7aa2f7;
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+  padding: 0;
+
+  &:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.25);
+    border-color: rgba(122, 162, 247, 0.4);
+    box-shadow: 0 0 12px rgba(122, 162, 247, 0.2);
+  }
+
+  &:active:not(:disabled) {
+    background: rgba(122, 162, 247, 0.3);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(122, 162, 247, 0.8);
+    outline-offset: 2px;
+  }
+}
+
+// ---- Buffering spinner ----
+
+.spinner {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+// ---- Seek row ----
+
+.seekRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  max-width: 480px;
+}
+
+.timeLabel {
+  font-size: 11px;
+  color: #a9b1d6;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 36px;
+
+  &:first-child {
+    text-align: right;
+  }
+
+  &:last-child {
+    text-align: left;
+  }
+}
+
+// ---- Seek track (custom div-based) ----
+
+.seekTrack {
+  flex: 1;
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  user-select: none;
+
+  // Larger hit target
+  &::before {
+    content: "";
+    position: absolute;
+    top: -8px;
+    bottom: -8px;
+    left: 0;
+    right: 0;
+  }
+
+  &:hover .seekThumb {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-50%) scale(1);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(122, 162, 247, 0.6);
+    outline-offset: 4px;
+    border-radius: 2px;
+  }
+}
+
+// Buffered range fill — lighter color
+.seekBuffered {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: rgba(122, 162, 247, 0.22);
+  pointer-events: none;
+  transition: width 0.2s linear;
+}
+
+// Played range fill — brighter color
+.seekPlayed {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: #7aa2f7;
+  pointer-events: none;
+}
+
+// Scrubber thumb
+.seekThumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c0caf5;
+  transform: translateX(-50%) translateY(-50%) scale(0.8);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+.seekThumbDragging {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-50%) scale(1.1);
+}
+
+// ---- Right section: extra controls + volume ----
+
+.right {
+  flex: 0 0 260px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+// ---- Volume slider (custom div-based, matches seek bar style) ----
+
+.volumeTrack {
+  position: relative;
+  width: 90px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  user-select: none;
+
+  // Larger hit target
+  &::before {
+    content: "";
+    position: absolute;
+    top: -8px;
+    bottom: -8px;
+    left: 0;
+    right: 0;
+  }
+
+  &:hover .volumeThumb {
+    opacity: 1;
+    transform: translateX(-50%) translateY(-50%) scale(1);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(122, 162, 247, 0.6);
+    outline-offset: 4px;
+    border-radius: 2px;
+  }
+}
+
+.volumeFill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: #7aa2f7;
+  pointer-events: none;
+}
+
+.volumeThumb {
+  position: absolute;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #c0caf5;
+  transform: translateX(-50%) translateY(-50%) scale(0.8);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.15s,
+    transform 0.15s;
+  box-shadow: 0 0 4px rgba(0, 0, 0, 0.5);
+}
+
+.volumeThumbActive {
+  opacity: 1;
+  transform: translateX(-50%) translateY(-50%) scale(1.1);
+}

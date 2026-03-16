@@ -12,7 +12,13 @@ import type {
   CreateTagInput,
   ListSessionsInput,
   ListSessionsResult,
+  MusicLibraryListInput,
+  MusicLibraryListResult,
+  MusicPlaylist,
+  MusicSortDir,
+  MusicSortField,
   NvimActivity,
+  PlaylistTrack,
   SaveSessionInput,
   SaveSessionWithTrackingInput,
   Session,
@@ -22,6 +28,8 @@ import type {
   UpdateTagInput,
   WorklogStatus,
 } from "../../src/shared/types.ts";
+import type { InternalTrackRecord } from "./music/internal-types.ts";
+import { toRendererTrack } from "./music/internal-types.ts";
 
 let db: Database.Database | null = null;
 
@@ -121,6 +129,46 @@ export function initDatabase(dbPath?: string): void {
 
     CREATE INDEX IF NOT EXISTS idx_nvim_activity_recorded_at ON nvim_activity(recorded_at DESC);
     CREATE INDEX IF NOT EXISTS idx_nvim_activity_project ON nvim_activity(project);
+
+    CREATE TABLE IF NOT EXISTS tracks (
+      id                TEXT PRIMARY KEY,
+      source_url        TEXT NOT NULL UNIQUE,
+      source_id         TEXT NOT NULL,
+      source_site       TEXT NOT NULL,
+      title             TEXT NOT NULL,
+      artist            TEXT,
+      duration_seconds  INTEGER,
+      thumbnail_url     TEXT,
+      cached_file_path  TEXT,
+      cache_size_bytes  INTEGER,
+      play_count        INTEGER NOT NULL DEFAULT 0,
+      last_played_at    TEXT,
+      added_at          TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_tracks_source_url ON tracks(source_url);
+    CREATE INDEX IF NOT EXISTS idx_tracks_last_played_at ON tracks(last_played_at);
+    CREATE INDEX IF NOT EXISTS idx_tracks_title ON tracks(title COLLATE NOCASE);
+    CREATE INDEX IF NOT EXISTS idx_tracks_cached ON tracks(cached_file_path) WHERE cached_file_path IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tracks_added_at ON tracks(added_at DESC);
+
+    CREATE TABLE IF NOT EXISTS playlists (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      name        TEXT NOT NULL,
+      source      TEXT NOT NULL DEFAULT 'user_created',
+      created_at  TEXT NOT NULL,
+      updated_at  TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS playlist_tracks (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,
+      track_id    TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+      position    INTEGER NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist_position ON playlist_tracks(playlist_id, position);
+    CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track ON playlist_tracks(track_id);
   `);
 
   // Idempotent migration: add issue columns if they don't exist yet
@@ -851,4 +899,386 @@ export function listNvimActivityByDate(date: string): { records: NvimActivity[] 
   }));
 
   return { records };
+}
+
+// --- Music Track Functions ---
+
+export function upsertTrack(record: Omit<InternalTrackRecord, "play_count" | "last_played_at">): InternalTrackRecord {
+  const database = getDb();
+  const now = new Date().toISOString();
+
+  // Try INSERT first, fall back to UPDATE on conflict (source_url UNIQUE)
+  database.prepare(`
+    INSERT INTO tracks (id, source_url, source_id, source_site, title, artist, duration_seconds, thumbnail_url, cached_file_path, cache_size_bytes, play_count, last_played_at, added_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, NULL, ?)
+    ON CONFLICT(source_url) DO UPDATE SET
+      title = excluded.title,
+      artist = excluded.artist,
+      duration_seconds = excluded.duration_seconds,
+      thumbnail_url = excluded.thumbnail_url
+  `).run(
+    record.id,
+    record.source_url,
+    record.source_id,
+    record.source_site,
+    record.title,
+    record.artist ?? null,
+    record.duration_seconds ?? null,
+    record.thumbnail_url ?? null,
+    record.cached_file_path ?? null,
+    record.cache_size_bytes ?? null,
+    record.added_at ?? now,
+  );
+
+  const row = database.prepare("SELECT * FROM tracks WHERE source_url = ?").get(record.source_url) as InternalTrackRecord;
+  return row;
+}
+
+export function incrementTrackPlayCount(trackId: string): void {
+  const database = getDb();
+  const now = new Date().toISOString();
+  database.prepare("UPDATE tracks SET play_count = play_count + 1, last_played_at = ? WHERE id = ?").run(now, trackId);
+}
+
+export function getTrackBySourceUrl(sourceUrl: string): InternalTrackRecord | null {
+  const database = getDb();
+  const row = database.prepare("SELECT * FROM tracks WHERE source_url = ?").get(sourceUrl) as InternalTrackRecord | undefined;
+  return row ?? null;
+}
+
+export function getTrackById(trackId: string): InternalTrackRecord | null {
+  const database = getDb();
+  const row = database.prepare("SELECT * FROM tracks WHERE id = ?").get(trackId) as InternalTrackRecord | undefined;
+  return row ?? null;
+}
+
+export function updateTrackCache(trackId: string, cachedFilePath: string | null, cacheSizeBytes: number | null): void {
+  const database = getDb();
+  database.prepare("UPDATE tracks SET cached_file_path = ?, cache_size_bytes = ? WHERE id = ?").run(
+    cachedFilePath,
+    cacheSizeBytes,
+    trackId,
+  );
+}
+
+export function deleteTrack(trackId: string): void {
+  const database = getDb();
+  database.prepare("DELETE FROM tracks WHERE id = ?").run(trackId);
+}
+
+const VALID_MUSIC_SORT_FIELDS: readonly MusicSortField[] = ["last_played_at", "title", "duration_seconds", "added_at"];
+const VALID_MUSIC_SORT_DIRS: readonly MusicSortDir[] = ["asc", "desc"];
+
+export function listMusicTracks(input: MusicLibraryListInput = {}): MusicLibraryListResult {
+  const database = getDb();
+
+  const limit = input.limit ?? 50;
+  const offset = input.offset ?? 0;
+  const sortField: MusicSortField = VALID_MUSIC_SORT_FIELDS.includes(input.sortField as MusicSortField)
+    ? (input.sortField as MusicSortField)
+    : "last_played_at";
+  const sortDir: MusicSortDir = VALID_MUSIC_SORT_DIRS.includes(input.sortDir as MusicSortDir)
+    ? (input.sortDir as MusicSortDir)
+    : "desc";
+
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (input.search && input.search.trim().length > 0) {
+    const term = `%${input.search.trim()}%`;
+    conditions.push("(title LIKE ? OR artist LIKE ?)");
+    params.push(term, term);
+  }
+
+  if (input.cachedOnly) {
+    conditions.push("cached_file_path IS NOT NULL");
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const orderClause = `ORDER BY ${sortField} ${sortDir.toUpperCase()}, id ASC`;
+
+  const rows = database
+    .prepare(`SELECT * FROM tracks ${whereClause} ${orderClause} LIMIT ? OFFSET ?`)
+    .all(...params, limit, offset) as InternalTrackRecord[];
+
+  const countRow = database
+    .prepare(`SELECT COUNT(*) as count FROM tracks ${whereClause}`)
+    .get(...params) as { count: number };
+
+  return {
+    tracks: rows.map(toRendererTrack),
+    total: countRow.count,
+  };
+}
+
+export function getCacheUsage(): { currentBytes: number; trackCount: number } {
+  const database = getDb();
+  const row = database
+    .prepare("SELECT COALESCE(SUM(cache_size_bytes), 0) as total, COUNT(*) as count FROM tracks WHERE cached_file_path IS NOT NULL")
+    .get() as { total: number; count: number };
+  return { currentBytes: row.total, trackCount: row.count };
+}
+
+export function clearAllCachedTracks(): void {
+  const database = getDb();
+  database.prepare("UPDATE tracks SET cached_file_path = NULL, cache_size_bytes = NULL").run();
+}
+
+export function getEvictionCandidates(excludeTrackIds: string[]): InternalTrackRecord[] {
+  const database = getDb();
+  if (excludeTrackIds.length === 0) {
+    return database
+      .prepare("SELECT * FROM tracks WHERE cached_file_path IS NOT NULL ORDER BY last_played_at ASC")
+      .all() as InternalTrackRecord[];
+  }
+  const placeholders = excludeTrackIds.map(() => "?").join(", ");
+  return database
+    .prepare(`SELECT * FROM tracks WHERE cached_file_path IS NOT NULL AND id NOT IN (${placeholders}) ORDER BY last_played_at ASC`)
+    .all(...excludeTrackIds) as InternalTrackRecord[];
+}
+
+export function getAllPlaylistTrackIds(): string[] {
+  const database = getDb();
+  const rows = database
+    .prepare("SELECT DISTINCT track_id FROM playlist_tracks")
+    .all() as Array<{ track_id: string }>;
+  return rows.map((r) => r.track_id);
+}
+
+// --- Music Playlist Functions ---
+
+export function createPlaylist(name: string, source: "user_created" | "saved_queue" = "user_created"): MusicPlaylist {
+  const database = getDb();
+  const now = new Date().toISOString();
+
+  if (!name || name.trim().length === 0) {
+    throw new Error("Playlist name cannot be empty");
+  }
+  const trimmedName = name.trim().slice(0, 200);
+
+  const result = database
+    .prepare("INSERT INTO playlists (name, source, created_at, updated_at) VALUES (?, ?, ?, ?)")
+    .run(trimmedName, source, now, now);
+
+  const id = result.lastInsertRowid as number;
+  return {
+    id,
+    name: trimmedName,
+    source,
+    trackCount: 0,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+export function renamePlaylist(id: number, name: string): void {
+  const database = getDb();
+  if (!name || name.trim().length === 0) {
+    throw new Error("Playlist name cannot be empty");
+  }
+  const trimmedName = name.trim().slice(0, 200);
+  const now = new Date().toISOString();
+  const result = database
+    .prepare("UPDATE playlists SET name = ?, updated_at = ? WHERE id = ?")
+    .run(trimmedName, now, id);
+  if (result.changes === 0) {
+    throw new Error(`Playlist with id ${id} not found`);
+  }
+}
+
+export function deletePlaylist(id: number): void {
+  const database = getDb();
+  const result = database.prepare("DELETE FROM playlists WHERE id = ?").run(id);
+  if (result.changes === 0) {
+    throw new Error(`Playlist with id ${id} not found`);
+  }
+}
+
+interface PlaylistRow {
+  id: number;
+  name: string;
+  source: string;
+  track_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToPlaylist(row: PlaylistRow): MusicPlaylist {
+  return {
+    id: row.id,
+    name: row.name,
+    source: row.source as "user_created" | "saved_queue",
+    trackCount: row.track_count,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function listPlaylists(): MusicPlaylist[] {
+  const database = getDb();
+  const rows = database
+    .prepare(`
+      SELECT p.id, p.name, p.source, p.created_at, p.updated_at,
+             COUNT(pt.id) as track_count
+      FROM playlists p
+      LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+      GROUP BY p.id
+      ORDER BY p.created_at DESC
+    `)
+    .all() as PlaylistRow[];
+  return rows.map(rowToPlaylist);
+}
+
+export function getPlaylistById(id: number): MusicPlaylist | null {
+  const database = getDb();
+  const row = database
+    .prepare(`
+      SELECT p.id, p.name, p.source, p.created_at, p.updated_at,
+             COUNT(pt.id) as track_count
+      FROM playlists p
+      LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
+      WHERE p.id = ?
+      GROUP BY p.id
+    `)
+    .get(id) as PlaylistRow | undefined;
+  return row ? rowToPlaylist(row) : null;
+}
+
+export function getPlaylistTracks(playlistId: number): PlaylistTrack[] {
+  const database = getDb();
+  const rows = database
+    .prepare(`
+      SELECT pt.id, pt.playlist_id, pt.track_id, pt.position,
+             t.source_url, t.source_id, t.source_site, t.title, t.artist,
+             t.duration_seconds, t.thumbnail_url, t.cached_file_path,
+             t.cache_size_bytes, t.play_count, t.last_played_at, t.added_at
+      FROM playlist_tracks pt
+      INNER JOIN tracks t ON t.id = pt.track_id
+      WHERE pt.playlist_id = ?
+      ORDER BY pt.position ASC
+    `)
+    .all(playlistId) as Array<{
+      id: number;
+      playlist_id: number;
+      track_id: string;
+      position: number;
+      source_url: string;
+      source_id: string;
+      source_site: string;
+      title: string;
+      artist: string | null;
+      duration_seconds: number | null;
+      thumbnail_url: string | null;
+      cached_file_path: string | null;
+      cache_size_bytes: number | null;
+      play_count: number;
+      last_played_at: string | null;
+      added_at: string;
+    }>;
+
+  return rows.map((row) => ({
+    id: row.id,
+    playlistId: row.playlist_id,
+    trackId: row.track_id,
+    position: row.position,
+    track: toRendererTrack({
+      id: row.track_id,
+      source_url: row.source_url,
+      source_id: row.source_id,
+      source_site: row.source_site,
+      title: row.title,
+      artist: row.artist,
+      duration_seconds: row.duration_seconds,
+      thumbnail_url: row.thumbnail_url,
+      cached_file_path: row.cached_file_path,
+      cache_size_bytes: row.cache_size_bytes,
+      play_count: row.play_count,
+      last_played_at: row.last_played_at,
+      added_at: row.added_at,
+    }),
+  }));
+}
+
+export function addTrackToPlaylist(playlistId: number, trackId: string): PlaylistTrack {
+  const database = getDb();
+  const now = new Date().toISOString();
+
+  // Get next position
+  const maxPos = database
+    .prepare("SELECT COALESCE(MAX(position), -1) as max_pos FROM playlist_tracks WHERE playlist_id = ?")
+    .get(playlistId) as { max_pos: number };
+
+  const position = maxPos.max_pos + 1;
+  const result = database
+    .prepare("INSERT INTO playlist_tracks (playlist_id, track_id, position) VALUES (?, ?, ?)")
+    .run(playlistId, trackId, position);
+
+  const entryId = result.lastInsertRowid as number;
+
+  // Update playlist updated_at
+  database.prepare("UPDATE playlists SET updated_at = ? WHERE id = ?").run(now, playlistId);
+
+  // Return the entry with track data
+  const track = getTrackById(trackId);
+  if (!track) {
+    throw new Error(`Track not found after insert: ${trackId}`);
+  }
+
+  return {
+    id: entryId,
+    playlistId,
+    trackId,
+    position,
+    track: toRendererTrack(track),
+  };
+}
+
+export function removeTrackFromPlaylist(playlistTrackId: number): void {
+  const database = getDb();
+  const result = database.prepare("DELETE FROM playlist_tracks WHERE id = ?").run(playlistTrackId);
+  if (result.changes === 0) {
+    throw new Error(`Playlist track entry with id ${playlistTrackId} not found`);
+  }
+}
+
+export function reorderPlaylistTrack(playlistId: number, trackEntryId: number, toPosition: number): void {
+  const database = getDb();
+
+  // Fetch the entry being moved
+  const entry = database
+    .prepare("SELECT id, position FROM playlist_tracks WHERE id = ? AND playlist_id = ?")
+    .get(trackEntryId, playlistId) as { id: number; position: number } | undefined;
+
+  if (!entry) {
+    throw new Error(`Track entry ${trackEntryId} not found in playlist ${playlistId}`);
+  }
+
+  const fromPosition = entry.position;
+  if (fromPosition === toPosition) return;
+
+  const reorder = database.transaction(() => {
+    if (fromPosition < toPosition) {
+      // Moving down: shift intervening tracks up
+      database
+        .prepare(
+          "UPDATE playlist_tracks SET position = position - 1 WHERE playlist_id = ? AND position > ? AND position <= ?",
+        )
+        .run(playlistId, fromPosition, toPosition);
+    } else {
+      // Moving up: shift intervening tracks down
+      database
+        .prepare(
+          "UPDATE playlist_tracks SET position = position + 1 WHERE playlist_id = ? AND position >= ? AND position < ?",
+        )
+        .run(playlistId, toPosition, fromPosition);
+    }
+    database
+      .prepare("UPDATE playlist_tracks SET position = ? WHERE id = ?")
+      .run(toPosition, trackEntryId);
+
+    const now = new Date().toISOString();
+    database.prepare("UPDATE playlists SET updated_at = ? WHERE id = ?").run(now, playlistId);
+  });
+
+  reorder();
 }

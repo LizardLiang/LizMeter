@@ -4,7 +4,7 @@
   "priority": "P2",
   "created": "2026-02-23T00:00:00Z",
   "updated": "2026-02-23T17:00:00Z",
-  "stage": "8-code-review",
+  "stage": "complete",
   "pipeline": {
     "1-prd": {
       "status": "complete",
@@ -83,10 +83,11 @@
       }
     },
     "8-code-review": {
-      "status": "ready",
+      "status": "complete",
       "assignee": "hermes",
-      "started": null,
-      "completed": null,
+      "started": "2026-03-11T00:00:00.000Z",
+      "completed": "2026-03-11T00:00:00.000Z",
+      "verdict": "approved",
       "document": "code-review.md",
       "gate": {
         "requires": ["7-implementation"],

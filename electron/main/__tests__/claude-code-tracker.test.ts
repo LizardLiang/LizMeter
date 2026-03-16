@@ -990,3 +990,172 @@ describe("v1.2 destroyTracker: clears all v1.2 state", () => {
     expect(() => destroyTracker()).not.toThrow();
   });
 });
+
+// ============================================================
+// Sub-agent tracking: integration tests using ~/.claude/projects/
+// ============================================================
+
+const TEST_PROJECT_PREFIX = "CC-tracker-test-subagent-";
+const claudeProjectsRoot = path.join(os.homedir(), ".claude", "projects");
+const testProjectDirs: string[] = [];
+
+/**
+ * Creates a real temp project dir under ~/.claude/projects/ so validateProjectDirName passes.
+ * Returns the directory name (not full path).
+ */
+function makeRealProjectDir(): string {
+  const dirName = `${TEST_PROJECT_PREFIX}${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const fullPath = path.join(claudeProjectsRoot, dirName);
+  fs.mkdirSync(fullPath, { recursive: true });
+  testProjectDirs.push(fullPath);
+  return dirName;
+}
+
+afterEach(() => {
+  for (const d of testProjectDirs.splice(0)) {
+    try {
+      fs.rmSync(d, { recursive: true, force: true });
+    } catch {
+      // ignore cleanup errors
+    }
+  }
+});
+
+describe("sub-agent tracking: stopTrackingAndGetData includes sub-agent sessions", () => {
+  it("includes sub-agent session in results when subagents/ dir exists at track time", () => {
+    const projDirName = makeRealProjectDir();
+    const projDirPath = path.join(claudeProjectsRoot, projDirName);
+
+    // Create a parent session JSONL that is within 2-minute buffer
+    const parentUuid = `parent-${Date.now()}`;
+    const parentJsonlPath = path.join(projDirPath, `${parentUuid}.jsonl`);
+    const now = new Date().toISOString();
+    fs.writeFileSync(
+      parentJsonlPath,
+      makeUserLine(now) + "\n",
+      "utf8",
+    );
+
+    // Create the subagents directory with one agent JSONL
+    const subagentsDir = path.join(projDirPath, parentUuid, "subagents");
+    fs.mkdirSync(subagentsDir, { recursive: true });
+    const agentFileName = "agent-abc123def456.jsonl";
+    const agentFilePath = path.join(subagentsDir, agentFileName);
+    const agentLine = makeAssistantLine(now, ["src/index.ts"]);
+    fs.writeFileSync(agentFilePath, agentLine + "\n", "utf8");
+
+    // Scan the project so the parent session is discovered
+    const wc = makeMockWebContents();
+    const scanResult = scanSessions(projDirName, wc, 5);
+    expect(scanResult.success).toBe(true);
+
+    // The parent session should appear in the scan results
+    const parentPreview = scanResult.sessions.find((s) => s.ccSessionUuid === parentUuid);
+    expect(parentPreview).toBeDefined();
+
+    // Track the parent session
+    const trackResult = trackSelectedSessions([parentUuid]);
+    expect(trackResult.tracked).toBe(1);
+
+    // Stop tracking and collect data
+    const stopResult = stopTrackingAndGetData();
+
+    // Should have at least 2 sessions: the parent + the sub-agent
+    expect(stopResult.sessions.length).toBeGreaterThanOrEqual(2);
+
+    // Parent session
+    const parentSession = stopResult.sessions.find((s) => s.ccSessionUuid === parentUuid);
+    expect(parentSession).toBeDefined();
+
+    // Sub-agent session — its ccSessionUuid starts with "subagent:"
+    const subagentSession = stopResult.sessions.find((s) =>
+      s.ccSessionUuid.startsWith("subagent:") && s.ccSessionUuid.includes(agentFileName)
+    );
+    expect(subagentSession).toBeDefined();
+    expect(subagentSession!.fileEditCount).toBe(1);
+    expect(subagentSession!.filesEdited).toContain("src/index.ts");
+  });
+
+  it("returns only parent session when subagents/ dir does not exist", () => {
+    const projDirName = makeRealProjectDir();
+    const projDirPath = path.join(claudeProjectsRoot, projDirName);
+
+    const parentUuid = `parent-nosubagents-${Date.now()}`;
+    const parentJsonlPath = path.join(projDirPath, `${parentUuid}.jsonl`);
+    const now = new Date().toISOString();
+    fs.writeFileSync(parentJsonlPath, makeUserLine(now) + "\n", "utf8");
+
+    const wc = makeMockWebContents();
+    const scanResult = scanSessions(projDirName, wc, 5);
+    expect(scanResult.success).toBe(true);
+
+    const parentPreview = scanResult.sessions.find((s) => s.ccSessionUuid === parentUuid);
+    expect(parentPreview).toBeDefined();
+
+    trackSelectedSessions([parentUuid]);
+    const stopResult = stopTrackingAndGetData();
+
+    // Only the parent session — no subagents
+    const subagentSessions = stopResult.sessions.filter((s) => s.ccSessionUuid.startsWith("subagent:"));
+    expect(subagentSessions).toHaveLength(0);
+
+    const parentSession = stopResult.sessions.find((s) => s.ccSessionUuid === parentUuid);
+    expect(parentSession).toBeDefined();
+  });
+
+  it("multiple sub-agent files are all tracked", () => {
+    const projDirName = makeRealProjectDir();
+    const projDirPath = path.join(claudeProjectsRoot, projDirName);
+
+    const parentUuid = `parent-multi-${Date.now()}`;
+    const parentJsonlPath = path.join(projDirPath, `${parentUuid}.jsonl`);
+    const now = new Date().toISOString();
+    fs.writeFileSync(parentJsonlPath, makeUserLine(now) + "\n", "utf8");
+
+    const subagentsDir = path.join(projDirPath, parentUuid, "subagents");
+    fs.mkdirSync(subagentsDir, { recursive: true });
+
+    // Create 3 sub-agent files
+    for (let i = 0; i < 3; i++) {
+      const agentFileName = `agent-${String(i).padStart(4, "0")}abcdefgh.jsonl`;
+      const agentLine = makeAssistantLine(now, [`src/file${i}.ts`]);
+      fs.writeFileSync(path.join(subagentsDir, agentFileName), agentLine + "\n", "utf8");
+    }
+
+    // Skip meta files — they're not .jsonl so they should be ignored
+    fs.writeFileSync(path.join(subagentsDir, "agent-0000abcdefgh.meta.json"), "{}", "utf8");
+
+    const wc = makeMockWebContents();
+    scanSessions(projDirName, wc, 5);
+    trackSelectedSessions([parentUuid]);
+
+    const stopResult = stopTrackingAndGetData();
+    const subagentSessions = stopResult.sessions.filter((s) => s.ccSessionUuid.startsWith("subagent:"));
+    expect(subagentSessions).toHaveLength(3);
+  });
+
+  it("non-jsonl files in subagents/ are ignored", () => {
+    const projDirName = makeRealProjectDir();
+    const projDirPath = path.join(claudeProjectsRoot, projDirName);
+
+    const parentUuid = `parent-nonjsonl-${Date.now()}`;
+    const parentJsonlPath = path.join(projDirPath, `${parentUuid}.jsonl`);
+    const now = new Date().toISOString();
+    fs.writeFileSync(parentJsonlPath, makeUserLine(now) + "\n", "utf8");
+
+    const subagentsDir = path.join(projDirPath, parentUuid, "subagents");
+    fs.mkdirSync(subagentsDir, { recursive: true });
+
+    // Only meta files, no JSONL
+    fs.writeFileSync(path.join(subagentsDir, "agent-abc.meta.json"), "{}", "utf8");
+    fs.writeFileSync(path.join(subagentsDir, "some-other-file.txt"), "data", "utf8");
+
+    const wc = makeMockWebContents();
+    scanSessions(projDirName, wc, 5);
+    trackSelectedSessions([parentUuid]);
+
+    const stopResult = stopTrackingAndGetData();
+    const subagentSessions = stopResult.sessions.filter((s) => s.ccSessionUuid.startsWith("subagent:"));
+    expect(subagentSessions).toHaveLength(0);
+  });
+});

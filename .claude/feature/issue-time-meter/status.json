@@ -18,7 +18,7 @@
       "document": "spec-review-sa.md"
     },
     "6-test-plan": { "status": "complete", "agent": "artemis", "document": "test-plan.md" },
-    "7-implementation": { "status": "ready" },
-    "8-code-review": { "status": "pending" }
+    "7-implementation": { "status": "complete", "completed": "2026-03-11T00:00:00.000Z" },
+    "8-code-review": { "status": "complete", "verdict": "approved", "completed": "2026-03-11T00:00:00.000Z" }
   }
 }

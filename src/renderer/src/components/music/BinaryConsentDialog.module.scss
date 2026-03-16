@@ -1,0 +1,333 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.dialog {
+  width: 480px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.01) 32%, transparent 55%),
+    linear-gradient(315deg, rgba(0, 0, 0, 0.08) 0%, transparent 40%),
+    rgba(14, 16, 30, 0.92);
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+  border: 1px solid rgba(86, 95, 137, 0.3);
+  border-radius: 18px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow:
+    0 20px 70px rgba(0, 0, 0, 0.65),
+    0 4px 16px rgba(0, 0, 0, 0.3),
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 1px 0 0 rgba(255, 255, 255, 0.05),
+    inset 0 -1px 0 rgba(0, 0, 0, 0.15),
+    inset -1px 0 0 rgba(0, 0, 0, 0.05);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(86, 95, 137, 0.3);
+  gap: 12px;
+}
+
+.headerIcon {
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--tokyoNight-fg, #c0caf5);
+  margin: 0;
+}
+
+.body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.description {
+  font-size: 13px;
+  color: var(--tokyoNight-fg, #c0caf5);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.binaryList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.binaryRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(12, 13, 26, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(86, 95, 137, 0.25);
+  border-radius: 8px;
+}
+
+.binaryIcon {
+  font-size: 16px;
+  flex-shrink: 0;
+}
+
+.binaryDetails {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.binaryName {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tokyoNight-fg, #c0caf5);
+  font-family: monospace;
+}
+
+.binaryMeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.binarySize {
+  font-size: 11px;
+  color: #a9b1d6;
+}
+
+.binaryLink {
+  font-size: 11px;
+  color: var(--tokyoNight-blue, #7aa2f7);
+  text-decoration: none;
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 0;
+
+  &:hover {
+    text-decoration: underline;
+    color: #a3c4fa;
+  }
+}
+
+.storagePath {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.storageLabel {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a9b1d6;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.storageValue {
+  font-size: 12px;
+  color: var(--tokyoNight-fg, #c0caf5);
+  font-family: monospace;
+  background: rgba(12, 13, 26, 0.45);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(86, 95, 137, 0.25);
+  border-radius: 6px;
+  padding: 6px 10px;
+  word-break: break-all;
+}
+
+.warningNote {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(224, 175, 104, 0.3);
+  background: rgba(224, 175, 104, 0.06);
+}
+
+.warningIcon {
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.warningText {
+  font-size: 12px;
+  color: #e0af68;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.errorBanner {
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid rgba(247, 118, 142, 0.3);
+  background: rgba(247, 118, 142, 0.07);
+  color: var(--tokyoNight-red, #f7768e);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* Progress section shown during download */
+
+.progressSection {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progressTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--tokyoNight-fg, #c0caf5);
+  margin: 0;
+}
+
+.progressItem {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progressItemHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.progressBinaryName {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--tokyoNight-fg, #c0caf5);
+  font-family: monospace;
+}
+
+.progressStats {
+  font-size: 11px;
+  color: #a9b1d6;
+}
+
+.progressTrack {
+  height: 4px;
+  background: rgba(86, 95, 137, 0.25);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.progressFill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--tokyoNight-blue, #7aa2f7), var(--tokyoNight-purple, #bb9af7));
+  border-radius: 2px;
+  transition: width 0.2s ease;
+  min-width: 4px;
+}
+
+.progressFillComplete {
+  background: linear-gradient(90deg, var(--tokyoNight-green, #9ece6a), #73c03a);
+}
+
+.completedText {
+  font-size: 11px;
+  color: var(--tokyoNight-green, #9ece6a);
+  font-weight: 600;
+}
+
+.loadingState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 28px 20px;
+  color: #a9b1d6;
+  font-size: 13px;
+}
+
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(86, 95, 137, 0.3);
+  border-top-color: var(--tokyoNight-blue, #7aa2f7);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 20px;
+  border-top: 1px solid rgba(86, 95, 137, 0.3);
+}
+
+.cancelBtn {
+  padding: 8px 18px;
+  border: 1px solid var(--tokyoNight-comment, #565f89);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--tokyoNight-fg, #c0caf5);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+
+  &:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.08);
+    border-color: var(--tokyoNight-blue, #7aa2f7);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.downloadBtn {
+  padding: 8px 18px;
+  border: 1px solid rgba(122, 162, 247, 0.4);
+  border-radius: 6px;
+  background: rgba(122, 162, 247, 0.12);
+  color: var(--tokyoNight-blue, #7aa2f7);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+
+  &:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.22);
+    border-color: rgba(122, 162, 247, 0.6);
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}

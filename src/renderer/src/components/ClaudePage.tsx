@@ -39,7 +39,7 @@ export function ClaudePage() {
 
   const subheadingStyle: React.CSSProperties = {
     fontSize: 13,
-    color: "#565f89",
+    color: "#a9b1d6",
     marginBottom: 24,
     marginTop: 0,
   };
@@ -63,13 +63,13 @@ export function ClaudePage() {
 
   const projectDirStyle: React.CSSProperties = {
     fontSize: 11,
-    color: "#565f89",
+    color: "#a9b1d6",
     fontFamily: "monospace",
     wordBreak: "break-all",
   };
 
   const emptyStyle: React.CSSProperties = {
-    color: "#565f89",
+    color: "#a9b1d6",
     fontSize: 13,
     padding: "20px 0",
   };

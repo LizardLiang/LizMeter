@@ -1,7 +1,7 @@
 import type { TimerStatus } from "../../../shared/types.ts";
 import styles from "./NavSidebar.module.scss";
 
-export type NavPage = "timer" | "history" | "stats" | "tags" | "settings" | "issues" | "claude" | "activity";
+export type NavPage = "timer" | "history" | "stats" | "tags" | "settings" | "issues" | "claude" | "activity" | "music";
 
 interface Props {
   activePage: NavPage;
@@ -140,6 +140,25 @@ function ClaudeIcon() {
   );
 }
 
+function MusicIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  );
+}
+
 function ActivityIcon() {
   return (
     <svg
@@ -164,6 +183,7 @@ const NAV_ITEMS: Array<{ id: NavPage; label: string; Icon: () => React.JSX.Eleme
   { id: "issues", label: "Issues", Icon: IssuesIcon },
   { id: "claude", label: "Claude", Icon: ClaudeIcon },
   { id: "activity", label: "Activity", Icon: ActivityIcon },
+  { id: "music", label: "Music", Icon: MusicIcon },
   { id: "stats", label: "Stats", Icon: ChartIcon },
   { id: "tags", label: "Tags", Icon: TagIcon },
   { id: "settings", label: "Settings", Icon: GearIcon },

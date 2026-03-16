@@ -35,6 +35,12 @@ export interface SessionState {
 
 let directoryWatcher: fs.FSWatcher | null = null;
 const fileWatchers: Map<string, fs.FSWatcher> = new Map();
+// Sub-agent directory watchers: keyed by parent session UUID.
+// Watches <projectPath>/<parentUuid>/subagents/ for new agent-*.jsonl files.
+const subagentDirWatchers: Map<string, fs.FSWatcher> = new Map();
+// Tracks pending retry timers for watchSubagentsDirectory, keyed by parent UUID.
+// Prevents duplicate retry loops and allows cleanup of pending timers on stop.
+const subagentDirRetryTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 const debounceTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
 let fallbackPollInterval: ReturnType<typeof setInterval> | null = null;
 const sessionState: Map<string, SessionState> = new Map(); // keyed by ccSessionUuid (active tracked)
@@ -49,6 +55,10 @@ let isPaused: boolean = false; // pause/resume state (v1.2)
 // Queue for new-session notifications (emit one at a time with 1s gap)
 const newSessionQueue: ClaudeCodeSessionPreview[] = [];
 let newSessionEmitTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Prefix used for sub-agent state keys in sessionState map.
+// Format: "subagent:<parentUuid>/<agentFileName>" (e.g. "subagent:abc123/agent-def456")
+const SUBAGENT_KEY_PREFIX = "subagent:";
 
 const DEBOUNCE_MS = 500;
 const FALLBACK_POLL_MS = 30_000;
@@ -101,8 +111,8 @@ export function decodeProjectPath(dirName: string): string {
   // Step 1: Detect drive letter prefix (e.g., "C--")
   const driveMatch = dirName.match(/^([A-Z])--(.+)$/);
   if (driveMatch) {
-    const drive = driveMatch[1];
-    const rest = driveMatch[2];
+    const drive = driveMatch[1]!;
+    const rest = driveMatch[2]!;
     // Step 2: Replace hyphens with backslashes (Windows — lossy)
     return `${drive}:\\${rest.replace(/-/g, "\\")}`;
   }
@@ -550,6 +560,157 @@ function watchFile(state: SessionState): void {
   }
 }
 
+// --- Sub-agent Tracking ---
+
+/**
+ * Builds the state map key for a sub-agent file.
+ * Format: "subagent:<parentUuid>/<agentFileName>"
+ */
+function subagentKey(parentUuid: string, agentFileName: string): string {
+  return `${SUBAGENT_KEY_PREFIX}${parentUuid}/${agentFileName}`;
+}
+
+/**
+ * Adds a sub-agent JSONL file to sessionState and starts watching it.
+ * The sub-agent's activity contributes to aggregated live stats.
+ * @param parentUuid - the parent (user-selected) session UUID
+ * @param agentFilePath - full path to the agent-*.jsonl file
+ * @param agentFileName - basename of the agent file (e.g. "agent-abc123.jsonl")
+ */
+function trackSubagentFile(parentUuid: string, agentFilePath: string, agentFileName: string): void {
+  const key = subagentKey(parentUuid, agentFileName);
+  if (sessionState.has(key)) return; // already tracking
+
+  const state: SessionState = {
+    ccSessionUuid: key,
+    filesEdited: new Set(),
+    lastMessageTimestamp: null,
+    firstActivityAt: null,
+    lastActivityAt: null,
+    idlePeriods: [],
+    // Read from byte 0 so we capture the full history of an already-active sub-agent
+    bytesRead: 0,
+    filePath: agentFilePath,
+    partialLine: "",
+    lastLineType: null,
+    lastToolNames: [],
+  };
+
+  sessionState.set(key, state);
+
+  // Do an initial full read so current activity is reflected immediately.
+  // If the file vanished between discovery and now, clean up and bail out.
+  try {
+    const { lines, newOffset, newPartialLine } = readNewLines(agentFilePath, 0, "");
+    state.bytesRead = newOffset;
+    state.partialLine = newPartialLine;
+    if (lines.length > 0) {
+      processLines(state, lines, idleThresholdMs);
+    }
+  } catch {
+    sessionState.delete(key);
+    return;
+  }
+
+  watchFile(state);
+}
+
+/**
+ * Scans an existing subagents/ directory and tracks all agent-*.jsonl files found.
+ * Called when a parent session is first added to tracking.
+ */
+function scanAndTrackExistingSubagents(parentUuid: string, projectPath: string): boolean {
+  const subagentsDir = path.join(projectPath, parentUuid, "subagents");
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(subagentsDir, { withFileTypes: true });
+  } catch {
+    // Directory doesn't exist yet — that's fine, the watcher will catch new files
+    return false;
+  }
+
+  let foundNew = false;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    if (!entry.name.startsWith("agent-") || !entry.name.endsWith(".jsonl")) continue;
+    const key = subagentKey(parentUuid, entry.name);
+    if (!sessionState.has(key)) {
+      const agentFilePath = path.join(subagentsDir, entry.name);
+      trackSubagentFile(parentUuid, agentFilePath, entry.name);
+      foundNew = true;
+    }
+  }
+  return foundNew;
+}
+
+/**
+ * Starts a directory watcher on <projectPath>/<parentUuid>/subagents/ so that
+ * newly spawned sub-agents are auto-tracked the moment their JSONL file appears.
+ */
+function watchSubagentsDirectory(parentUuid: string, projectPath: string): void {
+  if (subagentDirWatchers.has(parentUuid)) return;
+
+  const subagentsDir = path.join(projectPath, parentUuid, "subagents");
+
+  // Ensure the directory exists before watching; if it doesn't, retry periodically.
+  try {
+    fs.statSync(subagentsDir);
+  } catch {
+    // Directory doesn't exist yet — schedule a repeating retry (every 10s, up to 60 attempts = 10 min).
+    // Guard against starting duplicate retry loops for the same parentUuid.
+    if (subagentDirRetryTimers.has(parentUuid)) return;
+
+    const MAX_RETRIES = 60;
+    let attempt = 0;
+
+    const retry = () => {
+      subagentDirRetryTimers.delete(parentUuid);
+      attempt++;
+      // Stop retrying if a watcher was established (via fallback poll or a previous retry),
+      // or if all sessions have been destroyed, or we've hit the retry cap.
+      if (subagentDirWatchers.has(parentUuid) || sessionState.size === 0 || attempt > MAX_RETRIES) {
+        return;
+      }
+      watchSubagentsDirectory(parentUuid, projectPath);
+      // If watchSubagentsDirectory succeeded, the watcher is now registered and retry stops above.
+      // If it still didn't exist, schedule another attempt.
+      if (!subagentDirWatchers.has(parentUuid)) {
+        subagentDirRetryTimers.set(parentUuid, setTimeout(retry, 10_000));
+      }
+    };
+
+    subagentDirRetryTimers.set(parentUuid, setTimeout(retry, 10_000));
+    return;
+  }
+
+  try {
+    const watcher = fs.watch(subagentsDir, (_eventType, filename) => {
+      if (!filename || !filename.startsWith("agent-") || !filename.endsWith(".jsonl")) return;
+      if (isPaused) return;
+
+      const agentFilePath = path.join(subagentsDir, filename);
+      const key = subagentKey(parentUuid, filename);
+
+      if (sessionState.has(key)) return; // already tracking this sub-agent
+
+      // Wait briefly for the file to be created (watch may fire before write completes)
+      setTimeout(() => {
+        trackSubagentFile(parentUuid, agentFilePath, filename);
+        pushUpdate();
+      }, 200);
+    });
+
+    watcher.on("error", (err) => {
+      console.warn(`[claude-tracker] Sub-agent dir watcher error for ${subagentsDir}:`, err);
+      subagentDirWatchers.delete(parentUuid);
+    });
+
+    subagentDirWatchers.set(parentUuid, watcher);
+  } catch (err) {
+    console.warn(`[claude-tracker] Failed to watch sub-agents directory ${subagentsDir}:`, err);
+  }
+}
+
 // --- New Session Notification Queue ---
 
 function emitNextNewSession(): void {
@@ -581,7 +742,7 @@ function watchDirectory(projectPath: string): void {
   }
 
   try {
-    directoryWatcher = fs.watch(projectPath, (eventType, filename) => {
+    directoryWatcher = fs.watch(projectPath, (_eventType, filename) => {
       if (!filename || !filename.endsWith(".jsonl")) return;
 
       const ccSessionUuid = filename.replace(/\.jsonl$/, "");
@@ -646,11 +807,26 @@ function startFallbackPoll(): void {
     if (isPaused) return; // skip poll while paused
 
     let hasChanges = false;
+
+    // Poll existing session files (parent + sub-agents) for new content
     for (const [uuid, state] of sessionState.entries()) {
       const prevOffset = state.bytesRead;
       processFile(uuid);
       if (state.bytesRead !== prevOffset) hasChanges = true;
     }
+
+    // Discover new sub-agent files that the directory watcher may have missed
+    // (e.g. on Windows where fs.watch reliability is lower)
+    if (watchedProjectPath) {
+      for (const parentUuid of trackedUuids) {
+        if (scanAndTrackExistingSubagents(parentUuid, watchedProjectPath)) hasChanges = true;
+        // Set up a reactive watcher if not already watching (dir may not have existed earlier)
+        if (!subagentDirWatchers.has(parentUuid)) {
+          watchSubagentsDirectory(parentUuid, watchedProjectPath);
+        }
+      }
+    }
+
     if (hasChanges) pushUpdate();
   }, FALLBACK_POLL_MS);
 }
@@ -799,6 +975,48 @@ export function trackSelectedSessions(
         clearTimeout(timer);
         debounceTimers.delete(uuid);
       }
+
+      // Close sub-agent directory watcher and cancel any pending retry for this parent session
+      const subagentDirWatcher = subagentDirWatchers.get(uuid);
+      if (subagentDirWatcher) {
+        try {
+          subagentDirWatcher.close();
+        } catch {
+          // ignore
+        }
+        subagentDirWatchers.delete(uuid);
+      }
+      const retryTimer = subagentDirRetryTimers.get(uuid);
+      if (retryTimer !== undefined) {
+        clearTimeout(retryTimer);
+        subagentDirRetryTimers.delete(uuid);
+      }
+
+      // Freeze sub-agent session states for this parent session
+      const subagentPrefix = `${SUBAGENT_KEY_PREFIX}${uuid}/`;
+      for (const [key, subState] of sessionState.entries()) {
+        if (key.startsWith(subagentPrefix)) {
+          frozenSessions.set(key, subState);
+          sessionState.delete(key);
+          // Close sub-agent file watcher
+          const subWatcher = fileWatchers.get(key);
+          if (subWatcher) {
+            try {
+              subWatcher.close();
+            } catch {
+              // ignore
+            }
+            fileWatchers.delete(key);
+          }
+          // Cancel any pending debounce
+          const subTimer = debounceTimers.get(key);
+          if (subTimer) {
+            clearTimeout(subTimer);
+            debounceTimers.delete(key);
+          }
+        }
+      }
+
       trackedUuids.delete(uuid);
     }
   }
@@ -841,6 +1059,12 @@ export function trackSelectedSessions(
     sessionState.set(uuid, state);
     trackedUuids.add(uuid);
     watchFile(state);
+
+    // Track any existing sub-agents and watch for new ones
+    if (watchedProjectPath) {
+      scanAndTrackExistingSubagents(uuid, watchedProjectPath);
+      watchSubagentsDirectory(uuid, watchedProjectPath);
+    }
   }
 
   // Start fallback poll if not already running (only when at least 1 session tracked)
@@ -886,6 +1110,17 @@ function releaseResources(): void {
     }
   }
   fileWatchers.clear();
+
+  for (const watcher of subagentDirWatchers.values()) {
+    try {
+      watcher.close();
+    } catch {
+      // ignore
+    }
+  }
+  subagentDirWatchers.clear();
+  subagentDirRetryTimers.forEach((timerId) => clearTimeout(timerId));
+  subagentDirRetryTimers.clear();
 
   if (directoryWatcher) {
     try {

@@ -128,7 +128,7 @@ export function ClaudeCodeStats({
   };
 
   const labelStyle: React.CSSProperties = {
-    color: "#565f89",
+    color: "#a9b1d6",
     fontSize: 12,
   };
 

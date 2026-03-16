@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type {
   AvatarPaths,
+  BinaryInfo,
+  BinaryStatus,
+  CacheStats,
   IssueProviderStatus,
   JiraAuthType,
   JiraProviderStatus,
@@ -17,6 +20,8 @@ interface Props {
   onSave: (settings: TimerSettings) => Promise<void>;
   stopwatchSettings?: StopwatchSettings;
   onStopwatchSettingsChange?: (settings: StopwatchSettings) => void;
+  soundEnabled?: boolean;
+  onSoundEnabledChange?: (enabled: boolean) => void;
 }
 
 export function SettingsPage({
@@ -24,6 +29,8 @@ export function SettingsPage({
   onSave,
   stopwatchSettings,
   onStopwatchSettingsChange,
+  soundEnabled = true,
+  onSoundEnabledChange,
 }: Props) {
   const [work, setWork] = useState(String(settings.workDuration / 60));
   const [shortBreak, setShortBreak] = useState(String(settings.shortBreakDuration / 60));
@@ -94,6 +101,15 @@ export function SettingsPage({
   const [avatarPaths, setAvatarPaths] = useState<AvatarPaths>({ idle: null, thinking: null, tool_use: null });
   const [avatarNaturalSizes, setAvatarNaturalSizes] = useState<Record<string, number>>({});
 
+  // Music settings state
+  const [cacheStats, setCacheStats] = useState<CacheStats | null>(null);
+  const [binaryStatus, setBinaryStatus] = useState<BinaryStatus | null>(null);
+  const [binaryInfo, setBinaryInfo] = useState<BinaryInfo | null>(null);
+  const [cacheLimitMb, setCacheLimitMb] = useState<number>(1024);
+  const [cacheLimitSaving, setCacheLimitSaving] = useState(false);
+  const [cacheClearing, setCacheClearing] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+
   useEffect(() => {
     void window.electronAPI.issues.providerStatus().then(setTokenStatus);
     void window.electronAPI.linear.providerStatus().then(setLinearStatus);
@@ -102,6 +118,13 @@ export function SettingsPage({
       setWidgetSettings(settings);
       setAvatarPaths(settings.avatars);
     });
+    // Load music settings
+    void window.electronAPI.music.cacheStats().then((stats) => {
+      setCacheStats(stats);
+      setCacheLimitMb(Math.round(stats.maxBytes / (1024 * 1024)));
+    }).catch(() => {});
+    void window.electronAPI.music.binaryStatus().then(setBinaryStatus).catch(() => {});
+    void window.electronAPI.music.binaryInfo().then(setBinaryInfo).catch(() => {});
   }, []);
 
   async function handleSaveToken() {
@@ -335,6 +358,37 @@ export function SettingsPage({
     });
   }
 
+  // Music settings handlers
+
+  const handleCacheLimitChange = useCallback(async (mb: number) => {
+    setCacheLimitMb(mb);
+    setCacheLimitSaving(true);
+    try {
+      const maxBytes = mb * 1024 * 1024;
+      await window.electronAPI.music.cacheSetLimit(maxBytes);
+      const stats = await window.electronAPI.music.cacheStats();
+      setCacheStats(stats);
+    } catch {
+      // Non-fatal
+    } finally {
+      setCacheLimitSaving(false);
+    }
+  }, []);
+
+  const handleClearCache = useCallback(async () => {
+    setShowClearConfirm(false);
+    setCacheClearing(true);
+    try {
+      await window.electronAPI.music.cacheClear();
+      const stats = await window.electronAPI.music.cacheStats();
+      setCacheStats(stats);
+    } catch {
+      // Non-fatal
+    } finally {
+      setCacheClearing(false);
+    }
+  }, []);
+
   async function handleSave() {
     const w = parseInt(work, 10);
     const s = parseInt(shortBreak, 10);
@@ -415,6 +469,17 @@ export function SettingsPage({
       <button className={styles.saveBtn} onClick={() => void handleSave()} disabled={isSaving}>
         {isSaving ? "Saving…" : saved ? "Saved ✓" : "Save Settings"}
       </button>
+
+      {onSoundEnabledChange && (
+        <label className={styles.checkboxRow} style={{ marginTop: 16 }}>
+          <input
+            type="checkbox"
+            checked={soundEnabled}
+            onChange={(e) => onSoundEnabledChange(e.target.checked)}
+          />
+          <span className={styles.checkboxLabel}>Play sound when timer completes</span>
+        </label>
+      )}
 
       <div className={styles.sectionDivider} />
 
@@ -908,6 +973,91 @@ export function SettingsPage({
             <span className={styles.checkboxLabel}>Prompt to link issue when starting</span>
           </label>
         </>
+      )}
+
+      {/* --- Music Section --- */}
+      <div className={styles.sectionDivider} />
+      <h2 className={styles.sectionHeading}>Music</h2>
+
+      {/* Cache limit */}
+      <div className={styles.field}>
+        <label className={styles.label}>Cache Size Limit</label>
+        <div className={styles.segmentedControl} style={{ marginTop: 8 }}>
+          {([500, 1024, 2048, 5120] as const).map((mb) => (
+            <button
+              key={mb}
+              className={`${styles.segmentBtn} ${cacheLimitMb === mb ? styles.segmentBtnActive : ""}`}
+              onClick={() => void handleCacheLimitChange(mb)}
+              disabled={cacheLimitSaving}
+            >
+              {mb >= 1024 ? `${mb / 1024} GB` : `${mb} MB`}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Cache usage */}
+      {cacheStats !== null && (
+        <div className={styles.field}>
+          <label className={styles.label}>Current Cache Usage</label>
+          <p className={styles.tokenHint} style={{ margin: "6px 0 0" }}>
+            {(cacheStats.currentBytes / (1024 * 1024)).toFixed(1)} MB used ({cacheStats.trackCount}{" "}
+            track{cacheStats.trackCount !== 1 ? "s" : ""} cached)
+          </p>
+        </div>
+      )}
+
+      {/* Clear cache */}
+      {showClearConfirm
+        ? (
+          <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+            <button
+              className={styles.saveBtn}
+              style={{ background: "rgba(247,118,142,0.12)", borderColor: "rgba(247,118,142,0.3)", color: "#f7768e" }}
+              onClick={() => void handleClearCache()}
+              disabled={cacheClearing}
+            >
+              {cacheClearing ? "Clearing…" : "Confirm Clear"}
+            </button>
+            <button
+              className={styles.testTokenBtn}
+              onClick={() => setShowClearConfirm(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        )
+        : (
+          <button
+            className={styles.testTokenBtn}
+            style={{ marginTop: 8 }}
+            onClick={() => setShowClearConfirm(true)}
+            disabled={cacheClearing || (cacheStats !== null && cacheStats.currentBytes === 0)}
+          >
+            Clear Cache
+          </button>
+        )}
+
+      {/* yt-dlp version */}
+      {binaryStatus !== null && (
+        <div className={styles.field} style={{ marginTop: 16 }}>
+          <label className={styles.label}>yt-dlp Version</label>
+          <p className={styles.tokenHint} style={{ margin: "6px 0 0" }}>
+            {binaryStatus.ytDlpInstalled
+              ? binaryStatus.ytDlpVersion ?? "Installed (version unknown)"
+              : "Not installed"}
+          </p>
+        </div>
+      )}
+
+      {/* Binary storage path */}
+      {binaryInfo !== null && (
+        <div className={styles.field}>
+          <label className={styles.label}>Binary Storage Path</label>
+          <p className={styles.tokenHint} style={{ margin: "6px 0 0", wordBreak: "break-all" }}>
+            {binaryInfo.storagePath}
+          </p>
+        </div>
       )}
     </div>
   );

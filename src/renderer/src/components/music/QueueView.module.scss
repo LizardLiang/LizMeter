@@ -1,0 +1,336 @@
+// QueueView.module.scss — Phase 2 queue tab glass styling
+
+.queueContainer {
+  width: 100%;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.queueHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 4px 4px;
+  border-bottom: 1px solid rgba(122, 162, 247, 0.08);
+}
+
+.queueCount {
+  font-size: 11px;
+  font-weight: 600;
+  color: #a9b1d6;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+// ---- Track list ----
+
+.trackList {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+// ---- Track row ----
+
+.trackRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background 0.12s, border-color 0.12s;
+  position: relative;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.05);
+    border-color: rgba(122, 162, 247, 0.08);
+  }
+}
+
+.trackRowActive {
+  background: rgba(122, 162, 247, 0.08);
+  border-color: rgba(122, 162, 247, 0.18);
+
+  .trackTitle {
+    color: #7aa2f7;
+  }
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.12);
+  }
+}
+
+// ---- Drag handle ----
+
+.dragHandle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: #7a8194;
+  cursor: grab;
+  padding: 0;
+  border-radius: 4px;
+  transition: color 0.12s;
+
+  &:hover {
+    color: #a9b1d6;
+  }
+
+  &:active {
+    cursor: grabbing;
+  }
+}
+
+.dragHandleIcon {
+  pointer-events: none;
+}
+
+// ---- Track info button ----
+
+.trackInfo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  border-radius: 4px;
+}
+
+// ---- Thumbnail ----
+
+.thumb {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgba(41, 46, 66, 0.6);
+}
+
+.thumbPlaceholder {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  background: rgba(41, 46, 66, 0.5);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #7a8194;
+}
+
+// ---- Track text ----
+
+.trackText {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.trackTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #c0caf5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.12s;
+}
+
+.trackArtist {
+  font-size: 11px;
+  color: #a9b1d6;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+// ---- Track meta (right side) ----
+
+.trackMeta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.trackDuration {
+  font-size: 11px;
+  color: #a9b1d6;
+  font-variant-numeric: tabular-nums;
+  min-width: 34px;
+  text-align: right;
+}
+
+.cachedBadge {
+  color: #9ece6a;
+  display: flex;
+  align-items: center;
+}
+
+// ---- Remove button ----
+
+.removeBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: #7a8194;
+  cursor: pointer;
+  padding: 0;
+  border-radius: 4px;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
+
+  .trackRow:hover & {
+    opacity: 1;
+  }
+
+  &:hover {
+    color: #f7768e;
+    background: rgba(247, 118, 142, 0.1);
+  }
+}
+
+// ---- Save queue as playlist ----
+
+.saveQueueBtn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid rgba(122, 162, 247, 0.2);
+  background: rgba(122, 162, 247, 0.06);
+  color: #a9b1d6;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.12);
+    border-color: rgba(122, 162, 247, 0.3);
+    color: #7aa2f7;
+  }
+}
+
+.saveQueueForm {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 6px 4px;
+  border-bottom: 1px solid rgba(122, 162, 247, 0.06);
+  margin-bottom: 4px;
+}
+
+.saveQueueInput {
+  flex: 1;
+  padding: 6px 8px;
+  background: rgba(12, 13, 24, 0.5);
+  border: 1px solid rgba(122, 162, 247, 0.3);
+  border-radius: 6px;
+  color: #c0caf5;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  min-width: 0;
+
+  &::placeholder {
+    color: #7a8194;
+  }
+}
+
+.saveQueueConfirmBtn {
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  border: 1px solid rgba(122, 162, 247, 0.3);
+  background: rgba(122, 162, 247, 0.1);
+  color: #7aa2f7;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s;
+
+  &:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.18);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+.saveQueueCancelBtn {
+  padding: 5px 8px;
+  font-size: 12px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: #a9b1d6;
+  cursor: pointer;
+
+  &:hover {
+    color: #c0caf5;
+  }
+}
+
+.saveToast {
+  padding: 6px 10px;
+  font-size: 12px;
+  color: #9ece6a;
+  border-radius: 6px;
+  background: rgba(158, 206, 106, 0.08);
+  border: 1px solid rgba(158, 206, 106, 0.2);
+  margin: 4px 4px 8px;
+}
+
+// ---- Empty state ----
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 48px 24px;
+  color: #a9b1d6;
+  text-align: center;
+}
+
+.emptyIcon {
+  display: flex;
+  margin-bottom: 4px;
+}
+
+.emptyText {
+  font-size: 14px;
+  color: #c0caf5;
+  margin: 0;
+  font-weight: 500;
+}
+
+.emptyHint {
+  font-size: 12px;
+  color: #a9b1d6;
+  margin: 0;
+}

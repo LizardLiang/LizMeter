@@ -7,7 +7,7 @@
 @mixin page-heading {
   font-size: 13px;
   font-weight: 700;
-  color: #a9b1d6;
+  color: #c0caf5;
   letter-spacing: 0.14em;
   text-transform: uppercase;
 }
@@ -36,7 +36,7 @@
   background: none;
   border: none;
   cursor: pointer;
-  color: #565f89;
+  color: #7a8194;
   font-size: 12px;
   padding: 2px 4px;
   border-radius: 4px;
@@ -44,7 +44,7 @@
   transition: color 0.15s ease;
 
   &:hover {
-    color: #a9b1d6;
+    color: #c0caf5;
   }
 }
 
@@ -52,7 +52,7 @@
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.12em;
-  color: #a9b1d6;
+  color: #c0caf5;
   text-transform: uppercase;
   margin-bottom: 8px;
 }

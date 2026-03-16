@@ -324,6 +324,139 @@ export interface SaveSessionWithTrackingInput {
   claudeCodeSessions?: ClaudeCodeSessionData[];
 }
 
+// --- Music Player Types ---
+
+export interface MusicTrack {
+  id: string; // UUID v4
+  sourceUrl: string; // Canonical URL (yt-dlp webpage_url)
+  sourceId: string; // Site-specific content ID (YouTube video ID, etc.)
+  sourceSite: string; // yt-dlp extractor name ("youtube", "soundcloud", etc.)
+  title: string;
+  artist: string | null;
+  durationSeconds: number | null;
+  thumbnailUrl: string | null;
+  isCached: boolean; // Whether a cached .m4a file exists (v2.0: replaces cachedFilePath)
+  cacheSizeBytes: number | null;
+  playCount: number;
+  lastPlayedAt: string | null; // ISO 8601
+  addedAt: string; // ISO 8601
+}
+
+export interface MusicPlaylist {
+  id: number;
+  name: string;
+  source: "user_created" | "saved_queue";
+  trackCount: number; // Computed via JOIN
+  createdAt: string; // ISO 8601
+  updatedAt: string; // ISO 8601
+}
+
+export interface PlaylistTrack {
+  id: number; // playlist_tracks auto-increment PK
+  playlistId: number;
+  trackId: string;
+  position: number;
+  track: MusicTrack; // Joined track data
+}
+
+export interface MusicQueueItem {
+  queueId: string; // Client-generated UUID for queue identity
+  track: MusicTrack;
+  sourcePlaylistId: number | null; // Which playlist this came from
+}
+
+export interface BinaryStatus {
+  ytDlpInstalled: boolean;
+  ffmpegInstalled: boolean;
+  ytDlpVersion: string | null; // e.g., "2026.01.15"
+  // Note: filesystem paths intentionally excluded from renderer-facing type (CRIT-01 principle)
+}
+
+export interface BinaryInfo {
+  ytDlpSize: number | null; // Bytes (null if GitHub API call failed)
+  ffmpegSize: number | null; // Bytes (null if GitHub API call failed)
+  storagePath: string; // e.g., "C:\Users\...\AppData\...\bin\"
+  ytDlpFilename: string; // "yt-dlp" or "yt-dlp.exe"
+  ffmpegFilename: string; // "ffmpeg" or "ffmpeg.exe"
+  ytDlpUrl: string | null; // Download URL (null if GitHub API call failed)
+  ffmpegUrl: string | null; // Download URL (null if GitHub API call failed)
+  error: string | null; // Error message if GitHub API calls failed
+}
+
+export interface BinaryDownloadProgress {
+  binary: "yt-dlp" | "ffmpeg";
+  percent: number; // 0-100
+  bytesDownloaded: number;
+  totalBytes: number;
+  speed: number; // Bytes per second
+}
+
+export interface CacheStats {
+  currentBytes: number;
+  maxBytes: number;
+  trackCount: number; // Number of cached tracks
+}
+
+export interface MusicPlayRequest {
+  url: string;
+}
+
+export interface MusicPlayResult {
+  streamUrl: string; // http://127.0.0.1:PORT/audio/<id>
+  track: MusicTrack;
+  fromCache: boolean; // true if already cached, seek fully available
+}
+
+export interface MusicMetaResult {
+  track: MusicTrack; // Metadata only, no audio stream
+}
+
+export interface ImportProgress {
+  total: number | null; // null if unknown (some playlists don't report total)
+  current: number;
+  title: string; // Current track title being processed
+}
+
+export type MusicErrorCode =
+  | "BINARY_MISSING"
+  | "BINARY_DOWNLOAD_FAILED"
+  | "DOWNLOAD_IN_PROGRESS"
+  | "EXTRACTION_FAILED"
+  | "EXTRACTION_TIMEOUT"
+  | "NETWORK_ERROR"
+  | "INVALID_URL"
+  | "UNSUPPORTED_SOURCE"
+  | "CACHE_FULL"
+  | "FORMAT_ERROR"
+  | "HASH_MISMATCH"
+  | "PLAYLIST_NOT_FOUND"
+  | "TRACK_NOT_FOUND";
+
+export type MusicSortField = "last_played_at" | "title" | "duration_seconds" | "added_at";
+export type MusicSortDir = "asc" | "desc";
+
+export interface MusicLibraryListInput {
+  limit?: number; // Default 50
+  offset?: number; // Default 0
+  search?: string; // Title/artist search
+  sortField?: MusicSortField; // Default "last_played_at"
+  sortDir?: MusicSortDir; // Default "desc"
+  cachedOnly?: boolean; // Filter to offline-available tracks
+}
+
+export interface MusicLibraryListResult {
+  tracks: MusicTrack[];
+  total: number;
+}
+
+// Discriminated union for playlist add-track (v2.0: MINOR-08 fix)
+export type PlaylistAddTrackInput =
+  | { playlistId: number; trackId: string; url?: never; }
+  | { playlistId: number; url: string; trackId?: never; };
+
+export type RepeatMode = "off" | "queue" | "one";
+export type MusicPlaybackState = "playing" | "paused" | "buffering" | "stopped";
+
 // --- Electron API (exposed via contextBridge) ---
 
 export interface ElectronAPI {
@@ -422,6 +555,49 @@ export interface ElectronAPI {
   };
   nvimActivity: {
     listByDate: (input: ListNvimActivityInput) => Promise<ListNvimActivityResult>;
+  };
+  music: {
+    // Playback
+    play: (input: MusicPlayRequest) => Promise<MusicPlayResult>;
+    stop: () => Promise<void>;
+    meta: (input: { url: string; }) => Promise<MusicMetaResult>;
+
+    // Library
+    libraryList: (input: MusicLibraryListInput) => Promise<MusicLibraryListResult>;
+    libraryDelete: (trackId: string) => Promise<void>;
+
+    // Playlists
+    playlistCreate: (input: { name: string; trackIds?: string[]; }) => Promise<MusicPlaylist>;
+    playlistRename: (input: { id: number; name: string; }) => Promise<void>;
+    playlistDelete: (id: number) => Promise<void>;
+    playlistList: () => Promise<MusicPlaylist[]>;
+    playlistTracks: (playlistId: number) => Promise<PlaylistTrack[]>;
+    playlistAddTrack: (input: PlaylistAddTrackInput) => Promise<PlaylistTrack>;
+    playlistRemoveTrack: (playlistTrackId: number) => Promise<void>;
+    playlistReorder: (input: { playlistId: number; trackEntryId: number; toPosition: number; }) => Promise<void>;
+
+    // Cache
+    cacheStats: () => Promise<CacheStats>;
+    cacheClear: () => Promise<void>;
+    cacheSetLimit: (maxBytes: number) => Promise<void>;
+
+    // Binary management
+    binaryStatus: () => Promise<BinaryStatus>;
+    binaryInfo: () => Promise<BinaryInfo>;
+    binaryDownload: () => Promise<void>;
+
+    // Import
+    importCancel: () => Promise<void>;
+
+    // Reset
+    reset: (input: { deleteBinaries: boolean; }) => Promise<void>;
+
+    // Push event listeners (return unsubscribe function)
+    onImportProgress: (callback: (progress: ImportProgress) => void) => () => void;
+    onDownloadProgress: (callback: (progress: BinaryDownloadProgress) => void) => () => void;
+    onStreamCached: (callback: (data: { trackId: string; }) => void) => () => void;
+    onMediaKey: (callback: (action: string) => void) => () => void;
+    onPlaylistImported: (callback: (data: { tracks: MusicTrack[]; }) => void) => () => void;
   };
   widget: {
     sendStateUpdate: (snapshot: WidgetTimerSnapshot) => void;

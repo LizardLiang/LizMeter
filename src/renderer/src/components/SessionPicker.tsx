@@ -103,7 +103,7 @@ export function SessionPicker({
   };
 
   const collapseToggleStyle: React.CSSProperties = {
-    color: "#565f89",
+    color: "#a9b1d6",
     fontSize: 11,
     display: "flex",
     alignItems: "center",
@@ -135,7 +135,7 @@ export function SessionPicker({
         <div
           style={{
             padding: "14px",
-            color: "#565f89",
+            color: "#a9b1d6",
             fontSize: 12,
             textAlign: "center",
           }}
@@ -186,7 +186,7 @@ export function SessionPicker({
     borderRadius: 5,
     border: "1px solid rgba(122, 162, 247, 0.4)",
     background: selectedUuids.size > 0 ? "rgba(122, 162, 247, 0.15)" : "rgba(86, 95, 137, 0.1)",
-    color: selectedUuids.size > 0 ? "#7aa2f7" : "#565f89",
+    color: selectedUuids.size > 0 ? "#7aa2f7" : "#a9b1d6",
     fontSize: 12,
     cursor: selectedUuids.size > 0 ? "pointer" : "not-allowed",
     fontFamily: "inherit",
@@ -195,13 +195,13 @@ export function SessionPicker({
 
   const uuidStyle: React.CSSProperties = {
     fontFamily: "monospace",
-    color: "#565f89",
+    color: "#a9b1d6",
     fontSize: 11,
     minWidth: 68,
   };
 
   const timeStyle: React.CSSProperties = {
-    color: "#565f89",
+    color: "#a9b1d6",
     fontSize: 11,
     minWidth: 64,
   };
@@ -217,7 +217,7 @@ export function SessionPicker({
 
   const noPreviewStyle: React.CSSProperties = {
     ...previewStyle,
-    color: "#565f89",
+    color: "#a9b1d6",
     fontStyle: "italic",
   };
 
@@ -235,7 +235,7 @@ export function SessionPicker({
           <div
             style={{
               padding: "14px",
-              color: "#565f89",
+              color: "#a9b1d6",
               fontSize: 12,
               textAlign: "center",
             }}

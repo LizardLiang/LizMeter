@@ -14,6 +14,7 @@ const ACCENT: Record<TimerType, string> = {
   work: "#7aa2f7",
   short_break: "#9ece6a",
   long_break: "#bb9af7",
+  stopwatch: "#7dcfff",
 };
 
 const TIMER_OPTIONS: { value: TimerType; label: string; }[] = [
@@ -36,7 +37,7 @@ export function TimerTypeSelector({ value, onChange, disabled }: TimerTypeSelect
             style={{
               fontWeight: isSelected ? 600 : 400,
               borderBottom: `2px solid ${isSelected ? accent : "transparent"}`,
-              color: isSelected ? accent : "#565f89",
+              color: isSelected ? accent : "#a9b1d6",
               opacity: disabled && !isSelected ? 0.35 : 1,
               cursor: disabled ? "not-allowed" : "pointer",
             }}

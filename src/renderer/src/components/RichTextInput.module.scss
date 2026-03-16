@@ -6,15 +6,15 @@
   position: relative;
   display: flex;
   border-radius: 10px;
-  background: rgba(12, 13, 26, 0.5);
+  background: rgba(16, 17, 32, 0.72);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
-  border: 1px solid rgba(41, 46, 66, 0.85);
+  border: 1px solid rgba(59, 66, 97, 0.7);
   overflow: hidden;
   transition: border-color 0.25s ease, box-shadow 0.3s ease;
 
   &:hover:not(.disabled):not(.focused) {
-    border-color: rgba(59, 66, 97, 0.9);
+    border-color: rgba(86, 95, 137, 0.85);
   }
 }
 
@@ -58,8 +58,8 @@
   align-items: center;
   gap: 2px;
   padding: 4px 8px;
-  border-bottom: 1px solid var(--tn-border, #292e42);
-  opacity: 0.4;
+  border-bottom: 1px solid rgba(59, 66, 97, 0.6);
+  opacity: 0.65;
   transition: opacity 0.2s ease;
 
   .focused & {
@@ -67,7 +67,7 @@
   }
 
   .wrapper:hover:not(.disabled) & {
-    opacity: 0.7;
+    opacity: 0.85;
   }
 
   .focused.wrapper:hover & {
@@ -91,7 +91,7 @@
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
-  color: var(--tn-muted, #565f89);
+  color: #a9b1d6;
   cursor: pointer;
   transition: color 0.15s, background-color 0.15s, border-color 0.15s;
 
@@ -122,7 +122,7 @@
   display: inline-block;
   width: 1px;
   height: 14px;
-  background: var(--tn-border, #292e42);
+  background: rgba(86, 95, 137, 0.5);
   margin: 0 5px;
   flex-shrink: 0;
 }
@@ -164,7 +164,7 @@
     // Placeholder — gentle breathing animation
     p.is-editor-empty:first-child::before {
       content: attr(data-placeholder);
-      color: var(--tn-muted, #565f89);
+      color: #7a8194;
       pointer-events: none;
       float: left;
       height: 0;
@@ -184,14 +184,14 @@
 
     s {
       text-decoration: line-through;
-      color: var(--tn-muted, #565f89);
+      color: #a9b1d6;
     }
 
     code {
       font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
       font-size: 0.85em;
-      background: color-mix(in srgb, var(--tn-bg, #1a1b2e) 70%, var(--tn-surface, #1f2335));
-      border: 1px solid var(--tn-border, #292e42);
+      background: rgba(26, 27, 46, 0.8);
+      border: 1px solid rgba(59, 66, 97, 0.7);
       border-radius: 4px;
       padding: 0.1em 0.4em;
       color: #7dcfff;
@@ -216,7 +216,7 @@
       margin: 2px 0;
 
       &::marker {
-        color: var(--tn-muted, #565f89);
+        color: #7a8194;
       }
     }
 
@@ -236,8 +236,8 @@
   padding: 0;
   border: none;
   border-radius: 4px 0 0 0;
-  background: linear-gradient(to right, transparent, var(--tn-surface, #1f2335) 40%);
-  color: var(--tn-muted, #565f89);
+  background: linear-gradient(to right, transparent, rgba(16, 17, 32, 0.9) 40%);
+  color: #7a8194;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
@@ -304,7 +304,7 @@
 .modalTitle {
   font-size: 0.875rem;
   font-weight: 600;
-  color: var(--tn-text-dim, #a9b1d6);
+  color: #c0caf5;
   letter-spacing: 0.02em;
 }
 
@@ -318,7 +318,7 @@
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
-  color: var(--tn-muted, #565f89);
+  color: #a9b1d6;
   cursor: pointer;
   transition: color 0.15s, background-color 0.15s;
 
@@ -378,7 +378,7 @@
     // Placeholder
     p.is-editor-empty:first-child::before {
       content: attr(data-placeholder);
-      color: var(--tn-muted, #565f89);
+      color: #7a8194;
       pointer-events: none;
       float: left;
       height: 0;
@@ -397,14 +397,14 @@
 
     s {
       text-decoration: line-through;
-      color: var(--tn-muted, #565f89);
+      color: #a9b1d6;
     }
 
     code {
       font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
       font-size: 0.85em;
-      background: color-mix(in srgb, var(--tn-bg, #1a1b2e) 70%, var(--tn-surface, #1f2335));
-      border: 1px solid var(--tn-border, #292e42);
+      background: rgba(26, 27, 46, 0.8);
+      border: 1px solid rgba(59, 66, 97, 0.7);
       border-radius: 4px;
       padding: 0.1em 0.4em;
       color: #7dcfff;
@@ -429,7 +429,7 @@
       margin: 2px 0;
 
       &::marker {
-        color: var(--tn-muted, #565f89);
+        color: #7a8194;
       }
     }
 
@@ -455,17 +455,17 @@
   justify-content: center;
   height: 32px;
   padding: 0 14px;
-  border: 1px solid var(--tn-border, #292e42);
+  border: 1px solid rgba(41, 46, 66, 0.8);
   border-radius: 6px;
   background: transparent;
-  color: var(--tn-muted, #565f89);
+  color: #a9b1d6;
   font-size: 0.8125rem;
   font-weight: 500;
   cursor: pointer;
   transition: color 0.15s, border-color 0.15s, background-color 0.15s;
 
   &:hover {
-    color: var(--tn-text-dim, #a9b1d6);
+    color: var(--tn-text, #c0caf5);
     border-color: #3b4261;
     background-color: color-mix(in srgb, var(--tn-text, #c0caf5) 4%, transparent);
   }

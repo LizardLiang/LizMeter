@@ -15,7 +15,7 @@
 
 .placeholder {
   font-size: 11px;
-  color: #565f89;
+  color: #7a8194;
   font-style: italic;
 }
 
@@ -73,7 +73,7 @@
 .empty {
   padding: 8px 10px;
   font-size: 11px;
-  color: #565f89;
+  color: #a9b1d6;
   font-style: italic;
 }
 
@@ -93,13 +93,13 @@
   background: none;
   border: none;
   font-size: 11px;
-  color: #565f89;
+  color: #a9b1d6;
   cursor: pointer;
   letter-spacing: 0.03em;
   transition: color 0.15s ease;
 
   &:hover {
-    color: #a9b1d6;
+    color: #c0caf5;
   }
 }
 
@@ -121,13 +121,13 @@
   font-weight: 700;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #565f89;
+  color: #a9b1d6;
 }
 
 .cancelBtn {
   background: none;
   border: none;
-  color: #565f89;
+  color: #a9b1d6;
   cursor: pointer;
   font-size: 15px;
   line-height: 1;
@@ -135,7 +135,7 @@
   transition: color 0.15s ease;
 
   &:hover {
-    color: #a9b1d6;
+    color: #c0caf5;
   }
 }
 
@@ -152,7 +152,7 @@
   transition: border-color 0.15s ease, box-shadow 0.15s ease;
 
   &::placeholder {
-    color: #565f89;
+    color: #7a8194;
   }
 
   &:focus {

@@ -56,7 +56,7 @@ export function NewSessionNotification({ session, onAdd, onDismiss }: NewSession
     borderRadius: 4,
     border: "none",
     background: "transparent",
-    color: "#565f89",
+    color: "#a9b1d6",
     fontSize: 12,
     cursor: "pointer",
     fontFamily: "inherit",
