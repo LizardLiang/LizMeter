@@ -302,6 +302,41 @@
   transform: translateX(-50%) translateY(-50%) scale(1.1);
 }
 
+// ---- Active control button (shuffle / repeat on) ----
+
+.controlBtnActive {
+  color: #7aa2f7 !important;
+
+  &:hover:not(:disabled) {
+    color: #7aa2f7 !important;
+    background: rgba(122, 162, 247, 0.12);
+  }
+}
+
+// ---- Toggle button wrapper: positions the active dot below the button ----
+
+.toggleBtnWrapper {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+// Active dot indicator shown under shuffle / repeat when enabled
+
+.activeDot {
+  position: absolute;
+  bottom: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #7aa2f7;
+  box-shadow: 0 0 4px rgba(122, 162, 247, 0.7);
+  pointer-events: none;
+}
+
 // ---- Right section: extra controls + volume ----
 
 .right {

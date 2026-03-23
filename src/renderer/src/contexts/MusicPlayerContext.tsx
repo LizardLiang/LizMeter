@@ -55,6 +55,10 @@ export interface MusicPlayerContextValue {
   // Visibility: true once the first track has started playing
   isBottomBarVisible: boolean;
 
+  // Navigation availability (accounts for shuffle order and repeat mode)
+  canGoNext: boolean;
+  canGoPrev: boolean;
+
   // Playback actions
   play: (url: string) => Promise<void>;
   pause: () => void;
@@ -750,45 +754,69 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
 
   // ---- Assemble context value ----
 
-  const value = useMemo<MusicPlayerContextValue>(() => ({
-    currentTrack,
-    playbackState: audioPlayer.playbackState,
-    currentTime: audioPlayer.currentTime,
-    duration: audioPlayer.duration,
-    buffered: audioPlayer.buffered,
-    queue,
-    currentIndex,
-    queueLength: queue.length,
-    volume,
-    muted,
-    playbackSpeed,
-    shuffleEnabled,
-    repeatMode,
-    binaryStatus,
-    importProgress,
-    consecutiveFailures,
-    lastError,
-    isBottomBarVisible,
-    play,
-    pause,
-    resume,
-    stop,
-    seek,
-    next: handleNext,
-    prev: handlePrev,
-    jumpTo,
-    enqueue,
-    enqueueBulk,
-    dequeueAt,
-    reorderQueue,
-    clearQueue,
-    setVolume,
-    setMuted,
-    setPlaybackSpeed,
-    setShuffleEnabled,
-    setRepeatMode,
-    refreshBinaryStatus,
-  }), [
+  const value = useMemo<MusicPlayerContextValue>(() => {
+    // Compute navigation availability accounting for shuffle order and repeat mode.
+    // When shuffle is active the "next" / "prev" slots are determined by shuffleOrder
+    // position, not raw queue index. When repeatMode is "queue" or "one", next is
+    // always available as long as there is at least one track.
+    let canGoNext = false;
+    let canGoPrev = false;
+    if (queue.length > 0 && currentIndex >= 0) {
+      if (repeatMode === "queue" || repeatMode === "one") {
+        canGoNext = true;
+        canGoPrev = true;
+      } else if (shuffleOrder !== null) {
+        const pos = shuffleOrder.indexOf(currentIndex);
+        canGoNext = pos >= 0 && pos + 1 < shuffleOrder.length;
+        canGoPrev = pos > 0;
+      } else {
+        canGoNext = currentIndex + 1 < queue.length;
+        canGoPrev = currentIndex > 0;
+      }
+    }
+
+    return {
+      currentTrack,
+      playbackState: audioPlayer.playbackState,
+      currentTime: audioPlayer.currentTime,
+      duration: audioPlayer.duration,
+      buffered: audioPlayer.buffered,
+      queue,
+      currentIndex,
+      queueLength: queue.length,
+      volume,
+      muted,
+      playbackSpeed,
+      shuffleEnabled,
+      repeatMode,
+      binaryStatus,
+      importProgress,
+      consecutiveFailures,
+      lastError,
+      isBottomBarVisible,
+      canGoNext,
+      canGoPrev,
+      play,
+      pause,
+      resume,
+      stop,
+      seek,
+      next: handleNext,
+      prev: handlePrev,
+      jumpTo,
+      enqueue,
+      enqueueBulk,
+      dequeueAt,
+      reorderQueue,
+      clearQueue,
+      setVolume,
+      setMuted,
+      setPlaybackSpeed,
+      setShuffleEnabled,
+      setRepeatMode,
+      refreshBinaryStatus,
+    };
+  }, [
     currentTrack,
     audioPlayer.playbackState,
     audioPlayer.currentTime,
@@ -796,6 +824,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     audioPlayer.buffered,
     queue,
     currentIndex,
+    shuffleOrder,
     volume,
     muted,
     playbackSpeed,

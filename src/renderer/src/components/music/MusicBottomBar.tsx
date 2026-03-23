@@ -455,8 +455,8 @@ export function MusicBottomBar() {
     seek,
     next,
     prev,
-    queueLength,
-    currentIndex,
+    canGoNext,
+    canGoPrev,
     volume,
     muted,
     setVolume,
@@ -474,8 +474,6 @@ export function MusicBottomBar() {
   const isPlaying = playbackState === "playing";
   const isBuffering = playbackState === "buffering";
   const isCached = currentTrack?.isCached ?? false;
-  const hasPrev = currentIndex > 0;
-  const hasNext = currentIndex < queueLength - 1;
 
   const handleRepeatCycle = useCallback(() => {
     const next: RepeatMode = repeatMode === "off" ? "queue" : repeatMode === "queue" ? "one" : "off";
@@ -522,7 +520,7 @@ export function MusicBottomBar() {
           <button
             className={styles.controlBtn}
             aria-label="Previous track"
-            disabled={!hasPrev}
+            disabled={!canGoPrev}
             onClick={prev}
             tabIndex={0}
           >
@@ -542,7 +540,7 @@ export function MusicBottomBar() {
           <button
             className={styles.controlBtn}
             aria-label="Next track"
-            disabled={!hasNext}
+            disabled={!canGoNext}
             onClick={next}
             tabIndex={0}
           >
@@ -569,26 +567,36 @@ export function MusicBottomBar() {
         <SpeedSelector value={playbackSpeed} onChange={setPlaybackSpeed} />
 
         {/* Shuffle */}
-        <button
-          className={styles.controlBtn}
-          aria-label={shuffleEnabled ? "Disable shuffle" : "Enable shuffle"}
-          title="Shuffle"
-          onClick={() => setShuffleEnabled(!shuffleEnabled)}
-          style={shuffleEnabled ? { color: "#7aa2f7" } : undefined}
-        >
-          <ShuffleIcon />
-        </button>
+        <div className={styles.toggleBtnWrapper}>
+          <button
+            className={`${styles.controlBtn} ${shuffleEnabled ? styles.controlBtnActive : ""}`}
+            aria-label={shuffleEnabled ? "Disable shuffle" : "Enable shuffle"}
+            aria-pressed={shuffleEnabled}
+            title="Shuffle"
+            onClick={() => setShuffleEnabled(!shuffleEnabled)}
+          >
+            <ShuffleIcon />
+          </button>
+          {shuffleEnabled && <span className={styles.activeDot} aria-hidden="true" />}
+        </div>
 
         {/* Repeat */}
-        <button
-          className={styles.controlBtn}
-          aria-label={`Repeat: ${repeatMode}`}
-          title={`Repeat: ${repeatMode}`}
-          onClick={handleRepeatCycle}
-          style={repeatMode !== "off" ? { color: "#7aa2f7" } : undefined}
-        >
-          {repeatMode === "one" ? <RepeatOneIcon /> : repeatMode === "queue" ? <RepeatQueueIcon /> : <RepeatOffIcon />}
-        </button>
+        <div className={styles.toggleBtnWrapper}>
+          <button
+            className={`${styles.controlBtn} ${repeatMode !== "off" ? styles.controlBtnActive : ""}`}
+            aria-label={`Repeat: ${repeatMode}`}
+            aria-pressed={repeatMode !== "off"}
+            title={`Repeat: ${repeatMode}`}
+            onClick={handleRepeatCycle}
+          >
+            {repeatMode === "one"
+              ? <RepeatOneIcon />
+              : repeatMode === "queue"
+              ? <RepeatQueueIcon />
+              : <RepeatOffIcon />}
+          </button>
+          {repeatMode !== "off" && <span className={styles.activeDot} aria-hidden="true" />}
+        </div>
 
         {/* Volume mute toggle */}
         <button
