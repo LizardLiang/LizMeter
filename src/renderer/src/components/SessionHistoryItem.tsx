@@ -1,4 +1,5 @@
 import type { Session } from "../../../shared/types.ts";
+import { isUploadableSession } from "../../../shared/worklog.ts";
 import {
   formatCompletedAt,
   formatStopwatchDuration,
@@ -24,7 +25,7 @@ export function SessionHistoryItem({ session, onDelete, onLogWork, worklogLoadin
 
   const isJiraLinked = session.issueProvider === "jira" && session.issueId;
   const isEligibleDuration = session.actualDurationSeconds >= 60;
-  const showWorklogUi = isJiraLinked && isEligibleDuration;
+  const showWorklogUi = !!isJiraLinked && isUploadableSession(session) && isEligibleDuration;
 
   const handleLogWork = () => {
     if (onLogWork && session.issueId) {

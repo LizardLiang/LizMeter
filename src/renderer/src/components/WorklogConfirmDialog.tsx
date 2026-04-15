@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Session } from "../../../shared/types.ts";
+import { summarizeMergedWorklogSessions } from "../../../shared/worklog.ts";
 import styles from "./WorklogConfirmDialog.module.scss";
 
 interface WorklogConfirmDialogProps {
@@ -45,21 +46,6 @@ function formatLocalTime(iso: string): string {
   return new Date(iso).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-function computeTimesFromSessions(selected: Session[]) {
-  let earliest = Infinity;
-  let latest = 0;
-  for (const s of selected) {
-    const start = new Date(s.completedAt).getTime() - s.actualDurationSeconds * 1000;
-    if (start < earliest) earliest = start;
-    const end = new Date(s.completedAt).getTime();
-    if (end > latest) latest = end;
-  }
-  return {
-    start: new Date(earliest).toISOString(),
-    end: new Date(latest).toISOString(),
-  };
-}
-
 export function WorklogConfirmDialog({ session, issueKey, isRelog, onConfirm, onCancel }: WorklogConfirmDialogProps) {
   const allSessions = Array.isArray(session) ? session : [session];
   const isBulk = allSessions.length > 1;
@@ -71,27 +57,31 @@ export function WorklogConfirmDialog({ session, issueKey, isRelog, onConfirm, on
     () => allSessions.filter((s) => selectedIds.has(s.id)),
     [allSessions, selectedIds],
   );
+  const mergedSummary = useMemo(() => summarizeMergedWorklogSessions(selectedSessions), [selectedSessions]);
+  const uploadableSessions = useMemo(
+    () => selectedSessions.filter((s) => mergedSummary.uploadableSessionIds.includes(s.id)),
+    [mergedSummary.uploadableSessionIds, selectedSessions],
+  );
 
   // Compute default times from selected sessions
   const computedDefaults = useMemo(() => {
-    if (selectedSessions.length === 0) {
+    if (uploadableSessions.length === 0 || !mergedSummary.startedAt || !mergedSummary.endedAt) {
       return { start: new Date().toISOString(), end: new Date().toISOString(), desc: "" };
     }
-    if (selectedSessions.length === 1) {
-      const s = selectedSessions[0];
+    if (uploadableSessions.length === 1) {
+      const s = uploadableSessions[0]!;
       return {
         start: new Date(new Date(s.completedAt).getTime() - s.actualDurationSeconds * 1000).toISOString(),
         end: s.completedAt,
         desc: s.title || "",
       };
     }
-    const times = computeTimesFromSessions(selectedSessions);
     return {
-      start: times.start,
-      end: times.end,
-      desc: selectedSessions.map((s) => s.title || "Work session").join("\n"),
+      start: mergedSummary.startedAt,
+      end: mergedSummary.endedAt,
+      desc: uploadableSessions.map((s) => s.title || "Work session").join("\n"),
     };
-  }, [selectedSessions]);
+  }, [mergedSummary.endedAt, mergedSummary.startedAt, uploadableSessions]);
 
   const [startValue, setStartValue] = useState(() => toDatetimeLocal(computedDefaults.start));
   const [endValue, setEndValue] = useState(() => toDatetimeLocal(computedDefaults.end));
@@ -129,27 +119,48 @@ export function WorklogConfirmDialog({ session, issueKey, isRelog, onConfirm, on
   }, [allSessions]);
 
   // Recalculate duration whenever start or end changes
-  const { durationSeconds, validationError } = useMemo(() => {
-    if (selectedSessions.length === 0) {
-      return { durationSeconds: 0, validationError: "Select at least one session." };
+  const { durationSeconds, includedBreakSeconds, validationError } = useMemo(() => {
+    if (uploadableSessions.length === 0) {
+      return {
+        durationSeconds: 0,
+        includedBreakSeconds: 0,
+        validationError: "Select at least one work or stopwatch session.",
+      };
     }
     if (!startValue || !endValue) {
-      return { durationSeconds: 0, validationError: "Start and end time are required." };
+      return { durationSeconds: 0, includedBreakSeconds: 0, validationError: "Start and end time are required." };
     }
     const startMs = new Date(startValue).getTime();
     const endMs = new Date(endValue).getTime();
     if (isNaN(startMs) || isNaN(endMs)) {
-      return { durationSeconds: 0, validationError: "Invalid date/time." };
+      return { durationSeconds: 0, includedBreakSeconds: 0, validationError: "Invalid date/time." };
     }
-    const secs = Math.round((endMs - startMs) / 1000);
-    if (secs <= 0) {
-      return { durationSeconds: secs, validationError: "End time must be after start time." };
+    if (endMs <= startMs) {
+      return {
+        durationSeconds: mergedSummary.totalDurationSeconds,
+        includedBreakSeconds: mergedSummary.totalBreakSeconds,
+        validationError: "End time must be after start time.",
+      };
     }
-    if (secs < 60) {
-      return { durationSeconds: secs, validationError: "Duration must be at least 60 seconds." };
+    if (mergedSummary.totalDurationSeconds < 60) {
+      return {
+        durationSeconds: mergedSummary.totalDurationSeconds,
+        includedBreakSeconds: mergedSummary.totalBreakSeconds,
+        validationError: "Merged worklog duration must be at least 60 seconds.",
+      };
     }
-    return { durationSeconds: secs, validationError: null };
-  }, [startValue, endValue, selectedSessions.length]);
+    return {
+      durationSeconds: mergedSummary.totalDurationSeconds,
+      includedBreakSeconds: mergedSummary.totalBreakSeconds,
+      validationError: null,
+    };
+  }, [
+    endValue,
+    mergedSummary.totalBreakSeconds,
+    mergedSummary.totalDurationSeconds,
+    startValue,
+    uploadableSessions.length,
+  ]);
 
   // Close on Escape key
   useEffect(() => {
@@ -214,9 +225,19 @@ export function WorklogConfirmDialog({ session, issueKey, isRelog, onConfirm, on
                   <span className={styles.sessionMeta}>
                     {formatDuration(s.actualDurationSeconds)} · {formatLocalTime(s.completedAt)}
                   </span>
+                  {!mergedSummary.uploadableSessionIds.includes(s.id) && (
+                    <span className={styles.sessionLogged}>Break</span>
+                  )}
                   {s.worklogStatus === "logged" && <span className={styles.sessionLogged}>Logged</span>}
                 </label>
               ))}
+            </div>
+          )}
+
+          {isBulk && (
+            <div className={styles.durationDisplay}>
+              Uploadable sessions: {uploadableSessions.length} · Included break time:{" "}
+              {formatDuration(includedBreakSeconds)}
             </div>
           )}
 
@@ -245,7 +266,7 @@ export function WorklogConfirmDialog({ session, issueKey, isRelog, onConfirm, on
             ? <span className={styles.errorMsg}>{validationError}</span>
             : (
               <span className={styles.durationDisplay}>
-                Duration: {formatDuration(durationSeconds)}
+                Uploaded work time: {formatDuration(durationSeconds)}
               </span>
             )}
 

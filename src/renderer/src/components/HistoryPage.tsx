@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import type { CreateTagInput, Session, Tag, TimerStatus } from "../../../shared/types.ts";
+import { isUploadableSession, summarizeMergedWorklogSessions } from "../../../shared/worklog.ts";
 import { useGroupExpand } from "../hooks/useGroupExpand.ts";
 import { formatDuration, formatTimerType, timerTypeColor } from "../utils/format.ts";
 import type { DateSubGroup } from "../utils/groupSessions.ts";
@@ -86,7 +87,7 @@ function SessionCard(
 
   const isJiraLinked = session.issueProvider === "jira" && session.issueId;
   const isEligibleDuration = session.actualDurationSeconds >= 60;
-  const showWorklogUi = isJiraLinked && isEligibleDuration;
+  const showWorklogUi = !!isJiraLinked && isUploadableSession(session) && isEligibleDuration;
 
   const isTimerActive = timerStatus !== undefined && timerStatus !== "idle";
 
@@ -288,27 +289,41 @@ export function HistoryPage({
       setWorklogDialogState(null);
 
       if (isBulk) {
-        // Bulk: ONE Jira API call using first selected session as anchor, then mark rest as logged
+        const selectedSessions = sessions.filter((session) => selectedIds.includes(session.id));
+        const mergedSummary = summarizeMergedWorklogSessions(selectedSessions);
+        const uploadableSessions = selectedSessions.filter((session) =>
+          mergedSummary.uploadableSessionIds.includes(session.id)
+        );
+        if (uploadableSessions.length === 0) {
+          const toastId = crypto.randomUUID();
+          setToasts((
+            prev,
+          ) => [...prev, { id: toastId, message: "Select at least one work or stopwatch session.", type: "error" }]);
+          setTimeout(() => dismissToast(toastId), 4000);
+          return;
+        }
+
+        // Bulk: ONE Jira API call using the first uploadable session as the anchor.
         try {
           const result = await window.electronAPI.worklog.log({
-            sessionId: selectedIds[0]!,
+            sessionId: uploadableSessions[0]!.id,
             issueKey,
+            selectedSessionIds: selectedIds,
             startTimeOverride: params.startTime,
             endTimeOverride: params.endTime,
             descriptionOverride: params.description,
           });
-          // Mark remaining sessions as logged (no extra API calls)
-          if (selectedIds.length > 1) {
+          const additionalUploadableIds = uploadableSessions.slice(1).map((session) => session.id);
+          if (additionalUploadableIds.length > 0) {
             await window.electronAPI.worklog.markLogged({
-              sessionIds: selectedIds.slice(1),
+              sessionIds: additionalUploadableIds,
               worklogId: result.worklogId,
             });
           }
-          const durationMins = Math.round(
-            (new Date(params.endTime).getTime() - new Date(params.startTime).getTime()) / 60000,
-          );
+          const durationMins = Math.round(mergedSummary.totalDurationSeconds / 60);
           const toastId = crypto.randomUUID();
-          const message = `Logged ${durationMins}m to ${issueKey} (${selectedIds.length} sessions combined)`;
+          const message =
+            `Logged ${durationMins}m to ${issueKey} (${uploadableSessions.length} work sessions combined)`;
           setToasts((prev) => [...prev, { id: toastId, message, type: "success" }]);
           setTimeout(() => dismissToast(toastId), 4000);
           onRefresh?.();
@@ -323,24 +338,26 @@ export function HistoryPage({
         await handleLogWork(selectedIds[0]!, issueKey, params);
       }
     },
-    [worklogDialogState, handleLogWork, dismissToast, onRefresh],
+    [worklogDialogState, handleLogWork, dismissToast, onRefresh, sessions],
   );
 
   // Open combined worklog dialog for a date sub-group
   const handleLogDate = useCallback(
     (subGroup: DateSubGroup) => {
-      const eligible = subGroup.sessions.filter(
-        (s) => s.issueProvider === "jira" && s.issueId && s.actualDurationSeconds >= 60,
+      const mergeCandidates = subGroup.sessions.filter((s) => s.issueProvider === "jira" && s.issueId);
+      const mergedSummary = summarizeMergedWorklogSessions(mergeCandidates);
+      const uploadableSessions = mergeCandidates.filter((session) =>
+        mergedSummary.uploadableSessionIds.includes(session.id)
       );
-      if (eligible.length === 0) return;
-      const unloggedCount = eligible.filter((s) => s.worklogStatus !== "logged").length;
+      if (uploadableSessions.length === 0 || mergedSummary.totalDurationSeconds < 60) return;
+      const unloggedCount = uploadableSessions.filter((s) => s.worklogStatus !== "logged").length;
       const isRelog = unloggedCount === 0;
-      const issueKey = eligible[0]!.issueId!;
+      const issueKey = uploadableSessions[0]!.issueId!;
       setWorklogDialogState({
-        session: eligible.length === 1 ? eligible[0]! : eligible,
+        session: mergeCandidates.length === 1 ? mergeCandidates[0]! : mergeCandidates,
         issueKey,
         isRelog,
-        sessionIds: eligible.map((s) => s.id),
+        sessionIds: mergeCandidates.map((s) => s.id),
       });
     },
     [],

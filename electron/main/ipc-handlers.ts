@@ -25,6 +25,7 @@ import type {
   WidgetTimerSnapshot,
 } from "../../src/shared/types.ts";
 import { WIDGET_SETTINGS_KEYS } from "../../src/shared/types.ts";
+import { isUploadableSession, summarizeMergedWorklogSessions } from "../../src/shared/worklog.ts";
 import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widget-window.ts";
 import { getMainWindow } from "./index.ts";
 import {
@@ -600,8 +601,9 @@ export function registerIpcHandlers(): void {
   function resizeWidgetForAvatars(): void {
     const widget = getWidgetWindow();
     if (!widget || widget.isDestroyed()) return;
-    const [w] = widget.getSize();
-    widget.setSize(w, hasAnyAvatar() ? 112 : 80);
+    const width = widget.getSize()[0];
+    if (width === undefined) return;
+    widget.setSize(width, hasAnyAvatar() ? 112 : 80);
   }
 
   ipcMain.handle("widget:avatar-upload", async (_event, slot: keyof AvatarPaths): Promise<string | null> => {
@@ -656,7 +658,10 @@ export function registerIpcHandlers(): void {
     "worklog:mark-logged",
     (_event, input: { sessionIds: string[]; worklogId: string }) => {
       for (const sessionId of input.sessionIds) {
-        updateWorklogStatus(sessionId, "logged", input.worklogId);
+        const session = getSessionById(sessionId);
+        if (session && isUploadableSession(session)) {
+          updateWorklogStatus(sessionId, "logged", input.worklogId);
+        }
       }
     },
   );
@@ -665,12 +670,13 @@ export function registerIpcHandlers(): void {
     "worklog:log",
     async (
       _event,
-      input: {
-        sessionId: string;
-        issueKey: string;
-        startTimeOverride?: string;
-        endTimeOverride?: string;
-        descriptionOverride?: string;
+        input: {
+          sessionId: string;
+          issueKey: string;
+          selectedSessionIds?: string[];
+          startTimeOverride?: string;
+          endTimeOverride?: string;
+          descriptionOverride?: string;
       },
     ) => {
       const provider = getJiraProvider();
@@ -679,13 +685,35 @@ export function registerIpcHandlers(): void {
       // Fetch session from database
       const session = getSessionById(input.sessionId);
       if (!session) throw new Error("Session not found");
+      if (!isUploadableSession(session)) {
+        throw new IssueProviderError(
+          "Only work and stopwatch sessions can be uploaded to Jira",
+          "INELIGIBLE",
+        );
+      }
 
       // Calculate started timestamp and duration
       let started: string;
       let durationSeconds: number;
 
-      if (input.startTimeOverride && input.endTimeOverride) {
-        // Use override times
+      if (input.selectedSessionIds && input.selectedSessionIds.length > 1) {
+        const selectedSessions = input.selectedSessionIds
+          .map((sessionId) => getSessionById(sessionId))
+          .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null)
+          .filter((candidate) => candidate.issueProvider === "jira" && candidate.issueId === input.issueKey);
+        const merged = summarizeMergedWorklogSessions(selectedSessions);
+
+        if (merged.uploadableSessionIds.length === 0 || !merged.startedAt) {
+          throw new IssueProviderError(
+            "Select at least one work or stopwatch session to upload",
+            "INELIGIBLE",
+          );
+        }
+
+        durationSeconds = merged.totalDurationSeconds;
+        started = input.startTimeOverride ? new Date(input.startTimeOverride).toISOString() : merged.startedAt;
+      } else if (input.startTimeOverride && input.endTimeOverride) {
+        // Use override times for single-session uploads.
         const startDate = new Date(input.startTimeOverride);
         const endDate = new Date(input.endTimeOverride);
         durationSeconds = Math.round((endDate.getTime() - startDate.getTime()) / 1000);

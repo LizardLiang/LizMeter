@@ -36,6 +36,7 @@ export interface Session {
 export interface WorklogLogInput {
   sessionId: string;
   issueKey: string;
+  selectedSessionIds?: string[];
   startTimeOverride?: string; // ISO string
   endTimeOverride?: string; // ISO string
   descriptionOverride?: string;
@@ -432,6 +433,31 @@ export type MusicErrorCode =
   | "PLAYLIST_NOT_FOUND"
   | "TRACK_NOT_FOUND";
 
+// --- Music Integrity Types ---
+
+export type DamageReason = "missing" | "empty" | "unreadable" | "corrupt" | "truncated";
+
+export interface DamagedTrackInfo {
+  track: MusicTrack;
+  reason: DamageReason;
+  detail: string;
+  containerDuration: number | null;
+  expectedDuration: number | null;
+}
+
+export interface IntegrityCheckResult {
+  damaged: DamagedTrackInfo[];
+  checked: number;
+  total: number;
+  error: string | null;
+}
+
+export interface IntegrityProgress {
+  current: number;
+  total: number;
+  title: string;
+}
+
 export type MusicSortField = "last_played_at" | "title" | "duration_seconds" | "added_at";
 export type MusicSortDir = "asc" | "desc";
 
@@ -592,12 +618,17 @@ export interface ElectronAPI {
     // Reset
     reset: (input: { deleteBinaries: boolean; }) => Promise<void>;
 
+    // Integrity
+    integrityCheck: () => Promise<IntegrityCheckResult>;
+    integrityRepair: (trackIds: string[]) => Promise<number>;
+
     // Push event listeners (return unsubscribe function)
     onImportProgress: (callback: (progress: ImportProgress) => void) => () => void;
     onDownloadProgress: (callback: (progress: BinaryDownloadProgress) => void) => () => void;
     onStreamCached: (callback: (data: { trackId: string; }) => void) => () => void;
     onMediaKey: (callback: (action: string) => void) => () => void;
     onPlaylistImported: (callback: (data: { tracks: MusicTrack[]; }) => void) => () => void;
+    onIntegrityProgress: (callback: (progress: IntegrityProgress) => void) => () => void;
   };
   widget: {
     sendStateUpdate: (snapshot: WidgetTimerSnapshot) => void;

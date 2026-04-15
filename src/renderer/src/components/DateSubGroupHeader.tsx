@@ -1,4 +1,5 @@
 import type React from "react";
+import { summarizeMergedWorklogSessions } from "../../../shared/worklog.ts";
 import { formatDuration } from "../utils/format.ts";
 import type { DateSubGroup } from "../utils/groupSessions.ts";
 import styles from "./DateSubGroupHeader.module.scss";
@@ -28,13 +29,12 @@ export function DateSubGroupHeader(
 ) {
   const { dateLabel, totalSeconds, sessionCount } = subGroup;
 
-  // Determine if log button should show (Jira-linked sessions with >= 60s)
-  const eligible = subGroup.sessions.filter(
-    (s) => s.issueProvider === "jira" && s.issueId && s.actualDurationSeconds >= 60,
-  );
-  const unloggedCount = eligible.filter((s) => s.worklogStatus !== "logged").length;
-  const allLogged = eligible.length > 0 && unloggedCount === 0;
-  const showLogBtn = onLogDate != null && eligible.length > 0;
+  const jiraSessions = subGroup.sessions.filter((s) => s.issueProvider === "jira" && s.issueId);
+  const mergedSummary = summarizeMergedWorklogSessions(jiraSessions);
+  const uploadableSessions = jiraSessions.filter((s) => mergedSummary.uploadableSessionIds.includes(s.id));
+  const unloggedCount = uploadableSessions.filter((s) => s.worklogStatus !== "logged").length;
+  const allLogged = uploadableSessions.length > 0 && unloggedCount === 0;
+  const showLogBtn = onLogDate != null && mergedSummary.totalDurationSeconds >= 60 && uploadableSessions.length > 0;
 
   const handleLogClick = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -82,8 +82,8 @@ export function DateSubGroupHeader(
             {logDateLoading
               ? "Logging…"
               : allLogged
-              ? `Re-log (${eligible.length})`
-              : `Log (${eligible.length})`}
+              ? `Re-log (${uploadableSessions.length})`
+              : `Log (${uploadableSessions.length})`}
           </button>
         )}
       </div>

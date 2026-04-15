@@ -187,6 +187,26 @@ describe("TC-503: Log Work button hidden for sessions under 60 seconds", () => {
   });
 });
 
+describe("TC-503b: Log Work button shown for stopwatch Jira sessions", () => {
+  it("shows Log Work button when timerType is stopwatch", () => {
+    const stopwatchSession: Session = { ...jiraSession, timerType: "stopwatch", plannedDurationSeconds: 0 };
+    const { container } = render(
+      <SessionHistoryItem session={stopwatchSession} onDelete={vi.fn()} onLogWork={vi.fn()} />,
+    );
+    expect(within(container).getByRole("button", { name: /log work/i })).toBeInTheDocument();
+  });
+});
+
+describe("TC-503c: Log Work button hidden for Jira-linked break sessions", () => {
+  it("hides Log Work button when timerType is short_break", () => {
+    const breakSession: Session = { ...jiraSession, timerType: "short_break" };
+    const { container } = render(
+      <SessionHistoryItem session={breakSession} onDelete={vi.fn()} onLogWork={vi.fn()} />,
+    );
+    expect(within(container).queryByRole("button", { name: /log work/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("TC-504: Logged indicator shown for worklogStatus logged", () => {
   it("shows Logged indicator instead of Log Work button", () => {
     const loggedSession: Session = { ...jiraSession, worklogStatus: "logged", worklogId: "10042" };

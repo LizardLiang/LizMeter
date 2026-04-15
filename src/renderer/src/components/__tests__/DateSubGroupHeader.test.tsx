@@ -1,7 +1,28 @@
 import { fireEvent, render, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { Session } from "../../../../shared/types.ts";
 import type { DateSubGroup } from "../../utils/groupSessions.ts";
 import { DateSubGroupHeader } from "../DateSubGroupHeader.tsx";
+
+function makeSession(id: string, overrides: Partial<Session> = {}): Session {
+  return {
+    id,
+    title: `Session ${id}`,
+    timerType: "work",
+    plannedDurationSeconds: 1500,
+    actualDurationSeconds: 1500,
+    completedAt: "2026-02-24T10:00:00.000Z",
+    tags: [],
+    issueNumber: null,
+    issueTitle: "Jira task",
+    issueUrl: "https://example.atlassian.net/browse/PROJ-1",
+    issueProvider: "jira",
+    issueId: "PROJ-1",
+    worklogStatus: "not_logged",
+    worklogId: null,
+    ...overrides,
+  };
+}
 
 function makeDateSubGroup(overrides: Partial<DateSubGroup> = {}): DateSubGroup {
   return {
@@ -91,5 +112,23 @@ describe("DateSubGroupHeader", () => {
       </DateSubGroupHeader>,
     );
     expect(within(container).getByTestId("session-content")).toBeInTheDocument();
+  });
+
+  it("shows a bulk log button count based on uploadable sessions only", () => {
+    const subGroup = makeDateSubGroup({
+      sessions: [
+        makeSession("work-1"),
+        makeSession("break-1", { timerType: "short_break", actualDurationSeconds: 300 }),
+        makeSession("sw-1", {
+          timerType: "stopwatch",
+          plannedDurationSeconds: 0,
+          completedAt: "2026-02-24T10:35:00.000Z",
+        }),
+      ],
+    });
+    const { container } = render(
+      <DateSubGroupHeader subGroup={subGroup} isExpanded={false} onToggle={vi.fn()} onLogDate={vi.fn()} />,
+    );
+    expect(within(container).getByTestId("log-date-btn").textContent).toBe("Log (2)");
   });
 });
