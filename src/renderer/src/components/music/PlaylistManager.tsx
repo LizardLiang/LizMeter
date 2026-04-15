@@ -302,11 +302,11 @@ export function PlaylistManager() {
     if (tracks.length === 0) return;
     ctx.clearQueue();
     ctx.enqueueBulk(tracks, playlists.selectedPlaylistId ?? undefined);
-    void ctx.play(tracks[0]!.sourceUrl).catch(() => {});
+    void ctx.play(tracks[0]!.sourceUrl, tracks[0]!).catch(() => {});
   }, [playlists, ctx]);
 
   const handlePlayTrack = useCallback((entry: PlaylistTrack) => {
-    void ctx.play(entry.track.sourceUrl).catch(() => {});
+    void ctx.play(entry.track.sourceUrl, entry.track).catch(() => {});
   }, [ctx]);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {

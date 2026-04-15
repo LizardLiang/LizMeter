@@ -1037,6 +1037,13 @@ export function getEvictionCandidates(excludeTrackIds: string[]): InternalTrackR
     .all(...excludeTrackIds) as InternalTrackRecord[];
 }
 
+export function getAllCachedTracks(): InternalTrackRecord[] {
+  const database = getDb();
+  return database
+    .prepare("SELECT * FROM tracks WHERE cached_file_path IS NOT NULL")
+    .all() as InternalTrackRecord[];
+}
+
 export function getAllPlaylistTrackIds(): string[] {
   const database = getDb();
   const rows = database

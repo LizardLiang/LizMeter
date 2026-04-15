@@ -304,11 +304,11 @@
 
 // ---- Active control button (shuffle / repeat on) ----
 
-.controlBtnActive {
-  color: #7aa2f7 !important;
+.controlBtn.controlBtnActive {
+  color: #7aa2f7;
 
   &:hover:not(:disabled) {
-    color: #7aa2f7 !important;
+    color: #7aa2f7;
     background: rgba(122, 162, 247, 0.12);
   }
 }

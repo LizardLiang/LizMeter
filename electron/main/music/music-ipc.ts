@@ -53,6 +53,7 @@ import {
   setMaxBytes,
   evictIfNeeded,
 } from "./cache-manager.ts";
+import { checkIntegrity, checkTrackIntegrity, repairTracks } from "./integrity-checker.ts";
 import { getMainWindow } from "../index.ts";
 
 // --- Active import state ---
@@ -108,16 +109,21 @@ export function registerMusicIpcHandlers(): void {
     // 4. Check if track is already in DB by source URL and has a valid cache
     const existingRow = getTrackBySourceUrl(url);
     if (existingRow && existingRow.cached_file_path && fs.existsSync(existingRow.cached_file_path)) {
-      // Serve from cache immediately (full Range support)
-      const port = await startServer();
-      setCurrentTrack(existingRow.id, { type: "cache", filePath: existingRow.cached_file_path });
-      incrementTrackPlayCount(existingRow.id);
-      const updatedRow = getTrackById(existingRow.id) ?? existingRow;
-      return {
-        streamUrl: `http://127.0.0.1:${port}/audio/${existingRow.id}`,
-        track: toRendererTrack(updatedRow),
-        fromCache: true,
-      };
+      const damaged = await checkTrackIntegrity(existingRow);
+      if (damaged === null) {
+        // Serve from cache immediately (full Range support)
+        const port = await startServer();
+        setCurrentTrack(existingRow.id, { type: "cache", filePath: existingRow.cached_file_path });
+        incrementTrackPlayCount(existingRow.id);
+        const updatedRow = getTrackById(existingRow.id) ?? existingRow;
+        return {
+          streamUrl: `http://127.0.0.1:${port}/audio/${existingRow.id}`,
+          track: toRendererTrack(updatedRow),
+          fromCache: true,
+        };
+      }
+
+      repairTracks([existingRow.id]);
     }
 
     // 5. Pre-check: fetch metadata first to detect live streams
@@ -134,7 +140,7 @@ export function registerMusicIpcHandlers(): void {
     const port = await startServer();
 
     // 7. Extract audio stream
-    const { stream } = extractAudio(url);
+    const { stream } = extractAudio(url, { spawnMetadata: false });
 
     // 8. Generate track ID and cache file path
     // Reuse existing DB row ID if we have one (e.g. not-cached case after previous play)
@@ -419,6 +425,20 @@ export function registerMusicIpcHandlers(): void {
     },
   );
 
+  // music:integrity:check — scan all cached tracks for damage
+  ipcMain.handle("music:integrity:check", async (event) => {
+    return checkIntegrity((current, total, title) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send("music:integrity:progress", { current, total, title });
+      }
+    });
+  });
+
+  // music:integrity:repair — delete damaged cache files so tracks re-stream on next play
+  ipcMain.handle("music:integrity:repair", (_event, trackIds: string[]) => {
+    return repairTracks(trackIds);
+  });
+
   // music:import:cancel — cancel active playlist import (T2.7)
   ipcMain.handle("music:import:cancel", () => {
     if (activeImportAbortController) {
@@ -598,7 +618,7 @@ async function handlePlaylistImport(
 
   const preMeta = await extractMetadata(firstTrack.sourceUrl);
   const port = await startServer();
-  const { stream } = extractAudio(firstTrack.sourceUrl);
+  const { stream } = extractAudio(firstTrack.sourceUrl, { spawnMetadata: false });
   const trackId = firstTrack.id;
   const cacheFilePath = getCacheFilePath(trackId);
 

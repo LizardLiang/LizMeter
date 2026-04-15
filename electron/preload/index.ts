@@ -7,6 +7,8 @@ import type {
   ClaudeCodeSessionPreview,
   CreateTagInput,
   ImportProgress,
+  IntegrityCheckResult,
+  IntegrityProgress,
   IssuesListInput,
   IssuesSetTokenInput,
   ListNvimActivityInput,
@@ -186,6 +188,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Reset
     reset: (input: { deleteBinaries: boolean }) => ipcRenderer.invoke("music:reset", input),
 
+    // Integrity
+    integrityCheck: (): Promise<IntegrityCheckResult> => ipcRenderer.invoke("music:integrity:check"),
+    integrityRepair: (trackIds: string[]): Promise<number> => ipcRenderer.invoke("music:integrity:repair", trackIds),
+
     // Push event listeners (each returns an unsubscribe function)
     onImportProgress: (callback: (progress: ImportProgress) => void): (() => void) => {
       const handler = (_event: IpcRendererEvent, progress: ImportProgress) => callback(progress);
@@ -211,6 +217,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
       const handler = (_event: IpcRendererEvent, data: { tracks: MusicTrack[] }) => callback(data);
       ipcRenderer.on("music:playlist:imported", handler);
       return () => ipcRenderer.removeListener("music:playlist:imported", handler);
+    },
+    onIntegrityProgress: (callback: (progress: IntegrityProgress) => void): (() => void) => {
+      const handler = (_event: IpcRendererEvent, progress: IntegrityProgress) => callback(progress);
+      ipcRenderer.on("music:integrity:progress", handler);
+      return () => ipcRenderer.removeListener("music:integrity:progress", handler);
     },
   },
   widget: {

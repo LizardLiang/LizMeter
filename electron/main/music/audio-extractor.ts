@@ -21,6 +21,10 @@ export interface TrackMetadata {
   isLive: boolean; // true for live streams
 }
 
+interface ExtractAudioOptions {
+  spawnMetadata?: boolean;
+}
+
 // Max tracks to import from a playlist before hard-capping
 const PLAYLIST_IMPORT_CAP = 500;
 
@@ -155,20 +159,23 @@ export async function extractMetadata(url: string): Promise<TrackMetadata> {
 /**
  * Extract audio stream from a URL.
  * Returns the stdout stream immediately (for piping to the HTTP server)
- * plus a Promise<TrackMetadata> that resolves when the parallel --dump-json completes.
+ * plus an optional metadata promise when the caller wants a parallel --dump-json.
  *
- * Runs two concurrent yt-dlp processes with different keys (v2.0 CRIT-02 fix):
+ * Runs two concurrent yt-dlp processes with different keys when metadata is enabled:
  *   - "stream:<url>": produces the audio stream
  *   - "metadata:<url>": produces metadata (--dump-json, runs in parallel)
  *
  * Format: M4A preferred; falls back to opus if m4a fails.
  */
-export function extractAudio(url: string): { stream: Readable; metadata: Promise<TrackMetadata> } {
+export function extractAudio(
+  url: string,
+  options: ExtractAudioOptions = {},
+): { stream: Readable; metadata: Promise<TrackMetadata | null> } {
   validateUrl(url);
 
   const ffmpegArgs = getFfmpegArgs();
   const streamKey = `stream:${url}`;
-  const metaKey = `metadata:${url}`;
+  const shouldSpawnMetadata = options.spawnMetadata !== false;
 
   // Spawn audio stream process
   const streamResult = spawnYtDlp(streamKey, [
@@ -179,32 +186,33 @@ export function extractAudio(url: string): { stream: Readable; metadata: Promise
     url,
   ]);
 
-  // Spawn metadata process concurrently (different key — no mutual kill)
-  const metaResult = spawnYtDlp(metaKey, [
-    "--dump-json",
-    "--no-download",
-    url,
-  ]);
+  const metadata: Promise<TrackMetadata | null> = shouldSpawnMetadata
+    ? (async () => {
+      const metaKey = `metadata:${url}`;
+      const metaResult = spawnYtDlp(metaKey, [
+        "--dump-json",
+        "--no-download",
+        url,
+      ]);
 
-  // Collect metadata asynchronously
-  const metadata: Promise<TrackMetadata> = (async () => {
-    const [rawOutput, stderrOutput, exitCode] = await Promise.all([
-      collectStdout(metaResult.stdout),
-      collectStderr(metaResult.stderr),
-      waitForExit(metaResult.process),
-    ]);
+      const [rawOutput, stderrOutput, exitCode] = await Promise.all([
+        collectStdout(metaResult.stdout),
+        collectStderr(metaResult.stderr),
+        waitForExit(metaResult.process),
+      ]);
 
-    if (exitCode !== 0 && exitCode !== null) {
-      const errorMsg = stderrOutput.trim() || "yt-dlp metadata extraction failed";
-      throw new MusicError(`Metadata extraction failed: ${errorMsg}`, "EXTRACTION_FAILED");
-    }
+      if (exitCode !== 0 && exitCode !== null) {
+        const errorMsg = stderrOutput.trim() || "yt-dlp metadata extraction failed";
+        throw new MusicError(`Metadata extraction failed: ${errorMsg}`, "EXTRACTION_FAILED");
+      }
 
-    if (!rawOutput.trim()) {
-      throw new MusicError("yt-dlp produced no metadata output", "EXTRACTION_FAILED");
-    }
+      if (!rawOutput.trim()) {
+        throw new MusicError("yt-dlp produced no metadata output", "EXTRACTION_FAILED");
+      }
 
-    return parseYtDlpJson(rawOutput, url);
-  })();
+      return parseYtDlpJson(rawOutput, url);
+    })()
+    : Promise.resolve(null);
 
   // Handle M4A stream failure with opus fallback
   // We wrap the stream in a proxy that handles the exit code

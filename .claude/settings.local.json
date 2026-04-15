@@ -7,7 +7,22 @@
       "Bash(bun add:*)",
       "Bash(ls:*)",
       "Bash(node -e:*)",
-      "Bash(bunx tsc:*)"
+      "Bash(bunx tsc:*)",
+      "Bash(agent-browser snapshot:*)",
+      "Bash(agent-browser click:*)",
+      "Bash(sleep 3 && agent-browser screenshot C:/Users/lizard_liang/personal/PersonalTool/LizMeter/test-screenshots/download-progress-1.png 2>&1)",
+      "Bash(sleep 15 && agent-browser screenshot C:/Users/lizard_liang/personal/PersonalTool/LizMeter/test-screenshots/download-progress-2.png 2>&1)",
+      "Bash(agent-browser tab:*)",
+      "Bash(agent-browser fill:*)",
+      "Bash(sleep 15 && agent-browser screenshot C:/Users/lizard_liang/personal/PersonalTool/LizMeter/test-screenshots/playing-2.png 2>&1)",
+      "Bash(agent-browser js:*)",
+      "Bash(cd C:/Users/lizard_liang/personal/PersonalTool/LizMeter && bun run build 2>&1 | tail -5)",
+      "Bash(sleep 4 && agent-browser connect 9333 2>&1 && agent-browser tab 2>&1)",
+      "Bash(sleep 4 && agent-browser connect 9333 2>&1 && agent-browser tab 1 2>&1)",
+      "Bash(sleep 4 && agent-browser connect 9333 2>&1 && agent-browser tab 1 2>&1 && agent-browser snapshot -i 2>&1)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(wc -l /c/Users/lizard_liang/personal/PersonalTool/LizMeter/src/renderer/src/components/*.tsx /c/Users/lizard_liang/personal/PersonalTool/LizMeter/src/renderer/src/components/music/*.tsx)"
     ]
   }
 }

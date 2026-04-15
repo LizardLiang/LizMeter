@@ -12,6 +12,7 @@ import type {
   BinaryStatus,
   ImportProgress,
   MusicPlaybackState,
+  MusicPlayResult,
   MusicQueueItem,
   MusicTrack,
   RepeatMode,
@@ -51,6 +52,7 @@ export interface MusicPlayerContextValue {
   // Error tracking
   consecutiveFailures: number;
   lastError: string | null;
+  autoRepairNotice: { id: string; message: string; } | null;
 
   // Visibility: true once the first track has started playing
   isBottomBarVisible: boolean;
@@ -60,7 +62,7 @@ export interface MusicPlayerContextValue {
   canGoPrev: boolean;
 
   // Playback actions
-  play: (url: string) => Promise<void>;
+  play: (url: string, optimisticTrack?: MusicTrack) => Promise<void>;
   pause: () => void;
   resume: () => void;
   stop: () => void;
@@ -97,6 +99,16 @@ function makeQueueId(): string {
   return crypto.randomUUID();
 }
 
+interface PlaybackUiSnapshot {
+  currentTrack: MusicTrack | null;
+  currentIndex: number;
+  isBottomBarVisible: boolean;
+  playbackState: MusicPlaybackState;
+}
+
+const CACHE_STALL_REPAIR_THRESHOLD_MS = 5000;
+const CACHE_STALL_POLL_INTERVAL_MS = 1000;
+
 // ---- Helper: reorder an array (immutable) ----
 
 function reorderArray<T>(arr: T[], from: number, to: number): T[] {
@@ -127,6 +139,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   const [queue, setQueue] = useState<MusicQueueItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [isBottomBarVisible, setIsBottomBarVisible] = useState(false);
+  const [pendingPlaybackState, setPendingPlaybackState] = useState<MusicPlaybackState | null>(null);
 
   // ---- Shuffle order ----
   // Null when shuffle is off. Array of queue indices in play order when on.
@@ -139,6 +152,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   // ---- Error tracking ----
   const [consecutiveFailures, setConsecutiveFailures] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
+  const [autoRepairNotice, setAutoRepairNotice] = useState<{ id: string; message: string; } | null>(null);
 
   // Keep refs to queue + index so callbacks can read latest without stale closures
   const queueRef = useRef(queue);
@@ -146,6 +160,12 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   const repeatModeRef = useRef(repeatMode);
   const shuffleOrderRef = useRef(shuffleOrder);
   const shuffleEnabledRef = useRef(shuffleEnabled);
+  const lastPlaybackProgressAtRef = useRef<number>(Date.now());
+  const lastPlaybackTimeRef = useRef(0);
+  const autoRepairTrackIdRef = useRef<string | null>(null);
+  const autoRepairInFlightRef = useRef(false);
+  const playRequestIdRef = useRef(0);
+  const playQueueItemRef = useRef<(queueIndex: number) => Promise<void>>(() => Promise.resolve());
   useEffect(() => {
     queueRef.current = queue;
   }, [queue]);
@@ -184,41 +204,6 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     return order;
   }, []);
 
-  // ---- Core play-by-index (internal) ----
-  // Loads audio for the track at queueIndex via IPC, then hands stream URL to the
-  // audio element. Called by next/prev/jumpTo/play.
-  const playQueueItem = useCallback(async (queueIndex: number): Promise<void> => {
-    const q = queueRef.current;
-    if (queueIndex < 0 || queueIndex >= q.length) return;
-
-    const item = q[queueIndex]!;
-    try {
-      const result = await window.electronAPI.music.play({ url: item.track.sourceUrl });
-      setCurrentTrack(result.track);
-      setCurrentIndex(queueIndex);
-      setIsBottomBarVisible(true);
-      setConsecutiveFailures(0);
-      setLastError(null);
-      // Delegate audio element management to useAudioPlayer
-      audioPlayer.loadAndPlay(result.streamUrl);
-
-      // Update isCached on this queue item if server says it was from cache
-      if (result.fromCache) {
-        setQueue((prev) =>
-          prev.map((qi, i) => i === queueIndex ? { ...qi, track: { ...qi.track, isCached: true } } : qi)
-        );
-      }
-    } catch (err: unknown) {
-      const code = (err as { code?: string; }).code;
-      const message = err instanceof Error ? err.message : "Playback failed";
-      setLastError(message);
-      setConsecutiveFailures((n) => n + 1);
-      // Re-throw so callers can handle BINARY_MISSING etc.
-      throw Object.assign(new Error(message), { code });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // ---- useAudioPlayer callbacks ----
 
   const handleAudioEnded = useCallback(() => {
@@ -228,7 +213,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
 
     // repeat-one: replay current
     if (repeat === "one") {
-      void playQueueItem(idx);
+      void playQueueItemRef.current(idx);
       return;
     }
 
@@ -252,13 +237,13 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     }
 
     if (nextIdx !== null) {
-      void playQueueItem(nextIdx);
+      void playQueueItemRef.current(nextIdx);
     } else {
       // Queue ended — stay at last track in paused state (spec: queue-end behavior)
       audioPlayer.pause();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [playQueueItem]);
+  }, []);
 
   const handleAudioError = useCallback(() => {
     setLastError("Audio playback error");
@@ -269,6 +254,137 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     onEnded: handleAudioEnded,
     onError: handleAudioError,
   });
+
+  const snapshotPlaybackUi = useCallback((): PlaybackUiSnapshot => ({
+    currentTrack,
+    currentIndex,
+    isBottomBarVisible,
+    playbackState: pendingPlaybackState ?? audioPlayer.playbackState,
+  }), [audioPlayer.playbackState, currentIndex, currentTrack, isBottomBarVisible, pendingPlaybackState]);
+
+  const restorePlaybackUi = useCallback((snapshot: PlaybackUiSnapshot) => {
+    setCurrentTrack(snapshot.currentTrack);
+    setCurrentIndex(snapshot.currentIndex);
+    currentIndexRef.current = snapshot.currentIndex;
+    setIsBottomBarVisible(snapshot.isBottomBarVisible);
+    setPendingPlaybackState(null);
+
+    if (snapshot.playbackState === "playing") {
+      audioPlayer.play();
+      return;
+    }
+
+    if (snapshot.playbackState === "stopped") {
+      audioPlayer.stop();
+      return;
+    }
+
+    audioPlayer.pause();
+  }, [audioPlayer]);
+
+  const beginOptimisticSwitch = useCallback((track: MusicTrack | null, queueIndex: number) => {
+    const snapshot = snapshotPlaybackUi();
+    const requestId = playRequestIdRef.current + 1;
+    playRequestIdRef.current = requestId;
+
+    audioPlayer.beginPendingLoad();
+    setPendingPlaybackState("buffering");
+    setCurrentTrack(track);
+    setCurrentIndex(queueIndex);
+    currentIndexRef.current = queueIndex;
+    setIsBottomBarVisible(track !== null || snapshot.isBottomBarVisible);
+    setConsecutiveFailures(0);
+    setLastError(null);
+
+    return { requestId, snapshot };
+  }, [audioPlayer, snapshotPlaybackUi]);
+
+  const commitPlaybackResult = useCallback(
+    (requestId: number, queueIndex: number, result: MusicPlayResult): boolean => {
+      if (requestId !== playRequestIdRef.current) {
+        return false;
+      }
+
+      setPendingPlaybackState(null);
+      setCurrentTrack(result.track);
+      setCurrentIndex(queueIndex);
+      currentIndexRef.current = queueIndex;
+      setIsBottomBarVisible(true);
+      setConsecutiveFailures(0);
+      setLastError(null);
+      audioPlayer.loadAndPlay(result.streamUrl);
+
+      return true;
+    },
+    [audioPlayer],
+  );
+
+  const failPlaybackRequest = useCallback((requestId: number, snapshot: PlaybackUiSnapshot, message: string) => {
+    if (requestId !== playRequestIdRef.current) {
+      return;
+    }
+
+    restorePlaybackUi(snapshot);
+    setLastError(message);
+    setConsecutiveFailures((n) => n + 1);
+  }, [restorePlaybackUi]);
+
+  // ---- Core play-by-index (internal) ----
+  // Loads audio for the track at queueIndex via IPC, then hands stream URL to the
+  // audio element. Called by next/prev/jumpTo/play.
+  const playQueueItem = useCallback(async (queueIndex: number): Promise<void> => {
+    const q = queueRef.current;
+    if (queueIndex < 0 || queueIndex >= q.length) return;
+
+    const item = q[queueIndex]!;
+    const { requestId, snapshot } = beginOptimisticSwitch(item.track, queueIndex);
+
+    try {
+      const result = await window.electronAPI.music.play({ url: item.track.sourceUrl });
+      const didCommit = commitPlaybackResult(requestId, queueIndex, result);
+
+      if (didCommit && result.fromCache) {
+        setQueue((prev) =>
+          prev.map((qi, i) => i === queueIndex ? { ...qi, track: { ...qi.track, isCached: true } } : qi)
+        );
+      }
+    } catch (err: unknown) {
+      const code = (err as { code?: string; }).code;
+      const message = err instanceof Error ? err.message : "Playback failed";
+      failPlaybackRequest(requestId, snapshot, message);
+      throw Object.assign(new Error(message), { code });
+    }
+  }, [beginOptimisticSwitch, commitPlaybackResult, failPlaybackRequest]);
+
+  useEffect(() => {
+    playQueueItemRef.current = playQueueItem;
+  }, [playQueueItem]);
+
+  useEffect(() => {
+    if (currentTrack?.id !== autoRepairTrackIdRef.current) {
+      autoRepairTrackIdRef.current = null;
+      autoRepairInFlightRef.current = false;
+    }
+    lastPlaybackProgressAtRef.current = Date.now();
+    lastPlaybackTimeRef.current = 0;
+  }, [currentTrack?.id]);
+
+  useEffect(() => {
+    if (audioPlayer.currentTime > lastPlaybackTimeRef.current + 0.25) {
+      lastPlaybackTimeRef.current = audioPlayer.currentTime;
+      lastPlaybackProgressAtRef.current = Date.now();
+      if (currentTrack?.id === autoRepairTrackIdRef.current) {
+        autoRepairTrackIdRef.current = null;
+        autoRepairInFlightRef.current = false;
+      }
+      return;
+    }
+
+    if (audioPlayer.currentTime < lastPlaybackTimeRef.current) {
+      lastPlaybackTimeRef.current = audioPlayer.currentTime;
+      lastPlaybackProgressAtRef.current = Date.now();
+    }
+  }, [audioPlayer.currentTime, currentTrack?.id]);
 
   // ---- Apply volume/muted/speed changes to audio element ----
   useEffect(() => {
@@ -445,19 +561,74 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     }
   }, [importProgress]);
 
+  useEffect(() => {
+    if (currentTrack === null || !currentTrack.isCached || currentIndex < 0) return;
+
+    const interval = window.setInterval(() => {
+      if (autoRepairInFlightRef.current) return;
+      if (currentTrack.id === autoRepairTrackIdRef.current) return;
+      if (audioPlayer.playbackState !== "buffering") return;
+      if (audioPlayer.currentTime <= 0) return;
+      if (audioPlayer.duration > 0 && audioPlayer.currentTime >= audioPlayer.duration - 2) return;
+
+      const stalledForMs = Date.now() - lastPlaybackProgressAtRef.current;
+      if (stalledForMs < CACHE_STALL_REPAIR_THRESHOLD_MS) return;
+
+      autoRepairInFlightRef.current = true;
+      autoRepairTrackIdRef.current = currentTrack.id;
+      setAutoRepairNotice({
+        id: crypto.randomUUID(),
+        message: `Detected a corrupt cached file for "${currentTrack.title}". Redownloading and retrying playback.`,
+      });
+
+      void window.electronAPI.music.integrityRepair([currentTrack.id]).then(() => {
+        return playQueueItem(currentIndexRef.current);
+      }).catch(() => {
+        setLastError("Cached track stalled during playback");
+        setConsecutiveFailures((n) => n + 1);
+      }).finally(() => {
+        autoRepairInFlightRef.current = false;
+        lastPlaybackProgressAtRef.current = Date.now();
+      });
+    }, CACHE_STALL_POLL_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [
+    audioPlayer.currentTime,
+    audioPlayer.duration,
+    audioPlayer.playbackState,
+    currentIndex,
+    currentTrack,
+    playQueueItem,
+  ]);
+
   // ---- Public actions ----
 
-  const play = useCallback(async (url: string): Promise<void> => {
+  const play = useCallback(async (url: string, optimisticTrack?: MusicTrack): Promise<void> => {
+    const shouldEnqueue = audioPlayer.playbackState !== "stopped" && currentIndexRef.current >= 0;
+
     // Obtain stream URL from main process (initiates yt-dlp extraction)
+    const pendingSwitch = shouldEnqueue ? null : beginOptimisticSwitch(optimisticTrack ?? currentTrack, 0);
+
     let result: Awaited<ReturnType<typeof window.electronAPI.music.play>>;
     try {
       result = await window.electronAPI.music.play({ url });
     } catch (err: unknown) {
       const code = (err as { code?: string; }).code;
       const message = err instanceof Error ? err.message : "Playback failed";
-      setLastError(message);
-      setConsecutiveFailures((n) => n + 1);
+      if (pendingSwitch !== null) {
+        failPlaybackRequest(pendingSwitch.requestId, pendingSwitch.snapshot, message);
+      } else {
+        setLastError(message);
+        setConsecutiveFailures((n) => n + 1);
+      }
       throw Object.assign(new Error(message), { code });
+    }
+
+    if (pendingSwitch !== null && pendingSwitch.requestId !== playRequestIdRef.current) {
+      return;
     }
 
     const newItem: MusicQueueItem = {
@@ -467,7 +638,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     };
 
     // Already-playing behavior: if something is playing, enqueue instead of interrupting
-    if (audioPlayer.playbackState !== "stopped" && currentIndexRef.current >= 0) {
+    if (shouldEnqueue) {
       setQueue((prev) => [...prev, newItem]);
       // TODO: show toast "Added to queue" — toast system is a later task
       return;
@@ -476,14 +647,8 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     // Nothing playing — place the new track at index 0, preserving any tracks
     // already added by onPlaylistImported (which fires before this promise resolves).
     setQueue((prev) => [newItem, ...prev.filter((t) => t.track.sourceUrl !== newItem.track.sourceUrl)]);
-    setCurrentIndex(0);
     queueRef.current = [newItem, ...queueRef.current.filter((t) => t.track.sourceUrl !== newItem.track.sourceUrl)];
-    currentIndexRef.current = 0;
-    setCurrentTrack(result.track);
-    setIsBottomBarVisible(true);
-    setConsecutiveFailures(0);
-    setLastError(null);
-    audioPlayer.loadAndPlay(result.streamUrl);
+    commitPlaybackResult(pendingSwitch!.requestId, 0, result);
 
     if (result.fromCache) {
       setQueue((prev) => prev.map((qi, i) => i === 0 ? { ...qi, track: { ...qi.track, isCached: true } } : qi));
@@ -493,8 +658,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     if (shuffleEnabledRef.current) {
       setShuffleOrder([0]);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [audioPlayer.playbackState, beginOptimisticSwitch, commitPlaybackResult, currentTrack, failPlaybackRequest]);
 
   const pause = useCallback(() => {
     audioPlayer.pause();
@@ -507,6 +671,8 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   }, []);
 
   const stop = useCallback(() => {
+    playRequestIdRef.current += 1;
+    setPendingPlaybackState(null);
     audioPlayer.stop();
     setCurrentTrack(null);
     setCurrentIndex(-1);
@@ -695,6 +861,8 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   }, [buildShuffleOrder]);
 
   const clearQueue = useCallback(() => {
+    playRequestIdRef.current += 1;
+    setPendingPlaybackState(null);
     audioPlayer.stop();
     setQueue([]);
     setCurrentIndex(-1);
@@ -756,28 +924,44 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
 
   const value = useMemo<MusicPlayerContextValue>(() => {
     // Compute navigation availability accounting for shuffle order and repeat mode.
-    // When shuffle is active the "next" / "prev" slots are determined by shuffleOrder
-    // position, not raw queue index. When repeatMode is "queue" or "one", next is
-    // always available as long as there is at least one track.
+    // Guards must match what the handlers actually do — a button should only be
+    // enabled when pressing it will produce a result.
+    //
+    // handleNext behaviour:
+    //   "one"   → advances sequentially/shuffle without wrap (same as "off")
+    //   "queue" → advances with wrap (always has a next)
+    //   "off"   → advances without wrap
+    //
+    // handlePrev behaviour:
+    //   any mode → never wraps; at position 0 (or shuffle pos 0) it is a no-op
     let canGoNext = false;
     let canGoPrev = false;
     if (queue.length > 0 && currentIndex >= 0) {
-      if (repeatMode === "queue" || repeatMode === "one") {
+      if (repeatMode === "queue") {
+        // handleNext wraps → always a next track; handlePrev never wraps → check position
         canGoNext = true;
-        canGoPrev = true;
-      } else if (shuffleOrder !== null) {
-        const pos = shuffleOrder.indexOf(currentIndex);
-        canGoNext = pos >= 0 && pos + 1 < shuffleOrder.length;
-        canGoPrev = pos > 0;
+        if (shuffleOrder !== null) {
+          const pos = shuffleOrder.indexOf(currentIndex);
+          canGoPrev = pos > 0;
+        } else {
+          canGoPrev = currentIndex > 0;
+        }
       } else {
-        canGoNext = currentIndex + 1 < queue.length;
-        canGoPrev = currentIndex > 0;
+        // "off" or "one": handleNext advances without wrap; handlePrev never wraps
+        if (shuffleOrder !== null) {
+          const pos = shuffleOrder.indexOf(currentIndex);
+          canGoNext = pos >= 0 && pos + 1 < shuffleOrder.length;
+          canGoPrev = pos > 0;
+        } else {
+          canGoNext = currentIndex + 1 < queue.length;
+          canGoPrev = currentIndex > 0;
+        }
       }
     }
 
     return {
       currentTrack,
-      playbackState: audioPlayer.playbackState,
+      playbackState: pendingPlaybackState ?? audioPlayer.playbackState,
       currentTime: audioPlayer.currentTime,
       duration: audioPlayer.duration,
       buffered: audioPlayer.buffered,
@@ -793,6 +977,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
       importProgress,
       consecutiveFailures,
       lastError,
+      autoRepairNotice,
       isBottomBarVisible,
       canGoNext,
       canGoPrev,
@@ -819,6 +1004,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   }, [
     currentTrack,
     audioPlayer.playbackState,
+    pendingPlaybackState,
     audioPlayer.currentTime,
     audioPlayer.duration,
     audioPlayer.buffered,
@@ -834,6 +1020,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     importProgress,
     consecutiveFailures,
     lastError,
+    autoRepairNotice,
     isBottomBarVisible,
     play,
     pause,

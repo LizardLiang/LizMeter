@@ -1,7 +1,7 @@
 // src/renderer/src/components/TomatoClock.tsx
 // Root container for the Tomato Clock feature
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type {
   AppMode,
   ClaudeCodeSessionData,
@@ -19,25 +19,27 @@ import { useStopwatch } from "../hooks/useStopwatch.ts";
 import { useTagManager } from "../hooks/useTagManager.ts";
 import { useTimer } from "../hooks/useTimer.ts";
 import { useWidgetBridge } from "../hooks/useWidgetBridge.ts";
-import { ActivityPage } from "./ActivityPage.tsx";
 import { ClaudeCodeStats } from "./ClaudeCodeStats.tsx";
-import { ClaudePage } from "./ClaudePage.tsx";
 import { ClaudeSessionSelect, type SelectedClaudeSession } from "./ClaudeSessionSelect.tsx";
-import { HistoryPage } from "./HistoryPage.tsx";
-import { IssuesPage } from "./IssuesPage.tsx";
 import { ModeToggle } from "./ModeToggle.tsx";
 import { MusicBottomBar } from "./music/MusicBottomBar.tsx";
-import { MusicPage } from "./music/MusicPage.tsx";
 import type { NavPage } from "./NavSidebar.tsx";
 import { NavSidebar } from "./NavSidebar.tsx";
 import type { SessionPickerState } from "./SessionPicker.tsx";
 import { SessionPicker } from "./SessionPicker.tsx";
-import { SettingsPage } from "./SettingsPage.tsx";
-import { StatsPage } from "./StatsPage.tsx";
 import { StopwatchView } from "./StopwatchView.tsx";
 import { TagPicker } from "./TagPicker.tsx";
-import { TagsPage } from "./TagsPage.tsx";
 import { TimerView } from "./TimerView.tsx";
+
+// Lazy-loaded page components (not visible on initial render)
+const ActivityPage = lazy(() => import("./ActivityPage.tsx").then(m => ({ default: m.ActivityPage })));
+const ClaudePage = lazy(() => import("./ClaudePage.tsx").then(m => ({ default: m.ClaudePage })));
+const HistoryPage = lazy(() => import("./HistoryPage.tsx").then(m => ({ default: m.HistoryPage })));
+const IssuesPage = lazy(() => import("./IssuesPage.tsx").then(m => ({ default: m.IssuesPage })));
+const MusicPage = lazy(() => import("./music/MusicPage.tsx").then(m => ({ default: m.MusicPage })));
+const SettingsPage = lazy(() => import("./SettingsPage.tsx").then(m => ({ default: m.SettingsPage })));
+const StatsPage = lazy(() => import("./StatsPage.tsx").then(m => ({ default: m.StatsPage })));
+const TagsPage = lazy(() => import("./TagsPage.tsx").then(m => ({ default: m.TagsPage })));
 import styles from "./TomatoClock.module.scss";
 
 const DEFAULT_SETTINGS: TimerSettings = {
@@ -843,57 +845,59 @@ function TomatoClockInner(props: TomatoClockInnerProps) {
           </div>
         )}
 
-        {activePage === "history" && (
-          <HistoryPage
-            sessions={sessions}
-            total={total}
-            isLoading={historyLoading}
-            error={historyError}
-            allTags={tagManager.tags}
-            activeTagFilter={activeTagFilter}
-            onSetTagFilter={setTagFilter}
-            onDeleteSession={deleteSession}
-            onLoadMore={loadMore}
-            onAssignTag={tagManager.assignTag}
-            onUnassignTag={tagManager.unassignTag}
-            onCreateTag={tagManager.createTag}
-            onLogWork={logWork}
-            onRefresh={refresh}
-            worklogLoading={worklogLoading}
-            onResumeSession={handleResumeSession}
-            timerStatus={state.status}
-          />
-        )}
+        <Suspense fallback={null}>
+          {activePage === "history" && (
+            <HistoryPage
+              sessions={sessions}
+              total={total}
+              isLoading={historyLoading}
+              error={historyError}
+              allTags={tagManager.tags}
+              activeTagFilter={activeTagFilter}
+              onSetTagFilter={setTagFilter}
+              onDeleteSession={deleteSession}
+              onLoadMore={loadMore}
+              onAssignTag={tagManager.assignTag}
+              onUnassignTag={tagManager.unassignTag}
+              onCreateTag={tagManager.createTag}
+              onLogWork={logWork}
+              onRefresh={refresh}
+              worklogLoading={worklogLoading}
+              onResumeSession={handleResumeSession}
+              timerStatus={state.status}
+            />
+          )}
 
-        {activePage === "stats" && <StatsPage />}
+          {activePage === "stats" && <StatsPage />}
 
-        {activePage === "tags" && (
-          <TagsPage
-            tags={tagManager.tags}
-            onCreateTag={tagManager.createTag}
-            onUpdateTag={tagManager.updateTag}
-            onDeleteTag={tagManager.deleteTag}
-          />
-        )}
+          {activePage === "tags" && (
+            <TagsPage
+              tags={tagManager.tags}
+              onCreateTag={tagManager.createTag}
+              onUpdateTag={tagManager.updateTag}
+              onDeleteTag={tagManager.deleteTag}
+            />
+          )}
 
-        {activePage === "issues" && <IssuesPage onNavigate={onNavigate} />}
+          {activePage === "issues" && <IssuesPage onNavigate={onNavigate} />}
 
-        {activePage === "claude" && <ClaudePage />}
+          {activePage === "claude" && <ClaudePage />}
 
-        {activePage === "activity" && <ActivityPage />}
+          {activePage === "activity" && <ActivityPage />}
 
-        {activePage === "music" && <MusicPage />}
+          {activePage === "music" && <MusicPage />}
 
-        {activePage === "settings" && (
-          <SettingsPage
-            settings={effectiveSettings}
-            onSave={saveSettings}
-            stopwatchSettings={stopwatchSettings}
-            onStopwatchSettingsChange={setStopwatchSettings}
-            soundEnabled={soundEnabled}
-            onSoundEnabledChange={onSoundEnabledChange}
-          />
-        )}
+          {activePage === "settings" && (
+            <SettingsPage
+              settings={effectiveSettings}
+              onSave={saveSettings}
+              stopwatchSettings={stopwatchSettings}
+              onStopwatchSettingsChange={setStopwatchSettings}
+              soundEnabled={soundEnabled}
+              onSoundEnabledChange={onSoundEnabledChange}
+            />
+          )}
+        </Suspense>
       </div>
 
       {/* Music bottom bar renders outside the scrollable main area so it is always visible */}

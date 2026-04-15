@@ -54,8 +54,18 @@ export function MusicPage() {
 
   // Pending URL: stored when user tried to play but binaries were missing
   const pendingUrlRef = useRef<string | null>(null);
+  const seenAutoRepairNoticeIdRef = useRef<string | null>(null);
 
   const { toasts, showToast } = useToast();
+
+  useEffect(() => {
+    const notice = context.autoRepairNotice;
+    if (notice === null) return;
+    if (seenAutoRepairNoticeIdRef.current === notice.id) return;
+
+    seenAutoRepairNoticeIdRef.current = notice.id;
+    showToast(notice.message);
+  }, [context.autoRepairNotice, showToast]);
 
   // "This is taking longer than usual" message after 5 seconds of extraction
   useEffect(() => {

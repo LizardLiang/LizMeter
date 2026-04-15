@@ -5,7 +5,13 @@
 // Clicking a track plays it immediately (or adds to queue if something is already playing).
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { MusicSortDir, MusicSortField, MusicTrack } from "../../../../shared/types.ts";
+import type {
+  DamagedTrackInfo,
+  IntegrityProgress,
+  MusicSortDir,
+  MusicSortField,
+  MusicTrack,
+} from "../../../../shared/types.ts";
 import { useMusicPlayer } from "../../contexts/MusicPlayerContext.tsx";
 import { useMusicLibrary } from "../../hooks/useMusicLibrary.ts";
 import styles from "./LibraryView.module.scss";
@@ -121,11 +127,180 @@ function TrackRow({ track, onPlay }: TrackRowProps) {
   );
 }
 
+// ---- Integrity check hook + panel ----
+
+type IntegrityState =
+  | { phase: "idle"; }
+  | { phase: "scanning"; progress: IntegrityProgress | null; }
+  | { phase: "done"; damaged: DamagedTrackInfo[]; checked: number; error: string | null; }
+  | { phase: "repairing"; };
+
+function useIntegrityCheck(refreshLibrary: () => void) {
+  const [state, setState] = useState<IntegrityState>({ phase: "idle" });
+
+  useEffect(() => {
+    const unsub = window.electronAPI.music.onIntegrityProgress((progress) => {
+      setState((prev) => prev.phase === "scanning" ? { phase: "scanning", progress } : prev);
+    });
+    return unsub;
+  }, []);
+
+  const handleCheck = useCallback(async () => {
+    setState({ phase: "scanning", progress: null });
+    try {
+      const result = await window.electronAPI.music.integrityCheck();
+      setState({ phase: "done", damaged: result.damaged, checked: result.checked, error: result.error });
+    } catch (err) {
+      setState({ phase: "done", damaged: [], checked: 0, error: err instanceof Error ? err.message : "Scan failed" });
+    }
+  }, []);
+
+  const handleRepairAll = useCallback(async () => {
+    if (state.phase !== "done" || state.damaged.length === 0) return;
+    const ids = state.damaged.map((d) => d.track.id);
+    setState({ phase: "repairing" });
+    try {
+      await window.electronAPI.music.integrityRepair(ids);
+      setState({ phase: "idle" });
+      refreshLibrary();
+    } catch {
+      setState({ phase: "idle" });
+    }
+  }, [state, refreshLibrary]);
+
+  const handleRepairOne = useCallback(async (trackId: string) => {
+    if (state.phase !== "done") return;
+    try {
+      await window.electronAPI.music.integrityRepair([trackId]);
+      setState((prev) => {
+        if (prev.phase !== "done") return prev;
+        const remaining = prev.damaged.filter((d) => d.track.id !== trackId);
+        return remaining.length === 0
+          ? { phase: "idle" }
+          : { ...prev, damaged: remaining };
+      });
+      refreshLibrary();
+    } catch { /* non-fatal */ }
+  }, [state, refreshLibrary]);
+
+  const dismiss = useCallback(() => setState({ phase: "idle" }), []);
+
+  return { state, handleCheck, handleRepairAll, handleRepairOne, dismiss };
+}
+
+function IntegrityResultPanel({ state, handleRepairAll, handleRepairOne, dismiss }: {
+  state: IntegrityState;
+  handleRepairAll: () => Promise<void>;
+  handleRepairOne: (trackId: string) => Promise<void>;
+  dismiss: () => void;
+}) {
+  if (state.phase === "scanning") {
+    const p = state.progress;
+    return (
+      <div className={styles.integrityPanel}>
+        <div className={styles.integrityHeader}>
+          <span className={styles.spinner} aria-hidden="true" />
+          <span className={styles.integrityTitle}>
+            {p ? `Scanning ${p.current}/${p.total}...` : "Starting scan..."}
+          </span>
+        </div>
+        {p && (
+          <div className={styles.integrityProgress}>
+            <div className={styles.integrityProgressBar} style={{ width: `${(p.current / p.total) * 100}%` }} />
+          </div>
+        )}
+        {p && <span className={styles.integrityDetail}>{p.title}</span>}
+      </div>
+    );
+  }
+
+  if (state.phase === "repairing") {
+    return (
+      <div className={styles.integrityPanel}>
+        <div className={styles.integrityHeader}>
+          <span className={styles.spinner} aria-hidden="true" />
+          <span className={styles.integrityTitle}>Repairing...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (state.phase !== "done") return null;
+
+  const { damaged, checked, error } = state;
+
+  if (error) {
+    return (
+      <div className={styles.integrityPanel}>
+        <div className={styles.integrityHeader}>
+          <span className={styles.integrityTitle}>Scan error: {error}</span>
+          <button className={styles.integrityClose} onClick={dismiss} type="button">&times;</button>
+        </div>
+      </div>
+    );
+  }
+
+  if (damaged.length === 0) {
+    return (
+      <div className={styles.integrityPanel}>
+        <div className={styles.integrityHeader}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="#9ece6a" aria-hidden="true">
+            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+          </svg>
+          <span className={styles.integrityTitle}>All {checked} cached tracks are healthy</span>
+          <button className={styles.integrityClose} onClick={dismiss} type="button">&times;</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={styles.integrityPanel}>
+      <div className={styles.integrityHeader}>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="#f7768e" aria-hidden="true">
+          <path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z" />
+        </svg>
+        <span className={styles.integrityTitle}>
+          {damaged.length} damaged track{damaged.length !== 1 ? "s" : ""} found
+        </span>
+        <button
+          className={styles.integrityRepairAll}
+          onClick={() => void handleRepairAll()}
+          type="button"
+          title="Delete damaged cache files — tracks will re-download on next play"
+        >
+          Repair All
+        </button>
+        <button className={styles.integrityClose} onClick={dismiss} type="button">&times;</button>
+      </div>
+      <div className={styles.integrityList}>
+        {damaged.map((d) => (
+          <div key={d.track.id} className={styles.integrityItem}>
+            <div className={styles.integrityItemText}>
+              <span className={styles.integrityItemTitle}>{d.track.title}</span>
+              <span className={styles.integrityItemDetail}>{d.detail}</span>
+            </div>
+            <button
+              className={styles.integrityRepairBtn}
+              onClick={() => void handleRepairOne(d.track.id)}
+              type="button"
+              title="Delete cache — will re-download on next play"
+            >
+              Repair
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---- LibraryView (exported) ----
 
 export function LibraryView() {
   const lib = useMusicLibrary();
   const ctx = useMusicPlayer();
+  const integrity = useIntegrityCheck(lib.refresh);
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
@@ -159,7 +334,7 @@ export function LibraryView() {
   const [isEnqueueing, setIsEnqueueing] = useState(false);
 
   const handlePlay = useCallback((track: MusicTrack) => {
-    void ctx.play(track.sourceUrl).catch(() => {});
+    void ctx.play(track.sourceUrl, track).catch(() => {});
   }, [ctx]);
 
   const handleAddAllToQueue = useCallback(async () => {
@@ -256,6 +431,18 @@ export function LibraryView() {
             </svg>
             Offline only
           </button>
+          <button
+            className={`${styles.filterChip} ${integrity.state.phase !== "idle" ? styles.filterChipActive : ""}`}
+            onClick={() => void integrity.handleCheck()}
+            disabled={integrity.state.phase === "scanning" || integrity.state.phase === "repairing"}
+            type="button"
+            title="Scan cached tracks for corruption"
+          >
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z" />
+            </svg>
+            Health Check
+          </button>
         </div>
 
         {/* Sort buttons */}
@@ -294,6 +481,16 @@ export function LibraryView() {
           />
         </div>
       </div>
+
+      {/* Integrity scan results panel */}
+      {integrity.state.phase !== "idle" && (
+        <IntegrityResultPanel
+          state={integrity.state}
+          handleRepairAll={integrity.handleRepairAll}
+          handleRepairOne={integrity.handleRepairOne}
+          dismiss={integrity.dismiss}
+        />
+      )}
 
       {/* Track count + Add All to Queue */}
       {lib.total > 0 && (

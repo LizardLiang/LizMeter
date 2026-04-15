@@ -16,6 +16,7 @@ export interface UseAudioPlayerReturn {
   playbackState: MusicPlaybackState;
 
   // Actions (direct audio element manipulation — no IPC)
+  beginPendingLoad: () => void;
   loadAndPlay: (url: string) => void;
   play: () => void;
   pause: () => void;
@@ -173,6 +174,17 @@ export function useAudioPlayer(options: {
 
   // ---- Actions ----
 
+  const beginPendingLoad = useCallback(() => {
+    const audio = audioRef.current;
+    audio.pause();
+    setCurrentTime(0);
+    setDuration(0);
+    setBuffered(0);
+    setPaused(true);
+    setEnded(false);
+    setPlaybackState("buffering");
+  }, []);
+
   const loadAndPlay = useCallback((url: string) => {
     const audio = audioRef.current;
     audio.src = url;
@@ -233,6 +245,7 @@ export function useAudioPlayer(options: {
     paused,
     ended,
     playbackState,
+    beginPendingLoad,
     loadAndPlay,
     play,
     pause,
