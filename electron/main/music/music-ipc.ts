@@ -61,6 +61,56 @@ import { getMainWindow } from "../index.ts";
 // AbortController used to cancel in-flight playlist imports
 let activeImportAbortController: AbortController | null = null;
 
+// --- Shared stream-end finalize helper ---
+
+async function handleStreamFinalize(trackId: string, cacheFilePath: string): Promise<void> {
+  try {
+    if (didCacheWriteFail()) return;
+
+    const fileSize = finalizeCacheFile(cacheFilePath);
+    if (fileSize === null) return;
+
+    // Capture the active track ID before the long integrity probe so we can
+    // detect if the user switched tracks during the await.
+    const ownerTrackId = getCurrentTrackId();
+
+    const baseRow = getTrackById(trackId);
+    if (baseRow !== null) {
+      const integrityResult = await checkTrackIntegrity({ ...baseRow, cached_file_path: cacheFilePath });
+      if (integrityResult !== null) {
+        console.error(`[music-ipc] Integrity check failed for ${trackId}: ${integrityResult.reason} — ${integrityResult.detail}`);
+        try {
+          fs.unlinkSync(cacheFilePath);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+            console.warn("[music-ipc] Failed to delete corrupt cache file:", cacheFilePath);
+          }
+        }
+        return;
+      }
+    }
+
+    // If the active track changed while integrity was probing, do not commit —
+    // the new stream owns the server slot and we must not clobber it.
+    if (getCurrentTrackId() !== ownerTrackId) return;
+
+    updateTrackCache(trackId, cacheFilePath, fileSize);
+
+    if (getCurrentTrackId() === trackId) {
+      setCurrentTrack(trackId, { type: "cache", filePath: cacheFilePath });
+    }
+
+    const mainWindow = getMainWindow();
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send("music:stream:cached", { trackId });
+    }
+
+    evictIfNeeded(trackId);
+  } catch (err) {
+    console.error(`[music-ipc] Stream end-finalize failed for ${trackId}:`, err);
+  }
+}
+
 // --- IPC handler registration ---
 
 export function registerMusicIpcHandlers(): void {
@@ -153,31 +203,7 @@ export function registerMusicIpcHandlers(): void {
 
     // 10. Wire up async cache completion
     stream.once("end", () => {
-      void (async () => {
-        // Check if the cache write succeeded
-        if (didCacheWriteFail()) return;
-
-        // Finalize: rename .tmp -> final cache file
-        const fileSize = finalizeCacheFile(cacheFilePath);
-        if (fileSize === null) return;
-
-        // Update DB with cached file path
-        updateTrackCache(trackId, cacheFilePath, fileSize);
-
-        // Only upgrade stream server if this track is still the current track
-        if (getCurrentTrackId() === trackId) {
-          setCurrentTrack(trackId, { type: "cache", filePath: cacheFilePath });
-        }
-
-        // Push music:stream:cached to the renderer
-        const mainWindow = getMainWindow();
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send("music:stream:cached", { trackId });
-        }
-
-        // Run LRU eviction
-        evictIfNeeded(trackId);
-      })();
+      void handleStreamFinalize(trackId, cacheFilePath);
     });
 
     // 11. Upsert track in DB using pre-fetched metadata
@@ -269,11 +295,11 @@ export function registerMusicIpcHandlers(): void {
     }
     if (row.cached_file_path) {
       try {
-        if (fs.existsSync(row.cached_file_path)) {
-          fs.unlinkSync(row.cached_file_path);
+        fs.unlinkSync(row.cached_file_path);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+          console.error("[music-ipc] Failed to delete cache file:", row.cached_file_path);
         }
-      } catch {
-        console.error("[music-ipc] Failed to delete cache file:", row.cached_file_path);
       }
     }
     deleteTrack(trackId);
@@ -625,20 +651,7 @@ async function handlePlaylistImport(
   setCurrentTrack(trackId, { type: "stream", stream, cacheFilePath });
 
   stream.once("end", () => {
-    void (async () => {
-      if (didCacheWriteFail()) return;
-      const fileSize = finalizeCacheFile(cacheFilePath);
-      if (fileSize === null) return;
-      updateTrackCache(trackId, cacheFilePath, fileSize);
-      if (getCurrentTrackId() === trackId) {
-        setCurrentTrack(trackId, { type: "cache", filePath: cacheFilePath });
-      }
-      const mainWindow = getMainWindow();
-      if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send("music:stream:cached", { trackId });
-      }
-      evictIfNeeded(trackId);
-    })();
+    void handleStreamFinalize(trackId, cacheFilePath);
   });
 
   const upsertedRow = upsertTrack({

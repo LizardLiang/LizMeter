@@ -19,14 +19,17 @@ const execFileAsync = promisify(execFile);
 // Concurrency guard — prevents duplicate scans from overlapping ffmpeg spawns
 let isRunning = false;
 
+const FFMPEG_FINALIZE_TIMEOUT_MS = 60000;
+const FFMPEG_BULK_PROBE_TIMEOUT_MS = 20000;
+
 /**
  * Get the container-reported duration from an audio file.
  * Uses `ffmpeg -i <file> -hide_banner` — always exits non-zero (no output specified)
  * but prints file info including Duration to stderr.
  */
-async function getContainerDuration(filePath: string, ffmpegPath: string): Promise<number | null> {
+async function getContainerDuration(filePath: string, ffmpegPath: string, timeoutMs: number): Promise<number | null> {
   try {
-    await execFileAsync(ffmpegPath, ["-i", filePath, "-hide_banner"], { timeout: 15000 });
+    await execFileAsync(ffmpegPath, ["-i", filePath, "-hide_banner"], { timeout: timeoutMs });
     return null; // Should not reach here (ffmpeg exits 1 with no output)
   } catch (err: unknown) {
     const stderr = (err as { stderr?: string }).stderr ?? "";
@@ -46,7 +49,7 @@ async function getContainerDuration(filePath: string, ffmpegPath: string): Promi
  * Returns true if ffmpeg can decode audio at that position without errors.
  * For truncated files where moov atom references non-existent data, this fails.
  */
-async function canDecodeAt(filePath: string, ffmpegPath: string, seekSeconds: number): Promise<boolean> {
+async function canDecodeAt(filePath: string, ffmpegPath: string, seekSeconds: number, timeoutMs: number): Promise<boolean> {
   try {
     const { stderr } = await execFileAsync(ffmpegPath, [
       "-v", "error",
@@ -55,7 +58,7 @@ async function canDecodeAt(filePath: string, ffmpegPath: string, seekSeconds: nu
       "-t", "1",
       "-f", "null",
       process.platform === "win32" ? "NUL" : "/dev/null",
-    ], { timeout: 15000 });
+    ], { timeout: timeoutMs });
 
     return (stderr ?? "").trim().length === 0;
   } catch {
@@ -70,6 +73,7 @@ async function canDecodeAt(filePath: string, ffmpegPath: string, seekSeconds: nu
 export async function probeTrack(
   track: InternalTrackRecord,
   ffmpegPath: string,
+  timeoutMs: number = FFMPEG_BULK_PROBE_TIMEOUT_MS,
 ): Promise<DamagedTrackInfo | null> {
   const filePath = track.cached_file_path;
   if (!filePath) return null;
@@ -108,7 +112,7 @@ export async function probeTrack(
   }
 
   // Get container-reported duration
-  const containerDuration = await getContainerDuration(filePath, ffmpegPath);
+  const containerDuration = await getContainerDuration(filePath, ffmpegPath, timeoutMs);
 
   if (containerDuration === null) {
     return {
@@ -140,7 +144,7 @@ export async function probeTrack(
   const refDuration = expected ?? containerDuration;
   if (refDuration > 10) {
     const seekPoint = refDuration - 5;
-    const ok = await canDecodeAt(filePath, ffmpegPath, seekPoint);
+    const ok = await canDecodeAt(filePath, ffmpegPath, seekPoint, timeoutMs);
     if (!ok) {
       return {
         track: toRendererTrack(track),
@@ -165,7 +169,7 @@ export async function checkTrackIntegrity(track: InternalTrackRecord): Promise<D
     return null;
   }
 
-  return probeTrack(track, ffmpegPath);
+  return probeTrack(track, ffmpegPath, FFMPEG_FINALIZE_TIMEOUT_MS);
 }
 
 /**
@@ -225,14 +229,13 @@ export function repairTracks(trackIds: string[]): number {
     const track = cachedTracks.find((t) => t.id === trackId);
     if (!track) continue;
 
-    // Delete cache file from disk
     if (track.cached_file_path) {
       try {
-        if (fs.existsSync(track.cached_file_path)) {
-          fs.unlinkSync(track.cached_file_path);
+        fs.unlinkSync(track.cached_file_path);
+      } catch (e) {
+        if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+          console.warn("[integrity-checker] Failed to delete cache file:", track.cached_file_path);
         }
-      } catch {
-        console.warn("[integrity-checker] Failed to delete cache file:", track.cached_file_path);
       }
     }
 
