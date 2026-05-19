@@ -139,6 +139,14 @@ function RepeatOneIcon() {
   );
 }
 
+function ClearIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+      <path d="M10.5 2h-7A1.5 1.5 0 0 0 2 3.5v.5h10v-.5A1.5 1.5 0 0 0 10.5 2zM3 5.5l.72 5.76A1 1 0 0 0 4.71 12h4.58a1 1 0 0 0 .99-.74L11 5.5H3zm3.25 1.25a.5.5 0 0 1 1 0v3.5a.5.5 0 0 1-1 0v-3.5zM5 6.75a.5.5 0 0 0-1 0v3.5a.5.5 0 0 0 1 0v-3.5zm4 0a.5.5 0 0 0-1 0v3.5a.5.5 0 0 0 1 0v-3.5z" />
+    </svg>
+  );
+}
+
 function BufferingSpinner() {
   return (
     <svg
@@ -467,6 +475,7 @@ export function MusicBottomBar() {
     setShuffleEnabled,
     repeatMode,
     setRepeatMode,
+    clearPlayer,
   } = useMusicPlayer();
 
   const [previousVolume, setPreviousVolume] = useState(volume);
@@ -486,7 +495,7 @@ export function MusicBottomBar() {
       aria-label="Music player"
       role="region"
     >
-      {/* Left: thumbnail + track info */}
+      {/* Left: thumbnail + track info + clear button */}
       <div className={styles.left}>
         <div className={styles.thumbnail} aria-hidden="true">
           <MusicNoteIcon />
@@ -512,6 +521,15 @@ export function MusicBottomBar() {
               <span className={styles.trackTitle}>No track</span>
             </div>
           )}
+        <button
+          className={styles.clearBtn}
+          aria-label="Clear player"
+          title="Clear player (keeps queue)"
+          onClick={clearPlayer}
+          type="button"
+        >
+          <ClearIcon />
+        </button>
       </div>
 
       {/* Center: playback controls + seek */}

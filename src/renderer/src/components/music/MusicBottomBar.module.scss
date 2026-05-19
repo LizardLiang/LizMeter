@@ -91,6 +91,41 @@
   line-height: 1.3;
 }
 
+// ---- Clear player button (left section, trash icon) ----
+
+.clearBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(169, 177, 214, 0.45);
+  cursor: pointer;
+  transition:
+    color 0.15s,
+    background 0.15s;
+  padding: 0;
+
+  &:hover {
+    color: #f7768e;
+    background: rgba(247, 118, 142, 0.1);
+  }
+
+  &:active {
+    background: rgba(247, 118, 142, 0.18);
+  }
+
+  &:focus-visible {
+    outline: 2px solid rgba(247, 118, 142, 0.7);
+    outline-offset: 2px;
+  }
+}
+
 // ---- Center section: controls + seek ----
 
 .center {

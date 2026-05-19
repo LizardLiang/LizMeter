@@ -78,6 +78,9 @@ export interface MusicPlayerContextValue {
   reorderQueue: (fromIndex: number, toIndex: number) => void;
   clearQueue: () => void;
 
+  // Player reset (stops playback + clears current track; queue is preserved)
+  clearPlayer: () => void;
+
   // Settings
   setVolume: (v: number) => void;
   setMuted: (m: boolean) => void;
@@ -166,6 +169,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   const autoRepairInFlightRef = useRef(false);
   const playRequestIdRef = useRef(0);
   const playQueueItemRef = useRef<(queueIndex: number) => Promise<void>>(() => Promise.resolve());
+  const handleNextRef = useRef<() => void>(() => {});
   useEffect(() => {
     queueRef.current = queue;
   }, [queue]);
@@ -248,6 +252,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   const handleAudioError = useCallback(() => {
     setLastError("Audio playback error");
     setConsecutiveFailures((n) => n + 1);
+    handleNextRef.current();
   }, []);
 
   const audioPlayer = useAudioPlayer({
@@ -562,7 +567,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
   }, [importProgress]);
 
   useEffect(() => {
-    if (currentTrack === null || !currentTrack.isCached || currentIndex < 0) return;
+    if (currentTrack === null || currentIndex < 0) return;
 
     const interval = window.setInterval(() => {
       if (autoRepairInFlightRef.current) return;
@@ -576,6 +581,17 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
 
       autoRepairInFlightRef.current = true;
       autoRepairTrackIdRef.current = currentTrack.id;
+
+      if (!currentTrack.isCached) {
+        setLastError("Streaming track stalled during playback");
+        setConsecutiveFailures((n) => n + 1);
+        handleNextRef.current();
+        autoRepairTrackIdRef.current = null;
+        autoRepairInFlightRef.current = false;
+        lastPlaybackProgressAtRef.current = Date.now();
+        return;
+      }
+
       setAutoRepairNotice({
         id: crypto.randomUUID(),
         message: `Detected a corrupt cached file for "${currentTrack.title}". Redownloading and retrying playback.`,
@@ -720,6 +736,10 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
       });
     }
   }, [playQueueItem]);
+
+  useEffect(() => {
+    handleNextRef.current = handleNext;
+  }, [handleNext]);
 
   const handlePrev = useCallback(() => {
     const idx = currentIndexRef.current;
@@ -872,6 +892,24 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Stops playback and resets current track/position without touching the queue.
+  // Audio element src is cleared (frees file handle / network stream).
+  // isBottomBarVisible is reset so the bar slides back down.
+  const clearPlayer = useCallback(() => {
+    playRequestIdRef.current += 1;
+    setPendingPlaybackState(null);
+    audioPlayer.stop();
+    setCurrentTrack(null);
+    setCurrentIndex(-1);
+    setIsBottomBarVisible(false);
+    setShuffleOrder(null);
+    setConsecutiveFailures(0);
+    setLastError(null);
+    setAutoRepairNotice(null);
+    void window.electronAPI.music.stop().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ---- Settings setters (persist to KV store) ----
 
   const setVolume = useCallback((v: number) => {
@@ -994,6 +1032,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
       dequeueAt,
       reorderQueue,
       clearQueue,
+      clearPlayer,
       setVolume,
       setMuted,
       setPlaybackSpeed,
@@ -1035,6 +1074,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     dequeueAt,
     reorderQueue,
     clearQueue,
+    clearPlayer,
     setVolume,
     setMuted,
     setPlaybackSpeed,
