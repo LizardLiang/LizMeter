@@ -95,7 +95,7 @@ export function getIssueGroupKey(session: Session): IssueGroupKey {
  * Extracts the YYYY-MM-DD date key from an ISO 8601 timestamp.
  * Uses local time to match what users see in the UI.
  */
-function getDateKey(isoTimestamp: string): string {
+export function getDateKey(isoTimestamp: string): string {
   const d = new Date(isoTimestamp);
   const year = d.getFullYear();
   const month = String(d.getMonth() + 1).padStart(2, "0");
@@ -140,6 +140,46 @@ export function formatDateLabel(dateKey: string, now?: Date): string {
     return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
   }
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+/**
+ * A day-level grouping of ungrouped sessions (no linked issue).
+ * Shares the same dateKey/dateLabel/sessions shape as DateSubGroup to avoid
+ * structural drift; omits sessionCount and totalSeconds which are only needed
+ * inside IssueGroup sub-groups.
+ */
+export type DayGroup = Pick<DateSubGroup, "dateKey" | "dateLabel" | "sessions">;
+
+/**
+ * Groups a flat array of sessions by calendar day (local time).
+ * Returns day groups ordered by dateKey descending (most recent first).
+ * Intended for ungrouped sessions (those with no linked issue).
+ */
+export function groupSessionsByDay(sessions: Session[]): DayGroup[] {
+  const dayMap = new Map<string, Session[]>();
+
+  for (const session of sessions) {
+    const dateKey = getDateKey(session.completedAt);
+    let bucket = dayMap.get(dateKey);
+    if (!bucket) {
+      bucket = [];
+      dayMap.set(dateKey, bucket);
+    }
+    bucket.push(session);
+  }
+
+  const dayGroups: DayGroup[] = [];
+  for (const [dateKey, groupSessions] of dayMap.entries()) {
+    const sorted = groupSessions.slice().sort((a, b) => b.completedAt.localeCompare(a.completedAt));
+    dayGroups.push({
+      dateKey,
+      dateLabel: formatDateLabel(dateKey),
+      sessions: sorted,
+    });
+  }
+
+  dayGroups.sort((a, b) => b.dateKey.localeCompare(a.dateKey));
+  return dayGroups;
 }
 
 /**

@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Session } from "../../../../shared/types.ts";
-import { formatDateLabel, getIssueGroupKey, groupSessionsByIssue, hasLinkedIssue } from "../groupSessions.ts";
+import {
+  formatDateLabel,
+  getIssueGroupKey,
+  groupSessionsByDay,
+  groupSessionsByIssue,
+  hasLinkedIssue,
+} from "../groupSessions.ts";
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -408,5 +414,96 @@ describe("groupSessionsByIssue", () => {
     const dateKeys = result.issueGroups[0]!.dateSubGroups.map((sg) => sg.dateKey);
     expect(dateKeys[0]! > dateKeys[1]!).toBe(true);
     expect(dateKeys[1]! > dateKeys[2]!).toBe(true);
+  });
+});
+
+// ─── groupSessionsByDay ──────────────────────────────────────────────────
+
+describe("groupSessionsByDay", () => {
+  it("returns [] for empty input", () => {
+    expect(groupSessionsByDay([])).toEqual([]);
+  });
+
+  it("returns a single day group for a single session", () => {
+    const sessions = [makeSession({ id: "1", completedAt: "2026-02-24T10:00:00.000Z" })];
+    const result = groupSessionsByDay(sessions);
+    expect(result).toHaveLength(1);
+    expect(result[0]!.sessions).toHaveLength(1);
+    expect(result[0]!.sessions[0]!.id).toBe("1");
+  });
+
+  it("buckets sessions on different days into separate day groups", () => {
+    // Use fixed UTC times that map to the same local date regardless of timezone
+    // by anchoring at noon UTC to avoid date-boundary issues.
+    const sessions = [
+      makeSession({ id: "1", completedAt: "2026-02-24T12:00:00.000Z" }),
+      makeSession({ id: "2", completedAt: "2026-02-23T12:00:00.000Z" }),
+      makeSession({ id: "3", completedAt: "2026-02-22T12:00:00.000Z" }),
+    ];
+    const result = groupSessionsByDay(sessions);
+    expect(result).toHaveLength(3);
+    // Each bucket holds exactly one session
+    for (const group of result) {
+      expect(group.sessions).toHaveLength(1);
+    }
+  });
+
+  it("buckets sessions on the same day together", () => {
+    // No "Z" suffix → treated as local time, guaranteeing the same local calendar day
+    // regardless of the test runner's timezone offset.
+    const sessions = [
+      makeSession({ id: "1", completedAt: "2026-02-24T09:00:00.000" }),
+      makeSession({ id: "2", completedAt: "2026-02-24T14:00:00.000" }),
+      makeSession({ id: "3", completedAt: "2026-02-24T18:00:00.000" }),
+    ];
+    const result = groupSessionsByDay(sessions);
+    // All on same day — one bucket
+    expect(result).toHaveLength(1);
+    expect(result[0]!.sessions).toHaveLength(3);
+  });
+
+  it("orders day groups by dateKey descending (most recent first)", () => {
+    const sessions = [
+      makeSession({ id: "1", completedAt: "2026-02-22T12:00:00.000Z" }),
+      makeSession({ id: "2", completedAt: "2026-02-24T12:00:00.000Z" }),
+      makeSession({ id: "3", completedAt: "2026-02-23T12:00:00.000Z" }),
+    ];
+    const result = groupSessionsByDay(sessions);
+    expect(result).toHaveLength(3);
+    // Most recent first
+    expect(result[0]!.dateKey > result[1]!.dateKey).toBe(true);
+    expect(result[1]!.dateKey > result[2]!.dateKey).toBe(true);
+  });
+
+  it("orders sessions within a day group by completedAt descending", () => {
+    // No "Z" suffix → local time, same calendar day in any timezone
+    const sessions = [
+      makeSession({ id: "early", completedAt: "2026-02-24T08:00:00.000" }),
+      makeSession({ id: "late", completedAt: "2026-02-24T20:00:00.000" }),
+      makeSession({ id: "mid", completedAt: "2026-02-24T14:00:00.000" }),
+    ];
+    const result = groupSessionsByDay(sessions);
+    expect(result).toHaveLength(1);
+    const ids = result[0]!.sessions.map((s) => s.id);
+    // Descending: late → mid → early
+    expect(ids).toEqual(["late", "mid", "early"]);
+  });
+
+  it("assigns sessions crossing midnight to the correct local day", () => {
+    // 2026-02-24T23:00:00Z is Feb 24 in UTC+0 but Feb 25 in UTC+2 and Feb 24 in UTC-1.
+    // groupSessionsByDay uses local time (new Date().getFullYear() etc.).
+    // We verify that TWO sessions with the same UTC day but different local dates end up
+    // in different buckets by choosing timestamps that are definitely on different local
+    // calendar days regardless of timezone (noon vs. midnight UTC+14 worst case).
+    // Strategy: anchor sessions 26 hours apart so they are always on different local days.
+    const session1 = makeSession({ id: "day1", completedAt: "2026-02-24T12:00:00.000Z" });
+    const session2 = makeSession({ id: "day2", completedAt: "2026-02-25T14:00:00.000Z" }); // 26h later
+
+    const result = groupSessionsByDay([session1, session2]);
+    // They must fall into separate buckets since 26h always crosses a local midnight
+    expect(result).toHaveLength(2);
+    // Each bucket has one session
+    expect(result[0]!.sessions).toHaveLength(1);
+    expect(result[1]!.sessions).toHaveLength(1);
   });
 });

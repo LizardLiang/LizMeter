@@ -1,9 +1,10 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import type { CreateTagInput, Session, Tag, TimerStatus } from "../../../shared/types.ts";
 import { isUploadableSession, summarizeMergedWorklogSessions } from "../../../shared/worklog.ts";
 import { useGroupExpand } from "../hooks/useGroupExpand.ts";
 import { formatDuration, formatTimerType, timerTypeColor } from "../utils/format.ts";
 import type { DateSubGroup } from "../utils/groupSessions.ts";
+import { groupSessionsByDay } from "../utils/groupSessions.ts";
 import { stripHtml } from "../utils/html.ts";
 import { DateSubGroupHeader } from "./DateSubGroupHeader.tsx";
 import styles from "./HistoryPage.module.scss";
@@ -64,6 +65,8 @@ interface SessionCardProps {
   worklogLoading?: boolean;
   onResumeSession?: (session: Session) => void;
   timerStatus?: TimerStatus;
+  /** When true, omits the date portion of the meta timestamp (time-only). Use inside day groups where the date header already shows the date. */
+  hideDate?: boolean;
 }
 
 function SessionCard(
@@ -78,6 +81,7 @@ function SessionCard(
     worklogLoading,
     onResumeSession,
     timerStatus,
+    hideDate,
   }: SessionCardProps,
 ) {
   const assignedTagIds = session.tags.map((t) => t.id);
@@ -108,7 +112,9 @@ function SessionCard(
         </span>
         <span className={styles.cardDuration}>{formatDuration(session.actualDurationSeconds)}</span>
         <span className={styles.cardMeta}>
-          {formatDate(session.completedAt)} · {formatLocalTime(session.completedAt)}
+          {hideDate
+            ? formatLocalTime(session.completedAt)
+            : `${formatDate(session.completedAt)} · ${formatLocalTime(session.completedAt)}`}
         </span>
         {showWorklogUi && (
           <>
@@ -210,9 +216,19 @@ export function HistoryPage({
   timerStatus,
 }: Props) {
   const activeFilterTag = allTags.find((t) => t.id === activeTagFilter);
-  const { groupedData, expandedIssueGroups, expandedDateGroups, toggleIssueGroup, toggleDateGroup } = useGroupExpand(
-    sessions,
-    activeTagFilter,
+  const {
+    groupedData,
+    expandedIssueGroups,
+    expandedDateGroups,
+    expandedDayGroups,
+    toggleIssueGroup,
+    toggleDateGroup,
+    toggleDayGroup,
+  } = useGroupExpand(sessions, activeTagFilter);
+
+  const dayGroups = useMemo(
+    () => groupSessionsByDay(groupedData.ungroupedSessions),
+    [groupedData.ungroupedSessions],
   );
 
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -445,22 +461,51 @@ export function HistoryPage({
           );
         })}
 
-        {/* Ungrouped sessions (no linked issue) */}
-        {groupedData.ungroupedSessions.map((session) => (
-          <SessionCard
-            key={session.id}
-            session={session}
-            allTags={allTags}
-            onDelete={onDeleteSession}
-            onAssign={onAssignTag}
-            onUnassign={onUnassignTag}
-            onCreateTag={onCreateTag}
-            onLogWork={onLogWork ? handleOpenWorklogDialog : undefined}
-            worklogLoading={worklogLoading?.[session.id] ?? false}
-            onResumeSession={onResumeSession}
-            timerStatus={timerStatus}
-          />
-        ))}
+        {/* Ungrouped sessions (no linked issue) — grouped by calendar day */}
+        {dayGroups.map((dayGroup) => {
+          const isExpanded = expandedDayGroups.has(dayGroup.dateKey);
+          return (
+            <div key={dayGroup.dateKey} className={styles.dayGroup}>
+              <div
+                className={styles.dayHeader}
+                role="button"
+                tabIndex={0}
+                aria-expanded={isExpanded}
+                onClick={() => toggleDayGroup(dayGroup.dateKey)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    toggleDayGroup(dayGroup.dateKey);
+                  }
+                }}
+              >
+                <span className={isExpanded ? styles.dayChevronExpanded : styles.dayChevron}>▶</span>
+                <span className={styles.dayHeaderLabel}>{dayGroup.dateLabel}</span>
+                <span className={styles.dayHeaderCount}>
+                  {dayGroup.sessions.length} session{dayGroup.sessions.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+              <div className={isExpanded ? styles.dayContentExpanded : styles.dayContent} aria-hidden={!isExpanded}>
+                {dayGroup.sessions.map((session) => (
+                  <SessionCard
+                    key={session.id}
+                    session={session}
+                    allTags={allTags}
+                    onDelete={onDeleteSession}
+                    onAssign={onAssignTag}
+                    onUnassign={onUnassignTag}
+                    onCreateTag={onCreateTag}
+                    onLogWork={onLogWork ? handleOpenWorklogDialog : undefined}
+                    worklogLoading={worklogLoading?.[session.id] ?? false}
+                    onResumeSession={onResumeSession}
+                    timerStatus={timerStatus}
+                    hideDate
+                  />
+                ))}
+              </div>
+            </div>
+          );
+        })}
       </div>
 
       {sessions.length < total && (
