@@ -66,17 +66,34 @@ export async function checkBinaries(): Promise<BinaryStatus> {
 
   const ytDlpPath = getYtDlpPath();
   const ffmpegPath = getFfmpegPath();
-  const ytDlpInstalled = fs.existsSync(ytDlpPath);
-  const ffmpegInstalled = fs.existsSync(ffmpegPath);
 
+  // Phase 1: existence check
+  let ytDlpInstalled = fs.existsSync(ytDlpPath);
+  let ffmpegInstalled = fs.existsSync(ffmpegPath);
+
+  // Phase 2: health check — actually execute each binary.
+  // A file-exists check is not enough: a shared-build ffmpeg (missing DLLs) or a
+  // wrong-architecture binary passes the existence check but crashes on launch.
+  // If execution fails we delete the broken file so the next download is clean.
   let ytDlpVersion: string | null = null;
   if (ytDlpInstalled) {
     try {
       const { stdout } = await execFileAsync(ytDlpPath, ["--version"], { timeout: 5000 });
       ytDlpVersion = stdout.trim() || null;
     } catch {
-      // Binary exists but failed to execute — treat as installed but version unknown
-      ytDlpVersion = null;
+      // Exists but broken — remove so download can replace it atomically
+      ytDlpInstalled = false;
+      try { fs.unlinkSync(ytDlpPath); } catch { /* ignore */ }
+    }
+  }
+
+  if (ffmpegInstalled) {
+    try {
+      await execFileAsync(ffmpegPath, ["-version"], { timeout: 5000 });
+    } catch {
+      // Exists but broken (e.g. shared build missing DLLs, wrong arch)
+      ffmpegInstalled = false;
+      try { fs.unlinkSync(ffmpegPath); } catch { /* ignore */ }
     }
   }
 
@@ -300,19 +317,33 @@ function selectYtDlpAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
 
 function selectFfmpegAsset(assets: GitHubAsset[]): GitHubAsset | undefined {
   if (process.platform === "win32") {
-    // yt-dlp/FFmpeg-Builds releases a zip for Windows: ffmpeg-n*-win64-lgpl-*.zip
+    // Must be the static build (no "shared" suffix) — shared builds require separate DLLs not present on disk.
+    // yt-dlp/FFmpeg-Builds releases both ffmpeg-n*-win64-lgpl-*.zip (static, ~80 MB)
+    // and ffmpeg-n*-win64-lgpl-shared-*.zip (shared, ~0.5 MB); we must pick the static one.
     return assets.find(
-      (a) => a.name.endsWith(".zip") && a.name.includes("win64") && !a.name.includes("sha256"),
+      (a) =>
+        a.name.endsWith(".zip") &&
+        a.name.includes("win64") &&
+        !a.name.includes("shared") &&
+        !a.name.includes("sha256"),
     );
   }
   if (process.platform === "darwin") {
     return assets.find(
-      (a) => a.name.includes("macos") && a.name.endsWith(".tar.xz") && !a.name.includes("sha256"),
+      (a) =>
+        a.name.includes("macos") &&
+        a.name.endsWith(".tar.xz") &&
+        !a.name.includes("shared") &&
+        !a.name.includes("sha256"),
     );
   }
   // Linux
   return assets.find(
-    (a) => a.name.includes("linux64") && a.name.endsWith(".tar.xz") && !a.name.includes("sha256"),
+    (a) =>
+      a.name.includes("linux64") &&
+      a.name.endsWith(".tar.xz") &&
+      !a.name.includes("shared") &&
+      !a.name.includes("sha256"),
   );
 }
 
