@@ -22,7 +22,20 @@
       "Bash(sleep 4 && agent-browser connect 9333 2>&1 && agent-browser tab 1 2>&1 && agent-browser snapshot -i 2>&1)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(wc -l /c/Users/lizard_liang/personal/PersonalTool/LizMeter/src/renderer/src/components/*.tsx /c/Users/lizard_liang/personal/PersonalTool/LizMeter/src/renderer/src/components/music/*.tsx)"
+      "Bash(wc -l /c/Users/lizard_liang/personal/PersonalTool/LizMeter/src/renderer/src/components/*.tsx /c/Users/lizard_liang/personal/PersonalTool/LizMeter/src/renderer/src/components/music/*.tsx)",
+      "Bash(rtk vitest *)",
+      "Bash(bun vitest *)",
+      "Bash(tee C:\\\\Temp\\\\hades-debug-output.txt)",
+      "Bash(rtk bun *)",
+      "Skill(kratos:auto)",
+      "Skill(kratos:main)",
+      "Bash($KRATOS_BIN pipeline *)",
+      "Bash($KRATOS_BIN template *)",
+      "Bash($KRATOS_BIN *)",
+      "Bash(Select-String '\"name\"')",
+      "PowerShell(Get-ChildItem *)",
+      "Bash(rtk tsc *)",
+      "Bash(C:/Users/lizard_liang/.claude/plugins/cache/lizard-plugins/kratos/2.61.0/bin/kratos.exe hermes-list *)"
     ]
   }
 }
