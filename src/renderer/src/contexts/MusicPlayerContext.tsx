@@ -243,8 +243,9 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
     if (nextIdx !== null) {
       void playQueueItemRef.current(nextIdx);
     } else {
-      // Queue ended — stay at last track in paused state (spec: queue-end behavior)
-      audioPlayer.pause();
+      // Queue ended — stop so new songs start immediately instead of being enqueued,
+      // and so resume() doesn't replay the just-finished track from position 0.
+      audioPlayer.stop();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -574,7 +575,9 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
       if (currentTrack.id === autoRepairTrackIdRef.current) return;
       if (audioPlayer.playbackState !== "buffering") return;
       if (audioPlayer.currentTime <= 0) return;
-      if (audioPlayer.duration > 0 && audioPlayer.currentTime >= audioPlayer.duration - 2) return;
+      const knownDuration = audioPlayer.duration > 0 ? audioPlayer.duration : (currentTrack.durationSeconds ?? 0);
+      if (knownDuration > 0 && audioPlayer.currentTime >= knownDuration - 2) return;
+      if (knownDuration <= 0) return;
 
       const stalledForMs = Date.now() - lastPlaybackProgressAtRef.current;
       if (stalledForMs < CACHE_STALL_REPAIR_THRESHOLD_MS) return;
@@ -1001,7 +1004,7 @@ export function MusicPlayerProvider({ children }: MusicPlayerProviderProps) {
       currentTrack,
       playbackState: pendingPlaybackState ?? audioPlayer.playbackState,
       currentTime: audioPlayer.currentTime,
-      duration: audioPlayer.duration,
+      duration: audioPlayer.duration > 0 ? audioPlayer.duration : (currentTrack?.durationSeconds ?? 0),
       buffered: audioPlayer.buffered,
       queue,
       currentIndex,

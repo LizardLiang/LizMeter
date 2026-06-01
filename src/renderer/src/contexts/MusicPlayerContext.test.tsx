@@ -101,6 +101,7 @@ function Harness() {
       <div data-testid="playback-state">{player.playbackState}</div>
       <div data-testid="track-title">{player.currentTrack?.title ?? "none"}</div>
       <div data-testid="current-index">{player.currentIndex}</div>
+      <div data-testid="duration">{player.duration}</div>
     </>
   );
 }
@@ -310,5 +311,105 @@ describe("MusicPlayerContext", () => {
 
     expect(screen.getByTestId("track-title").textContent).toBe("Track 1");
     expect(screen.getByTestId("current-index").textContent).toBe("0");
+  });
+
+  it("falls back to durationSeconds when audio element duration is unknown", async () => {
+    playMock.mockImplementation(async () => {
+      return makePlayResult(makeTrack({ durationSeconds: 240, isCached: false }));
+    });
+
+    render(
+      <MusicPlayerProvider>
+        <Harness />
+      </MusicPlayerProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("play-first"));
+      await Promise.resolve();
+    });
+
+    const audio = audioInstances[0]!;
+    // Simulate a chunked stream: browser sets duration to Infinity, hook clamps to 0
+    audio.duration = Infinity;
+    await act(async () => {
+      audio.dispatch("durationchange");
+    });
+
+    expect(screen.getByTestId("duration").textContent).toBe("240");
+  });
+
+  it("does not auto-repair a streamed track near end of its known duration", async () => {
+    playMock.mockImplementation(async () => {
+      return makePlayResult(makeTrack({ durationSeconds: 300, isCached: true }));
+    });
+
+    render(
+      <MusicPlayerProvider>
+        <Harness />
+      </MusicPlayerProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("play-first"));
+      await Promise.resolve();
+    });
+
+    const audio = audioInstances[0]!;
+    // Stream: browser has no Content-Length → duration stays Infinity → clamped to 0
+    audio.duration = Infinity;
+    await act(async () => {
+      audio.dispatch("durationchange");
+    });
+
+    // Simulate playback near the end (within 2s of durationSeconds)
+    await act(async () => {
+      audio.currentTime = 299;
+      audio.dispatch("timeupdate");
+    });
+
+    // Advance past stall threshold
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+      await Promise.resolve();
+    });
+
+    expect(integrityRepairMock).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-repair when no duration info is available at all", async () => {
+    playMock.mockImplementation(async () => {
+      return makePlayResult(makeTrack({ durationSeconds: null, isCached: true }));
+    });
+
+    render(
+      <MusicPlayerProvider>
+        <Harness />
+      </MusicPlayerProvider>,
+    );
+
+    await act(async () => {
+      fireEvent.click(screen.getByText("play-first"));
+      await Promise.resolve();
+    });
+
+    const audio = audioInstances[0]!;
+    audio.duration = Infinity;
+    await act(async () => {
+      audio.dispatch("durationchange");
+    });
+
+    // Mid-playback position — stall detector should still skip (no duration to compare)
+    await act(async () => {
+      audio.currentTime = 50;
+      audio.dispatch("timeupdate");
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(6000);
+      await Promise.resolve();
+    });
+
+    expect(integrityRepairMock).not.toHaveBeenCalled();
   });
 });
