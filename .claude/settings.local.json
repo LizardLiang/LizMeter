@@ -35,7 +35,23 @@
       "Bash(Select-String '\"name\"')",
       "PowerShell(Get-ChildItem *)",
       "Bash(rtk tsc *)",
-      "Bash(C:/Users/lizard_liang/.claude/plugins/cache/lizard-plugins/kratos/2.61.0/bin/kratos.exe hermes-list *)"
+      "Bash(C:/Users/lizard_liang/.claude/plugins/cache/lizard-plugins/kratos/2.61.0/bin/kratos.exe hermes-list *)",
+      "Bash(bun run *)",
+      "Bash(obsidian append *)",
+      "Bash(type coverage\\\\coverage-summary.json)",
+      "Bash(type coverage/coverage-summary.json)",
+      "Bash(ls coverage/)",
+      "Bash(dir coverage *)",
+      "Read(//c/Users/lizard_liang/AppData/Roaming/LizMeter/**)",
+      "Read(//c/Users/lizard_liang/AppData/Roaming/lizmeter/**)",
+      "Read(//c/Users/lizard_liang/AppData/Roaming/**)",
+      "Bash(C:/Users/lizard_liang/AppData/Roaming/lizmeter/bin/yt-dlp.exe *)",
+      "Bash(\"C:/Users/lizard_liang/AppData/Roaming/lizmeter/bin/ffmpeg.exe\" -version)",
+      "Bash(echo \"Exit: $?\")",
+      "PowerShell(& \"C:\\\\Users\\\\lizard_liang\\\\AppData\\\\Roaming\\\\lizmeter\\\\bin\\\\ffmpeg.exe\" -version 2>&1 | Select-Object -First 5)",
+      "PowerShell(& \"C:\\\\Users\\\\lizard_liang\\\\AppData\\\\Roaming\\\\lizmeter\\\\bin\\\\ffmpeg.exe\" -version; Write-Host \"Exit: $LASTEXITCODE\")",
+      "PowerShell(Get-Item *)",
+      "Bash(git stash *)"
     ]
   }
 }
