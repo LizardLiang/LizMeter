@@ -5,16 +5,20 @@
 // Clicking a track plays it immediately (or adds to queue if something is already playing).
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type {
   DamagedTrackInfo,
   IntegrityProgress,
+  MusicPlaylist,
   MusicSortDir,
   MusicSortField,
   MusicTrack,
 } from "../../../../shared/types.ts";
 import { useMusicPlayer } from "../../contexts/MusicPlayerContext.tsx";
 import { useMusicLibrary } from "../../hooks/useMusicLibrary.ts";
+import { usePlaylists } from "../../hooks/usePlaylists.ts";
 import styles from "./LibraryView.module.scss";
+import { TrackContextMenu } from "./TrackContextMenu.tsx";
 
 // ---- Format duration ----
 
@@ -97,33 +101,45 @@ function SortButton({ label, field, currentField, currentDir, onSort, onToggleDi
 interface TrackRowProps {
   track: MusicTrack;
   onPlay: (track: MusicTrack) => void;
+  playlists: MusicPlaylist[];
+  onAddToPlaylist: (track: MusicTrack, playlist: MusicPlaylist) => void;
+  onDeleteFromLibrary: (track: MusicTrack) => void;
 }
 
-function TrackRow({ track, onPlay }: TrackRowProps) {
+function TrackRow({ track, onPlay, playlists, onAddToPlaylist, onDeleteFromLibrary }: TrackRowProps) {
   return (
-    <button
-      className={styles.trackRow}
-      onClick={() => onPlay(track)}
-      type="button"
-      title={`Play: ${track.title}`}
-    >
-      <TrackThumb thumbnailUrl={track.thumbnailUrl} title={track.title} />
-      <div className={styles.trackText}>
-        <span className={styles.trackTitle}>{track.title}</span>
-        {track.artist && <span className={styles.trackArtist}>{track.artist}</span>}
-      </div>
-      <div className={styles.trackMeta}>
-        <SiteBadge site={track.sourceSite} />
-        {track.isCached && (
-          <span className={styles.cachedIcon} title="Available offline">
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
-            </svg>
-          </span>
-        )}
-        <span className={styles.trackDuration}>{formatDuration(track.durationSeconds)}</span>
-      </div>
-    </button>
+    <div className={styles.trackRowWrapper}>
+      <button
+        className={styles.trackRow}
+        onClick={() => onPlay(track)}
+        type="button"
+        title={`Play: ${track.title}`}
+      >
+        <TrackThumb thumbnailUrl={track.thumbnailUrl} title={track.title} />
+        <div className={styles.trackText}>
+          <span className={styles.trackTitle}>{track.title}</span>
+          {track.artist && <span className={styles.trackArtist}>{track.artist}</span>}
+        </div>
+        <div className={styles.trackMeta}>
+          <SiteBadge site={track.sourceSite} />
+          {track.isCached && (
+            <span className={styles.cachedIcon} title="Available offline">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                <path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z" />
+              </svg>
+            </span>
+          )}
+          <span className={styles.trackDuration}>{formatDuration(track.durationSeconds)}</span>
+        </div>
+      </button>
+      <TrackContextMenu
+        track={track}
+        playlists={playlists}
+        onAddToPlaylist={(playlist) => onAddToPlaylist(track, playlist)}
+        onDeleteFromLibrary={onDeleteFromLibrary}
+        className={styles.trackMenuBtn}
+      />
+    </div>
   );
 }
 
@@ -295,11 +311,48 @@ function IntegrityResultPanel({ state, handleRepairAll, handleRepairOne, dismiss
   );
 }
 
+// ---- Clear library confirmation dialog ----
+
+interface ClearLibraryDialogProps {
+  trackCount: number;
+  isClearing: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+function ClearLibraryDialog({ trackCount, isClearing, onConfirm, onCancel }: ClearLibraryDialogProps) {
+  // Portaled to document.body — the tab content ancestor has backdrop-filter
+  // (creates a containing block for position:fixed) + overflow:hidden, which
+  // would otherwise clip this overlay to the tab box instead of the viewport.
+  // Same pattern as DeleteDialog in TrackContextMenu.tsx.
+  return createPortal(
+    <div className={styles.clearOverlay} onClick={onCancel}>
+      <div className={styles.clearDialog} onClick={(e) => e.stopPropagation()}>
+        <p className={styles.clearDialogTitle}>Clear Library?</p>
+        <p className={styles.clearDialogText}>
+          Delete all {trackCount} track{trackCount !== 1 ? "s" : ""}{" "}
+          and cached files? Playlists are kept but emptied. This cannot be undone.
+        </p>
+        <div className={styles.clearDialogActions}>
+          <button className={styles.clearCancelBtn} onClick={onCancel} type="button" disabled={isClearing}>
+            Cancel
+          </button>
+          <button className={styles.clearConfirmBtn} onClick={onConfirm} type="button" disabled={isClearing}>
+            {isClearing ? "Clearing…" : "Clear Library"}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
 // ---- LibraryView (exported) ----
 
 export function LibraryView() {
   const lib = useMusicLibrary();
   const ctx = useMusicPlayer();
+  const playlists = usePlaylists();
   const integrity = useIntegrityCheck(lib.refresh);
 
   const observerRef = useRef<IntersectionObserver | null>(null);
@@ -332,10 +385,41 @@ export function LibraryView() {
   }, [lib.hasMore, lib.isLoading, lib.loadMore]);
 
   const [isEnqueueing, setIsEnqueueing] = useState(false);
+  const [showClearDialog, setShowClearDialog] = useState(false);
+  const [isClearing, setIsClearing] = useState(false);
 
   const handlePlay = useCallback((track: MusicTrack) => {
     void ctx.play(track.sourceUrl, track).catch(() => {});
   }, [ctx]);
+
+  const handleAddToPlaylist = useCallback((track: MusicTrack, playlist: MusicPlaylist) => {
+    void playlists.addTrackToPlaylist(playlist.id, track.id).catch(() => {});
+  }, [playlists]);
+
+  const handleDeleteFromLibrary = useCallback((track: MusicTrack) => {
+    // Purge the track from the live queue first so a deleted track can't keep
+    // playing or get resurrected by an in-flight play/repair request.
+    ctx.removeTrackFromQueue(track.id);
+    void window.electronAPI.music.libraryDelete(track.id).then(() => {
+      lib.refresh();
+    }).catch(() => {
+      // Non-fatal — the library list will just be stale until the next refresh
+    });
+  }, [ctx, lib]);
+
+  const handleClearLibrary = useCallback(async () => {
+    setIsClearing(true);
+    try {
+      await window.electronAPI.music.libraryClear();
+      ctx.clearQueue();
+      lib.refresh();
+    } catch {
+      // Non-fatal — user can retry
+    } finally {
+      setIsClearing(false);
+      setShowClearDialog(false);
+    }
+  }, [ctx, lib]);
 
   const handleAddAllToQueue = useCallback(async () => {
     if (isEnqueueing || lib.total === 0) return;
@@ -496,22 +580,32 @@ export function LibraryView() {
       {lib.total > 0 && (
         <div className={styles.trackCountRow}>
           <span className={styles.trackCount}>{lib.total} track{lib.total !== 1 ? "s" : ""}</span>
-          <button
-            className={`${styles.addAllBtn} ${isEnqueueing ? styles.addAllBtnLoading : ""}`}
-            onClick={() => void handleAddAllToQueue()}
-            disabled={isEnqueueing}
-            type="button"
-            title="Add all tracks to queue"
-          >
-            {isEnqueueing
-              ? <span className={styles.addAllSpinner} aria-hidden="true" />
-              : (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-                  <path d="M19 11H7.83l4.88-4.88c.39-.39.39-1.03 0-1.42-.39-.39-1.02-.39-1.41 0l-6.59 6.59c-.39.39-.39 1.02 0 1.41l6.59 6.59c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L7.83 13H19c.55 0 1-.45 1-1s-.45-1-1-1z" />
-                </svg>
-              )}
-            <span>{isEnqueueing ? "Adding…" : `Add All (${lib.total})`}</span>
-          </button>
+          <div className={styles.trackCountActions}>
+            <button
+              className={`${styles.addAllBtn} ${isEnqueueing ? styles.addAllBtnLoading : ""}`}
+              onClick={() => void handleAddAllToQueue()}
+              disabled={isEnqueueing}
+              type="button"
+              title="Add all tracks to queue"
+            >
+              {isEnqueueing
+                ? <span className={styles.addAllSpinner} aria-hidden="true" />
+                : (
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <path d="M19 11H7.83l4.88-4.88c.39-.39.39-1.03 0-1.42-.39-.39-1.02-.39-1.41 0l-6.59 6.59c-.39.39-.39 1.02 0 1.41l6.59 6.59c.39.39 1.02.39 1.41 0 .39-.39.39-1.02 0-1.41L7.83 13H19c.55 0 1-.45 1-1s-.45-1-1-1z" />
+                  </svg>
+                )}
+              <span>{isEnqueueing ? "Adding…" : `Add All (${lib.total})`}</span>
+            </button>
+            <button
+              className={styles.clearLibraryBtn}
+              onClick={() => setShowClearDialog(true)}
+              type="button"
+              title="Delete all tracks and cached files"
+            >
+              Clear Library
+            </button>
+          </div>
         </div>
       )}
 
@@ -525,7 +619,16 @@ export function LibraryView() {
       {/* Track list */}
       {lib.tracks.length > 0 && (
         <div className={styles.trackList}>
-          {lib.tracks.map((track) => <TrackRow key={track.id} track={track} onPlay={handlePlay} />)}
+          {lib.tracks.map((track) => (
+            <TrackRow
+              key={track.id}
+              track={track}
+              onPlay={handlePlay}
+              playlists={playlists.playlists}
+              onAddToPlaylist={handleAddToPlaylist}
+              onDeleteFromLibrary={handleDeleteFromLibrary}
+            />
+          ))}
 
           {/* Infinite scroll sentinel */}
           <div ref={sentinelRef} className={styles.sentinel} aria-hidden="true" />
@@ -544,6 +647,16 @@ export function LibraryView() {
         <div className={styles.loadingState}>
           <span className={styles.spinner} aria-hidden="true" />
         </div>
+      )}
+
+      {/* Clear library confirmation dialog */}
+      {showClearDialog && (
+        <ClearLibraryDialog
+          trackCount={lib.total}
+          isClearing={isClearing}
+          onConfirm={() => void handleClearLibrary()}
+          onCancel={() => setShowClearDialog(false)}
+        />
       )}
     </div>
   );

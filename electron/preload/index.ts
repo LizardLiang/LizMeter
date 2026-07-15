@@ -156,6 +156,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     // Library
     libraryList: (input: MusicLibraryListInput) => ipcRenderer.invoke("music:library:list", input),
     libraryDelete: (trackId: string) => ipcRenderer.invoke("music:library:delete", trackId),
+    libraryClear: () => ipcRenderer.invoke("music:library:clear"),
 
     // Playlists
     playlistCreate: (input: { name: string; trackIds?: string[] }) =>

@@ -15,7 +15,7 @@ import type {
 } from "../../../src/shared/types.ts";
 import { MusicError } from "./music-error.ts";
 import { checkBinaries, getBinaryInfo, downloadBinaries, getBinDir } from "./binary-manager.ts";
-import { killAll, killByPrefix } from "./process-manager.ts";
+import { killAll, killByPrefix, killByPrefixAsync } from "./process-manager.ts";
 import {
   startServer,
   setCurrentTrack,
@@ -24,6 +24,7 @@ import {
   finalizeCacheFile,
   didCacheWriteFail,
   getCurrentTrackId,
+  closeCacheReadStreams,
 } from "./stream-server.ts";
 import { extractAudio, extractMetadata, detectPlaylist, extractPlaylistMetadata } from "./audio-extractor.ts";
 import { toRendererTrack } from "./internal-types.ts";
@@ -34,6 +35,7 @@ import {
   incrementTrackPlayCount,
   updateTrackCache,
   deleteTrack,
+  deleteAllTracks,
   listMusicTracks,
   createPlaylist,
   renamePlaylist,
@@ -60,6 +62,43 @@ import { getMainWindow } from "../index.ts";
 
 // AbortController used to cancel in-flight playlist imports
 let activeImportAbortController: AbortController | null = null;
+
+// --- Shared cache-file unlink helper ---
+
+// Delay before retrying an EBUSY unlink once — gives Windows a moment to
+// release a handle that was just closed (stream kill / read-stream destroy
+// are not always synchronous with the OS releasing the lock).
+const UNLINK_RETRY_DELAY_MS = 250;
+
+// Deletes a cache file, retrying once on EBUSY (Windows holds a file lock for
+// a brief moment after a handle closes). Throws MusicError if the file is
+// still busy or fails to delete for any other reason — callers must not
+// proceed to remove the DB row on failure, or the file is orphaned forever.
+async function unlinkWithRetry(filePath: string): Promise<void> {
+  try {
+    fs.unlinkSync(filePath);
+    return;
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code === "ENOENT") return;
+
+    if (err.code === "EBUSY") {
+      await new Promise((resolve) => setTimeout(resolve, UNLINK_RETRY_DELAY_MS));
+      try {
+        fs.unlinkSync(filePath);
+        return;
+      } catch (e2) {
+        const err2 = e2 as NodeJS.ErrnoException;
+        if (err2.code === "ENOENT") return;
+        console.error("[music-ipc] Cache file still busy after retry:", filePath, err2);
+        throw new MusicError(`Cache file is still in use: ${filePath}`, "CACHE_FILE_BUSY");
+      }
+    }
+
+    console.error("[music-ipc] Failed to delete cache file:", filePath, err);
+    throw new MusicError(`Failed to delete cache file: ${filePath}`, "CACHE_FILE_BUSY");
+  }
+}
 
 // --- Shared stream-end finalize helper ---
 
@@ -288,21 +327,42 @@ export function registerMusicIpcHandlers(): void {
   });
 
   // music:library:delete — remove a track from the library (and its cache file) (T2.2)
-  ipcMain.handle("music:library:delete", (_event, trackId: string) => {
+  ipcMain.handle("music:library:delete", async (_event, trackId: string) => {
     const row = getTrackById(trackId);
     if (!row) {
       throw new MusicError(`Track not found: ${trackId}`, "TRACK_NOT_FOUND");
     }
+    if (getCurrentTrackId() === trackId) {
+      // Stop every hold on this file before unlinking it — otherwise Windows
+      // returns EBUSY for a file that's actively being served. Two distinct
+      // handles can be open: a yt-dlp stream process (type "stream", killed via
+      // killByPrefixAsync) and/or an in-flight HTTP read of the cached file
+      // itself (type "cache", served by serveCachedFile — clearCurrentTrack()
+      // never touches this one, so it must be torn down separately). Both are
+      // awaited so the unlink below sees a released handle.
+      await closeCacheReadStreams(trackId);
+      clearCurrentTrack();
+      await killByPrefixAsync("stream:");
+    }
     if (row.cached_file_path) {
-      try {
-        fs.unlinkSync(row.cached_file_path);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
-          console.error("[music-ipc] Failed to delete cache file:", row.cached_file_path);
-        }
-      }
+      // Do not delete the DB row on failure — that would orphan the file on
+      // disk forever with no way to retry the delete.
+      await unlinkWithRetry(row.cached_file_path);
     }
     deleteTrack(trackId);
+  });
+
+  // music:library:clear — wipe every track + cached file. Playlists survive as
+  // empty shells (playlist_tracks cascades on tracks delete).
+  ipcMain.handle("music:library:clear", async () => {
+    const currentId = getCurrentTrackId();
+    if (currentId) {
+      await closeCacheReadStreams(currentId);
+    }
+    clearCurrentTrack();
+    await killByPrefixAsync("stream:");
+    clearAllCache();
+    deleteAllTracks();
   });
 
   // music:cache:stats — current cache size + configured limit (T2.2)

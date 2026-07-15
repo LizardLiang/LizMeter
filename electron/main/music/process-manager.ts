@@ -166,6 +166,34 @@ export function killByPrefix(prefix: string): void {
 }
 
 /**
+ * Awaitable variant of killByPrefix. Resolves once every matched process's kill
+ * signal has actually been delivered (Windows: the `taskkill` helper process has
+ * exited; POSIX: the child has exited or a short grace period has elapsed).
+ * Callers that must not proceed until the OS-level file handles are released
+ * (e.g. unlinking a cache file right after stopping the stream that serves it)
+ * should await this instead of the fire-and-forget killByPrefix.
+ */
+export function killByPrefixAsync(prefix: string): Promise<void> {
+  const waits: Promise<void>[] = [];
+
+  for (const [key, child] of activeProcesses) {
+    if (!key.startsWith(prefix)) continue;
+
+    activeProcesses.delete(key);
+
+    const handle = timeoutHandles.get(key);
+    if (handle !== undefined) {
+      clearTimeout(handle);
+      timeoutHandles.delete(key);
+    }
+
+    waits.push(killChildProcessAwait(child));
+  }
+
+  return Promise.all(waits).then(() => undefined);
+}
+
+/**
  * Returns the number of currently active processes.
  * Useful for diagnostics and testing.
  */
@@ -198,4 +226,48 @@ function killChildProcess(child: ChildProcess): void {
   } catch {
     // Ignore errors during kill — process may have already exited
   }
+}
+
+// Grace period to wait for a POSIX child's "exit" event after SIGKILL before
+// giving up and resolving anyway — SIGKILL is not synchronous.
+const POSIX_KILL_GRACE_MS = 500;
+
+/**
+ * Same platform-aware kill as killChildProcess, but resolves only once the kill
+ * has actually taken effect: on Windows, once the `taskkill` helper process
+ * exits; on POSIX, once the child's own "exit" event fires (bounded by a short
+ * grace period so a hung child can't stall callers forever).
+ */
+function killChildProcessAwait(child: ChildProcess): Promise<void> {
+  if (!child.pid) return Promise.resolve();
+
+  return new Promise((resolve) => {
+    try {
+      if (process.platform === "win32") {
+        const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], {
+          stdio: "ignore",
+          shell: false,
+          windowsHide: true,
+        });
+        killer.on("exit", () => resolve());
+        killer.on("error", () => resolve());
+        return;
+      }
+
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
+      }
+
+      const timer = setTimeout(() => resolve(), POSIX_KILL_GRACE_MS);
+      child.once("exit", () => {
+        clearTimeout(timer);
+        resolve();
+      });
+      child.kill("SIGKILL");
+    } catch {
+      // Ignore errors during kill — process may have already exited
+      resolve();
+    }
+  });
 }

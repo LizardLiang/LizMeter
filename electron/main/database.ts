@@ -966,6 +966,13 @@ export function deleteTrack(trackId: string): void {
   database.prepare("DELETE FROM tracks WHERE id = ?").run(trackId);
 }
 
+// Deletes every track row. playlist_tracks rows cascade (foreign_keys = ON,
+// ON DELETE CASCADE — see schema above), so playlists survive as empty shells.
+export function deleteAllTracks(): void {
+  const database = getDb();
+  database.prepare("DELETE FROM tracks").run();
+}
+
 const VALID_MUSIC_SORT_FIELDS: readonly MusicSortField[] = ["last_played_at", "title", "duration_seconds", "added_at"];
 const VALID_MUSIC_SORT_DIRS: readonly MusicSortDir[] = ["asc", "desc"];
 

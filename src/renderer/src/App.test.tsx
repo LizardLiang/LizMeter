@@ -118,6 +118,7 @@ const mockElectronAPI = {
     meta: vi.fn().mockResolvedValue({ track: null }),
     libraryList: vi.fn().mockResolvedValue({ tracks: [], total: 0 }),
     libraryDelete: vi.fn().mockResolvedValue(undefined),
+    libraryClear: vi.fn().mockResolvedValue(undefined),
     playlistCreate: vi.fn().mockResolvedValue({
       id: 1,
       name: "test",

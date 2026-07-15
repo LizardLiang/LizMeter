@@ -428,6 +428,7 @@ export type MusicErrorCode =
   | "INVALID_URL"
   | "UNSUPPORTED_SOURCE"
   | "CACHE_FULL"
+  | "CACHE_FILE_BUSY"
   | "FORMAT_ERROR"
   | "HASH_MISMATCH"
   | "PLAYLIST_NOT_FOUND"
@@ -591,6 +592,7 @@ export interface ElectronAPI {
     // Library
     libraryList: (input: MusicLibraryListInput) => Promise<MusicLibraryListResult>;
     libraryDelete: (trackId: string) => Promise<void>;
+    libraryClear: () => Promise<void>;
 
     // Playlists
     playlistCreate: (input: { name: string; trackIds?: string[]; }) => Promise<MusicPlaylist>;

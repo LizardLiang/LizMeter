@@ -19,6 +19,12 @@ let server: http.Server | null = null;
 let assignedPort: number | null = null;
 let currentTrack: CurrentTrackState | null = null;
 
+// In-flight cache-file read streams (serveCachedFile), keyed by the trackId they
+// serve. Windows holds an exclusive-ish lock on an open file handle, so a caller
+// that wants to unlink a cache file (e.g. deleting a track from the library)
+// must destroy any read stream still serving it first — see closeCacheReadStreams.
+const activeCacheReadStreams = new Map<string, Set<fs.ReadStream>>();
+
 // Tracks whether the tee-write to disk failed (disk full, permissions, etc.)
 // Used to skip cache-completion logic in music-ipc.ts
 let cacheWriteFailed = false;
@@ -150,6 +156,52 @@ export function didCacheWriteFail(): boolean {
   return cacheWriteFailed;
 }
 
+/**
+ * Register an in-flight cache-file read stream so it can be forcibly closed
+ * later (see closeCacheReadStreams). Removes itself from tracking once it
+ * closes on its own (request finished / client disconnected).
+ */
+function registerCacheReadStream(trackId: string, stream: fs.ReadStream): void {
+  let set = activeCacheReadStreams.get(trackId);
+  if (!set) {
+    set = new Set();
+    activeCacheReadStreams.set(trackId, set);
+  }
+  set.add(stream);
+  stream.on("close", () => {
+    set!.delete(stream);
+    if (set!.size === 0) {
+      activeCacheReadStreams.delete(trackId);
+    }
+  });
+}
+
+/**
+ * Destroy every in-flight cache-file read stream serving the given trackId and
+ * wait for them to actually close. Must be awaited before unlinking that
+ * track's cache file — otherwise Windows returns EBUSY for the still-open
+ * handle (the stream-process kill alone does not touch these; they belong to
+ * this HTTP server, not to a yt-dlp child process).
+ */
+export function closeCacheReadStreams(trackId: string): Promise<void> {
+  const set = activeCacheReadStreams.get(trackId);
+  if (!set || set.size === 0) return Promise.resolve();
+
+  const streams = Array.from(set);
+  return Promise.all(
+    streams.map((stream) =>
+      new Promise<void>((resolve) => {
+        if (stream.destroyed) {
+          resolve();
+          return;
+        }
+        stream.once("close", () => resolve());
+        stream.destroy();
+      })
+    ),
+  ).then(() => undefined);
+}
+
 // --- Internal HTTP request handler ---
 
 function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -170,7 +222,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
     if (currentTrack.type === "stream") {
       serveStream(req, res, currentTrack.stream, currentTrack.cacheFilePath);
     } else {
-      serveCachedFile(req, res, currentTrack.filePath);
+      serveCachedFile(req, res, currentTrack.filePath, currentTrack.id);
     }
     return;
   }
@@ -180,7 +232,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
   try {
     const track = getTrackById(trackId);
     if (track && track.cached_file_path && fs.existsSync(track.cached_file_path)) {
-      serveCachedFile(req, res, track.cached_file_path);
+      serveCachedFile(req, res, track.cached_file_path, trackId);
       return;
     }
   } catch {
@@ -284,6 +336,7 @@ function serveCachedFile(
   req: http.IncomingMessage,
   res: http.ServerResponse,
   filePath: string,
+  trackId: string,
 ): void {
   let stat: fs.Stats;
   try {
@@ -305,6 +358,7 @@ function serveCachedFile(
       "Accept-Ranges": "bytes",
     });
     const readStream = fs.createReadStream(filePath);
+    registerCacheReadStream(trackId, readStream);
     readStream.on("error", () => {
       if (!res.headersSent) {
         res.writeHead(500);
@@ -363,6 +417,7 @@ function serveCachedFile(
   });
 
   const readStream = fs.createReadStream(filePath, { start, end });
+  registerCacheReadStream(trackId, readStream);
   readStream.on("error", () => {
     if (!res.headersSent) {
       res.writeHead(500);
