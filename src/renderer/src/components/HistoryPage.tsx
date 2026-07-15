@@ -5,7 +5,6 @@ import { useGroupExpand } from "../hooks/useGroupExpand.ts";
 import { formatDuration, formatTimerType, timerTypeColor } from "../utils/format.ts";
 import type { DateSubGroup } from "../utils/groupSessions.ts";
 import { groupSessionsByDay } from "../utils/groupSessions.ts";
-import { stripHtml } from "../utils/html.ts";
 import { DateSubGroupHeader } from "./DateSubGroupHeader.tsx";
 import styles from "./HistoryPage.module.scss";
 import { IssueBadge } from "./IssueBadge.tsx";
@@ -180,7 +179,16 @@ function SessionCard(
           ✕
         </button>
       </div>
-      {session.title && <div className={styles.cardTitle}>{stripHtml(session.title)}</div>}
+      {session.title && (
+        /<[a-z][\s\S]*>/i.test(session.title)
+          ? (
+            <div
+              className={`${styles.cardTitle} ${styles.cardTitleRich}`}
+              dangerouslySetInnerHTML={{ __html: session.title }}
+            />
+          )
+          : <div className={styles.cardTitle}>{session.title}</div>
+      )}
       <div className={styles.cardTags}>
         <IssueBadge session={session} />
         {session.tags.map((t) => <TagBadge key={t.id} tag={t} onRemove={(id) => void onUnassign(session.id, id)} />)}

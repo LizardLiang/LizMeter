@@ -775,10 +775,12 @@ function TomatoClockInner(props: TomatoClockInnerProps) {
                 {isPomodoroActive && (
                   <>
                     {pickerState === "hidden" && (
-                      <ClaudeSessionSelect
-                        selected={linkedPomodoroClaudeSession}
-                        onSelect={(s) => void handlePomodoroClaudeSessionSelect(s)}
-                      />
+                      <div style={{ marginTop: 12 }}>
+                        <ClaudeSessionSelect
+                          selected={linkedPomodoroClaudeSession}
+                          onSelect={(s) => void handlePomodoroClaudeSessionSelect(s)}
+                        />
+                      </div>
                     )}
 
                     {showPicker && (

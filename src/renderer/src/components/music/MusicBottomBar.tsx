@@ -575,7 +575,7 @@ export function MusicBottomBar() {
             isCached={isCached}
             onSeek={seek}
           />
-          <span className={styles.timeLabel}>{formatTime(duration)}</span>
+          <span className={styles.timeLabel}>{duration > 0 ? formatTime(duration) : "--:--"}</span>
         </div>
       </div>
 

@@ -258,6 +258,62 @@
   white-space: nowrap;
 }
 
+.cardTitleRich {
+  white-space: normal;
+  text-overflow: clip;
+  overflow: visible;
+  line-height: 1.6;
+
+  ol,
+  ul {
+    margin: 4px 0;
+    padding-left: 20px;
+  }
+
+  ol {
+    list-style: decimal;
+  }
+
+  ul {
+    list-style: disc;
+  }
+
+  li {
+    margin-bottom: 2px;
+  }
+
+  p {
+    margin: 0 0 4px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+
+  strong {
+    font-weight: 700;
+  }
+
+  em {
+    font-style: italic;
+  }
+
+  s {
+    text-decoration: line-through;
+    color: #565f89;
+  }
+
+  code {
+    font-family: "JetBrains Mono", "Fira Code", "Cascadia Code", "Consolas", monospace;
+    font-size: 0.8125em;
+    background: #1a1b2e;
+    border: 1px solid #292e42;
+    border-radius: 3px;
+    padding: 0.05em 0.3em;
+    color: #7dcfff;
+  }
+}
+
 .cardTags {
   display: flex;
   flex-wrap: wrap;
