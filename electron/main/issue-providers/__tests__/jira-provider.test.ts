@@ -191,3 +191,222 @@ describe("TC-569: IssueProviderError includes NOT_FOUND and INELIGIBLE codes", (
     expect(() => new IssueProviderError("Ineligible", "INELIGIBLE")).not.toThrow();
   });
 });
+
+// --- fetchIssues ---
+
+describe("TC-570: fetchIssues returns mapped issues", () => {
+  it("fetches and maps Jira issues from search API", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({
+        issues: [
+          {
+            id: "10001",
+            key: "PROJ-1",
+            fields: {
+              summary: "Fix login bug",
+              status: { name: "In Progress" },
+              priority: { name: "High" },
+              assignee: { displayName: "Alice" },
+              issuetype: { name: "Bug" },
+              labels: ["backend"],
+            },
+          },
+        ],
+      }),
+    );
+    const provider = makeCloudProvider();
+    const issues = await provider.fetchIssues(null, null);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]!.key).toBe("PROJ-1");
+    expect(issues[0]!.title).toBe("Fix login bug");
+    expect(issues[0]!.status).toBe("In Progress");
+    expect(issues[0]!.priority).toBe("High");
+    expect(issues[0]!.assignee).toBe("Alice");
+    expect(issues[0]!.labels).toEqual(["backend"]);
+  });
+
+  it("uses projectKey JQL when provided", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({ issues: [] }),
+    );
+    const provider = makeCloudProvider();
+    await provider.fetchIssues("PROJ", null);
+
+    const [url] = fetchSpy.mock.calls[0]!;
+    expect(String(url)).toContain("project");
+  });
+
+  it("uses jqlFilter when provided", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({ issues: [] }),
+    );
+    const provider = makeCloudProvider();
+    await provider.fetchIssues(null, "assignee = currentUser()");
+
+    const [url] = fetchSpy.mock.calls[0]!;
+    expect(String(url)).toContain("assignee");
+  });
+
+  it("caches results on second call", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({ issues: [] }),
+    );
+    const provider = makeCloudProvider();
+    await provider.fetchIssues(null, null);
+    await provider.fetchIssues(null, null);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("forceRefresh bypasses cache", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({ issues: [] }),
+    );
+    const provider = makeCloudProvider();
+    await provider.fetchIssues(null, null);
+    await provider.fetchIssues(null, null, true);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("handles null fields gracefully (priority, assignee, issuetype)", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({
+        issues: [{
+          id: "10002",
+          key: "PROJ-2",
+          fields: {
+            summary: "No optional fields",
+            status: { name: "Open" },
+            priority: null,
+            assignee: null,
+            issuetype: null,
+            labels: [],
+          },
+        }],
+      }),
+    );
+    const provider = makeCloudProvider();
+    const issues = await provider.fetchIssues(null, null);
+    expect(issues[0]!.priority).toBeNull();
+    expect(issues[0]!.assignee).toBeNull();
+    expect(issues[0]!.issueType).toBeNull();
+  });
+});
+
+describe("TC-571: fetchIssues error handling — 400 with errorMessages", () => {
+  it("throws QUERY_ERROR with first errorMessages entry on 400", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue({
+      ok: false,
+      status: 400,
+      statusText: "Bad Request",
+      json: () => Promise.resolve({ errorMessages: ["Invalid JQL: unknown field"] }),
+    } as unknown as Response);
+
+    const provider = makeCloudProvider();
+    await expect(provider.fetchIssues(null, "bad jql")).rejects.toMatchObject({
+      code: "QUERY_ERROR",
+      message: "Invalid JQL: unknown field",
+    });
+  });
+
+  it("throws AUTH_FAILED with server-specific message on 401 for server provider", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(makeErrorResponse(401, "Unauthorized"));
+    const provider = makeServerProvider();
+    const err = await provider.fetchIssues(null, null).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(IssueProviderError);
+    expect((err as IssueProviderError).message).toContain("username and password");
+  });
+
+  it("throws AUTH_FAILED on 403", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(makeErrorResponse(403, "Forbidden"));
+    const provider = makeCloudProvider();
+    await expect(provider.fetchIssues(null, null)).rejects.toMatchObject({ code: "AUTH_FAILED" });
+  });
+});
+
+// --- fetchComments ---
+
+describe("TC-572: fetchComments returns mapped comments", () => {
+  it("returns comments with author, body, and createdAt", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({
+        comments: [
+          {
+            id: "comment-1",
+            author: { displayName: "Bob" },
+            body: "Looks good to me!",
+            created: "2026-03-01T09:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    const provider = makeCloudProvider();
+    const comments = await provider.fetchComments("PROJ-42");
+
+    expect(comments).toHaveLength(1);
+    expect(comments[0]!.id).toBe("comment-1");
+    expect(comments[0]!.author).toBe("Bob");
+    expect(comments[0]!.body).toBe("Looks good to me!");
+  });
+
+  it("extracts ADF body from Cloud v3 comment", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({
+        comments: [
+          {
+            id: "c2",
+            author: { displayName: "Alice" },
+            body: {
+              type: "doc",
+              version: 1,
+              content: [
+                { type: "paragraph", content: [{ type: "text", text: "ADF content" }] },
+              ],
+            },
+            created: "2026-03-01T10:00:00.000Z",
+          },
+        ],
+      }),
+    );
+    const provider = makeCloudProvider();
+    const comments = await provider.fetchComments("PROJ-1");
+    expect(comments[0]!.body).toBe("ADF content");
+  });
+
+  it("handles missing author gracefully", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({
+        comments: [{ id: "c3", body: "text", created: "2026-01-01T00:00:00.000Z" }],
+      }),
+    );
+    const provider = makeCloudProvider();
+    const comments = await provider.fetchComments("PROJ-1");
+    expect(comments[0]!.author).toBe("Unknown");
+  });
+});
+
+// --- clearCache / destroy ---
+
+describe("TC-573: clearCache and destroy", () => {
+  it("clearCache forces a fresh fetch on next fetchIssues", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({ issues: [] }),
+    );
+    const provider = makeCloudProvider();
+    await provider.fetchIssues(null, null);
+    provider.clearCache();
+    await provider.fetchIssues(null, null);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("destroy clears cache", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValue(
+      makeOkResponse({ issues: [] }),
+    );
+    const provider = makeCloudProvider();
+    await provider.fetchIssues(null, null);
+    provider.destroy();
+    await provider.fetchIssues(null, null);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+});

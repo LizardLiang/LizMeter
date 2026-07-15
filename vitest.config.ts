@@ -14,5 +14,18 @@ export default defineConfig({
     environmentMatchGlobs: [
       ["electron/main/**", "node"],
     ],
+    coverage: {
+      provider: "v8",
+      exclude: [
+        "**/*.module.scss",
+        "**/*.scss",
+        "**/node_modules/**",
+        "**/dist/**",
+        "**/dist-electron/**",
+        "src/test/**",
+        "**/*.config.*",
+        "**/*.d.ts",
+      ],
+    },
   },
 });

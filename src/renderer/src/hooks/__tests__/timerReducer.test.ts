@@ -227,3 +227,117 @@ describe("TC-113: RESUME sets new startedAtWallClock", () => {
     expect(result.remainingSeconds).toBe(800); // unchanged
   });
 });
+
+describe("TC-114: RESTORE sets fields from session payload", () => {
+  it("sets timerType, title, remainingSeconds, and originalPlannedDuration from payload", () => {
+    const result = timerReducer(idleState, {
+      type: "RESTORE",
+      payload: {
+        remainingSeconds: 600,
+        originalPlannedDuration: 1500,
+        title: "Restored task",
+        timerType: "short_break",
+      },
+    });
+
+    expect(result.status).toBe("idle");
+    expect(result.timerType).toBe("short_break");
+    expect(result.title).toBe("Restored task");
+    expect(result.remainingSeconds).toBe(600);
+    expect(result.originalPlannedDuration).toBe(1500);
+    expect(result.accumulatedActiveMs).toBe(0);
+    expect(result.startedAtWallClock).toBeNull();
+  });
+
+  it("RESTORE from non-idle state is a no-op", () => {
+    const result = timerReducer(runningState, {
+      type: "RESTORE",
+      payload: { remainingSeconds: 600, originalPlannedDuration: 1500, title: "Nope", timerType: "work" },
+    });
+    expect(result).toEqual(runningState);
+  });
+});
+
+describe("TC-115: RESET from idle with originalPlannedDuration clears title", () => {
+  it("clears title when resetting a restored but unstarted session", () => {
+    const restoredIdle: TimerState = {
+      ...idleState,
+      title: "Restored title",
+      originalPlannedDuration: 1500,
+    };
+
+    const result = timerReducer(restoredIdle, { type: "RESET" });
+
+    expect(result.status).toBe("idle");
+    expect(result.title).toBe(""); // cleared because it was a restored session
+    expect(result.originalPlannedDuration).toBeNull();
+  });
+
+  it("RESET from idle with no originalPlannedDuration is a no-op", () => {
+    const result = timerReducer(idleState, { type: "RESET" });
+    expect(result).toEqual(idleState);
+  });
+});
+
+describe("TC-116: UPDATE_SETTINGS updates remaining when idle and not restored", () => {
+  it("updates remainingSeconds when idle with no originalPlannedDuration", () => {
+    const newSettings: TimerSettings = { workDuration: 2700, shortBreakDuration: 600, longBreakDuration: 1200 };
+    const result = timerReducer(idleState, { type: "UPDATE_SETTINGS", payload: newSettings });
+
+    expect(result.settings).toEqual(newSettings);
+    expect(result.remainingSeconds).toBe(2700);
+  });
+
+  it("does NOT update remainingSeconds when running", () => {
+    const newSettings: TimerSettings = { workDuration: 2700, shortBreakDuration: 600, longBreakDuration: 1200 };
+    const result = timerReducer(runningState, { type: "UPDATE_SETTINGS", payload: newSettings });
+
+    expect(result.settings).toEqual(newSettings);
+    expect(result.remainingSeconds).toBe(runningState.remainingSeconds); // unchanged
+  });
+
+  it("does NOT update remainingSeconds when idle but has originalPlannedDuration (restored)", () => {
+    const restoredIdle: TimerState = { ...idleState, originalPlannedDuration: 1500, remainingSeconds: 600 };
+    const newSettings: TimerSettings = { workDuration: 2700, shortBreakDuration: 600, longBreakDuration: 1200 };
+    const result = timerReducer(restoredIdle, { type: "UPDATE_SETTINGS", payload: newSettings });
+
+    expect(result.settings).toEqual(newSettings);
+    expect(result.remainingSeconds).toBe(600); // preserved because restored
+  });
+});
+
+describe("TC-117: SET_REMAINING clamps values", () => {
+  it("clamps value below 1 to 1", () => {
+    const result = timerReducer(idleState, { type: "SET_REMAINING", payload: 0 });
+    expect(result.remainingSeconds).toBe(1);
+  });
+
+  it("clamps value above 7200 to 7200", () => {
+    const result = timerReducer(idleState, { type: "SET_REMAINING", payload: 9999 });
+    expect(result.remainingSeconds).toBe(7200);
+  });
+
+  it("accepts valid value in range", () => {
+    const result = timerReducer(idleState, { type: "SET_REMAINING", payload: 900 });
+    expect(result.remainingSeconds).toBe(900);
+  });
+
+  it("SET_REMAINING from running is a no-op", () => {
+    const result = timerReducer(runningState, { type: "SET_REMAINING", payload: 300 });
+    expect(result).toEqual(runningState);
+  });
+});
+
+describe("TC-118: SET_TIMER_TYPE from running is a no-op", () => {
+  it("does not change timer type when running", () => {
+    const result = timerReducer(runningState, { type: "SET_TIMER_TYPE", payload: "short_break" });
+    expect(result).toEqual(runningState);
+  });
+
+  it("SET_TIMER_TYPE clears originalPlannedDuration", () => {
+    const restoredIdle: TimerState = { ...idleState, originalPlannedDuration: 1500 };
+    const result = timerReducer(restoredIdle, { type: "SET_TIMER_TYPE", payload: "long_break" });
+    expect(result.originalPlannedDuration).toBeNull();
+    expect(result.remainingSeconds).toBe(900);
+  });
+});
