@@ -109,6 +109,91 @@ export interface AssignTagInput {
   tagId: number;
 }
 
+// --- Todo Types ---
+
+/** Who created a todo. AI-written todos are tagged so they can be filtered and bulk-removed. */
+export type TodoSource = "user" | "ai";
+
+/**
+ * A user-editable workflow state. Labels can be renamed freely, so nothing may key off
+ * the literal text -- `isCompleted` is the stable anchor for "this todo is finished".
+ */
+export interface TodoState {
+  id: number;
+  label: string;
+  color: string;
+  position: number;
+  /** Exactly one state carries this. Drives completedAt, the Done filter, and todo_complete. */
+  isCompleted: boolean;
+  /** Exactly one state carries this. Where new todos land. */
+  isDefault: boolean;
+  createdAt: string;
+}
+
+export interface CreateTodoStateInput {
+  label: string;
+  color?: string;
+}
+
+export interface UpdateTodoStateInput {
+  id: number;
+  label?: string;
+  color?: string;
+  isCompleted?: boolean;
+  isDefault?: boolean;
+}
+
+export interface Todo {
+  id: number;
+  title: string;
+  notes: string | null;
+  /** Joined in full rather than a bare id, so the UI can render the pill without a second lookup. */
+  state: TodoState;
+  project: string | null;
+  milestone: string | null;
+  /** YYYY-MM-DD */
+  startDate: string | null;
+  /** YYYY-MM-DD */
+  dueDate: string | null;
+  source: TodoSource;
+  /** Free-text label for the specific agent that created it, e.g. "claude-code". Null for user todos. */
+  sourceLabel: string | null;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export interface CreateTodoInput {
+  title: string;
+  notes?: string | null;
+  /** Omitted means the default state. */
+  stateId?: number;
+  project?: string | null;
+  milestone?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+  source?: TodoSource;
+  sourceLabel?: string | null;
+}
+
+export interface UpdateTodoInput {
+  id: number;
+  title?: string;
+  notes?: string | null;
+  stateId?: number;
+  project?: string | null;
+  milestone?: string | null;
+  startDate?: string | null;
+  dueDate?: string | null;
+}
+
+export type TodoFilter = "all" | "active" | "done" | "ai";
+
+export interface ListTodosInput {
+  filter?: TodoFilter;
+  stateId?: number;
+  project?: string;
+}
+
 // --- Issue Tracker Types ---
 
 export interface Issue {
@@ -509,6 +594,25 @@ export interface ElectronAPI {
     assign: (input: AssignTagInput) => Promise<void>;
     unassign: (input: AssignTagInput) => Promise<void>;
     listForSession: (sessionId: string) => Promise<Tag[]>;
+  };
+  todo: {
+    create: (input: CreateTodoInput) => Promise<Todo>;
+    list: (input?: ListTodosInput) => Promise<Todo[]>;
+    update: (input: UpdateTodoInput) => Promise<Todo>;
+    delete: (id: number) => Promise<void>;
+    clearCompleted: () => Promise<number>;
+    listProjects: () => Promise<string[]>;
+    listMilestones: () => Promise<string[]>;
+    /** Fires when a todo is written from outside the renderer (e.g. the MCP server). Returns an unsubscribe. */
+    onChanged: (callback: () => void) => () => void;
+  };
+  todoState: {
+    list: () => Promise<TodoState[]>;
+    create: (input: CreateTodoStateInput) => Promise<TodoState>;
+    update: (input: UpdateTodoStateInput) => Promise<TodoState>;
+    /** Moves todos onto `reassignToId`, then deletes. Resolves with how many todos moved. */
+    delete: (id: number, reassignToId: number) => Promise<number>;
+    reorder: (orderedIds: number[]) => Promise<TodoState[]>;
   };
   window: {
     minimize: () => void;

@@ -1,0 +1,56 @@
+// Editable sibling of Select. The wrapper carries the same frame as `.trigger` in
+// Select.module.scss so the two controls line up when they sit side by side.
+
+.wrap {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  border-radius: 8px;
+  border: 1px solid rgba(41, 46, 66, 0.9);
+  background: rgba(12, 13, 24, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: border-color 0.15s, box-shadow 0.15s;
+
+  &:hover {
+    border-color: rgba(122, 162, 247, 0.35);
+  }
+
+  &:focus-within {
+    border-color: rgba(122, 162, 247, 0.55);
+    box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.08);
+  }
+}
+
+.input {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 4px 6px 10px;
+  border: none;
+  background: none;
+  color: #c0caf5;
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+
+  &::placeholder {
+    color: #565f89;
+  }
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  padding: 0 8px 0 4px;
+  border: none;
+  background: none;
+  color: #565f89;
+  cursor: pointer;
+  transition: color 0.15s;
+
+  &:hover {
+    color: #c0caf5;
+  }
+}

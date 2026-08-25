@@ -8,6 +8,8 @@ import type {
   AvatarPaths,
   AssignTagInput,
   CreateTagInput,
+  CreateTodoInput,
+  CreateTodoStateInput,
   IssueProviderStatus,
   IssuesListInput,
   IssuesSetTokenInput,
@@ -16,10 +18,13 @@ import type {
   LinearProviderStatus,
   ListNvimActivityInput,
   ListSessionsInput,
+  ListTodosInput,
   SaveSessionInput,
   SaveSessionWithTrackingInput,
   TimerSettings,
   UpdateTagInput,
+  UpdateTodoInput,
+  UpdateTodoStateInput,
   WidgetControlAction,
   WidgetSettings,
   WidgetTimerSnapshot,
@@ -30,10 +35,15 @@ import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widg
 import { getMainWindow } from "./index.ts";
 import {
   assignTag,
+  clearCompletedTodos,
   createTag,
+  createTodo,
+  createTodoState,
   deleteSession,
   deleteSettingValue,
   deleteTag,
+  deleteTodo,
+  deleteTodoState,
   getClaudeCodeDataForSession,
   getSessionById,
   getSettingValue,
@@ -42,6 +52,11 @@ import {
   listSessions,
   listTags,
   listTagsForSession,
+  listTodoMilestones,
+  listTodoProjects,
+  listTodos,
+  listTodoStates,
+  reorderTodoStates,
   saveSession,
   saveSessionWithTracking,
   saveSettings,
@@ -49,6 +64,8 @@ import {
   unassignTag,
   updateSessionDuration,
   updateTag,
+  updateTodo,
+  updateTodoState,
   updateWorklogStatus,
 } from "./database.ts";
 import {
@@ -144,6 +161,56 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("tag:list-for-session", (_event, sessionId: string) => {
     return listTagsForSession(sessionId);
+  });
+
+  // Todo handlers
+  ipcMain.handle("todo:create", (_event, input: CreateTodoInput) => {
+    return createTodo(input);
+  });
+
+  ipcMain.handle("todo:list", (_event, input: ListTodosInput | undefined) => {
+    return listTodos(input ?? {});
+  });
+
+  ipcMain.handle("todo:update", (_event, input: UpdateTodoInput) => {
+    return updateTodo(input);
+  });
+
+  ipcMain.handle("todo:delete", (_event, id: number) => {
+    return deleteTodo(id);
+  });
+
+  ipcMain.handle("todo:clear-completed", () => {
+    return clearCompletedTodos();
+  });
+
+  ipcMain.handle("todo:list-projects", () => {
+    return listTodoProjects();
+  });
+
+  ipcMain.handle("todo:list-milestones", () => {
+    return listTodoMilestones();
+  });
+
+  // Todo state handlers
+  ipcMain.handle("todo-state:list", () => {
+    return listTodoStates();
+  });
+
+  ipcMain.handle("todo-state:create", (_event, input: CreateTodoStateInput) => {
+    return createTodoState(input);
+  });
+
+  ipcMain.handle("todo-state:update", (_event, input: UpdateTodoStateInput) => {
+    return updateTodoState(input);
+  });
+
+  ipcMain.handle("todo-state:delete", (_event, input: { id: number; reassignToId: number }) => {
+    return deleteTodoState(input.id, input.reassignToId);
+  });
+
+  ipcMain.handle("todo-state:reorder", (_event, orderedIds: number[]) => {
+    return reorderTodoStates(orderedIds);
   });
 
   // Issue tracker handlers (GitHub)

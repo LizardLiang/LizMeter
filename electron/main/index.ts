@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { closeDatabase, getSettingValue, initDatabase } from "./database.ts";
 import { destroyTracker } from "./claude-code-tracker.ts";
 import { registerIpcHandlers } from "./ipc-handlers.ts";
-import { destroyNvimPipeServer, startNvimPipeServer } from "./nvim-pipe-server.ts";
+import { destroyPipeServer, startPipeServer } from "./pipe-server.ts";
 import {
   initJiraProviderFromDisk,
   initLinearProviderFromDisk,
@@ -96,6 +96,9 @@ app.whenReady().then(() => {
   try {
     initDatabase();
   } catch (err) {
+    // Logged before the modal: showErrorBox blocks startup with no window and no
+    // console trace, which leaves a failed migration impossible to diagnose.
+    console.error("[startup] initDatabase failed:", err);
     dialog.showErrorBox(
       "Database Error",
       `Failed to initialize the database. The app cannot start.\n\nError: ${
@@ -108,7 +111,7 @@ app.whenReady().then(() => {
 
   registerIpcHandlers();
   registerWindowControlHandlers();
-  startNvimPipeServer();
+  startPipeServer();
   initProviderFromDisk();
   initLinearProviderFromDisk();
   initJiraProviderFromDisk();
@@ -139,7 +142,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
-  destroyNvimPipeServer();
+  destroyPipeServer();
   destroyTracker();
   closeDatabase();
 });

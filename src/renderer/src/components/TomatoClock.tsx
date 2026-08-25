@@ -40,6 +40,7 @@ const MusicPage = lazy(() => import("./music/MusicPage.tsx").then(m => ({ defaul
 const SettingsPage = lazy(() => import("./SettingsPage.tsx").then(m => ({ default: m.SettingsPage })));
 const StatsPage = lazy(() => import("./StatsPage.tsx").then(m => ({ default: m.StatsPage })));
 const TagsPage = lazy(() => import("./TagsPage.tsx").then(m => ({ default: m.TagsPage })));
+const TodosPage = lazy(() => import("./TodosPage.tsx").then(m => ({ default: m.TodosPage })));
 import styles from "./TomatoClock.module.scss";
 
 const DEFAULT_SETTINGS: TimerSettings = {
@@ -870,6 +871,7 @@ function TomatoClockInner(props: TomatoClockInnerProps) {
             />
           )}
 
+          {activePage === "todos" && <TodosPage />}
           {activePage === "stats" && <StatsPage />}
 
           {activePage === "tags" && (

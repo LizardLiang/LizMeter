@@ -22,6 +22,16 @@ Electron + React 19 桌面時間追蹤應用程式。整合番茄鐘與碼錶模
 - **Jira Worklog** — Log completed session duration back to linked Jira issues with a comment; tracks logged/failed status
 - **Bulk Log** — Log all sessions for a single issue at once from the History page
 
+### Todos / 待辦事項
+- **Todo List** — A standalone list with project, milestone, start/due dates, and a workflow state
+- **Editable States** — Ships with Backlog / Todo / Processing / Testing / Done / Deprecated, all of which you can
+  rename, recolor, reorder, add to, and delete. Deleting one asks where to move its todos
+- **AI-Written Todos** — An AI agent can add and update todos through an MCP server; they land live and carry a
+  source badge
+- **Grouped List** — Linear-style dense rows grouped under collapsible state bands, with multi-select,
+  per-row actions, and `c` to create a todo
+- **Filters** — All / Active / Done / From AI, plus a per-project filter
+
 ### Session Management / 工作階段管理
 - **Session History** — Paginated list of completed sessions with delete support
 - **Session Tags** — Create color-coded tags and assign them to sessions; filter history by tag
@@ -159,6 +169,55 @@ Open **Settings** in the sidebar and configure one or more providers:
 | **Jira Server** | Server URL, username, password |
 
 Optional per-provider: project key filter, custom JQL query.
+
+---
+
+## AI Todo Setup / AI 待辦設定
+
+LizMeter ships an MCP server that lets an AI agent add todos to the running app.
+It has no dependencies and forwards over the app's existing named pipe, so the UI
+updates live and the database keeps a single writer.
+
+Register it with Claude Code:
+
+```bash
+claude mcp add lizmeter-todo -- node /absolute/path/to/LizMeter/mcp/lizmeter-todo-mcp.mjs
+```
+
+Or add it to `.mcp.json` by hand:
+
+```json
+{
+  "mcpServers": {
+    "lizmeter-todo": {
+      "command": "node",
+      "args": ["/absolute/path/to/LizMeter/mcp/lizmeter-todo-mcp.mjs"]
+    }
+  }
+}
+```
+
+The agent then gets three tools:
+
+| Tool | Purpose |
+|---|---|
+| `todo_add` | Add a todo. Accepts `title`, plus optional `notes`, `agent`, `project`, `milestone`, `startDate`, `dueDate`, `state` |
+| `todo_list` | List todos, optionally filtered by `all` / `active` / `done` / `ai`, and by `project` or `state` |
+| `todo_update` | Change an existing todo: move it between states, set a due date, assign a project. Only the fields you pass change |
+| `todo_complete` | Mark one todo done by its numeric id |
+
+Notes:
+
+- **LizMeter must be running.** The MCP server talks to the live app, not the database
+  file. If the app is closed, the tools return a message saying so.
+- Every todo added this way is tagged `ai` and shown with a badge, so it can be told
+  apart from one you typed and filtered out in bulk.
+- `LIZMETER_PIPE_PATH` overrides the pipe on both sides, for tests or a second instance.
+- **State labels are yours to change.** The agent passes a state by label, case-insensitively. Because you can
+  rename them, there is no fixed list — pass an unknown one and the error names every valid label, so the agent
+  learns them in a single round trip. `todo_complete` resolves whichever state you marked as the completed one,
+  so renaming "Done" to "Shipped" breaks nothing.
+- Dates are `YYYY-MM-DD`, and a start date may not be later than the due date.
 
 ---
 

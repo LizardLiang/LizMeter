@@ -1,7 +1,17 @@
 import type { TimerStatus } from "../../../shared/types.ts";
 import styles from "./NavSidebar.module.scss";
 
-export type NavPage = "timer" | "history" | "stats" | "tags" | "settings" | "issues" | "claude" | "activity" | "music";
+export type NavPage =
+  | "timer"
+  | "history"
+  | "todos"
+  | "stats"
+  | "tags"
+  | "settings"
+  | "issues"
+  | "claude"
+  | "activity"
+  | "music";
 
 interface Props {
   activePage: NavPage;
@@ -177,9 +187,28 @@ function ActivityIcon() {
   );
 }
 
+function CheckSquareIcon() {
+  return (
+    <svg
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <polyline points="9 11 12 14 20 6" />
+      <path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9" />
+    </svg>
+  );
+}
+
 const NAV_ITEMS: Array<{ id: NavPage; label: string; Icon: () => React.JSX.Element; }> = [
   { id: "timer", label: "Timer", Icon: ClockIcon },
   { id: "history", label: "History", Icon: ListIcon },
+  { id: "todos", label: "Todos", Icon: CheckSquareIcon },
   { id: "issues", label: "Issues", Icon: IssuesIcon },
   { id: "claude", label: "Claude", Icon: ClaudeIcon },
   { id: "activity", label: "Activity", Icon: ActivityIcon },
