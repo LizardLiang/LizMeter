@@ -6,6 +6,8 @@ import type {
   ClaudeCodeLiveStats,
   ClaudeCodeSessionPreview,
   CreateTagInput,
+  CreateTodoInput,
+  CreateTodoStateInput,
   ImportProgress,
   IntegrityCheckResult,
   IntegrityProgress,
@@ -13,6 +15,7 @@ import type {
   IssuesSetTokenInput,
   ListNvimActivityInput,
   ListSessionsInput,
+  ListTodosInput,
   MusicLibraryListInput,
   MusicMetaResult,
   MusicPlayRequest,
@@ -23,6 +26,8 @@ import type {
   SaveSessionWithTrackingInput,
   TimerSettings,
   UpdateTagInput,
+  UpdateTodoInput,
+  UpdateTodoStateInput,
   WidgetControlAction,
   WidgetSettings,
   WidgetTimerSnapshot,
@@ -54,6 +59,27 @@ contextBridge.exposeInMainWorld("electronAPI", {
     assign: (input: AssignTagInput) => ipcRenderer.invoke("tag:assign", input),
     unassign: (input: AssignTagInput) => ipcRenderer.invoke("tag:unassign", input),
     listForSession: (sessionId: string) => ipcRenderer.invoke("tag:list-for-session", sessionId),
+  },
+  todo: {
+    create: (input: CreateTodoInput) => ipcRenderer.invoke("todo:create", input),
+    list: (input?: ListTodosInput) => ipcRenderer.invoke("todo:list", input),
+    update: (input: UpdateTodoInput) => ipcRenderer.invoke("todo:update", input),
+    delete: (id: number) => ipcRenderer.invoke("todo:delete", id),
+    clearCompleted: () => ipcRenderer.invoke("todo:clear-completed"),
+    listProjects: () => ipcRenderer.invoke("todo:list-projects"),
+    listMilestones: () => ipcRenderer.invoke("todo:list-milestones"),
+    onChanged: (callback: () => void): (() => void) => {
+      const handler = () => callback();
+      ipcRenderer.on("todo:changed", handler);
+      return () => ipcRenderer.removeListener("todo:changed", handler);
+    },
+  },
+  todoState: {
+    list: () => ipcRenderer.invoke("todo-state:list"),
+    create: (input: CreateTodoStateInput) => ipcRenderer.invoke("todo-state:create", input),
+    update: (input: UpdateTodoStateInput) => ipcRenderer.invoke("todo-state:update", input),
+    delete: (id: number, reassignToId: number) => ipcRenderer.invoke("todo-state:delete", { id, reassignToId }),
+    reorder: (orderedIds: number[]) => ipcRenderer.invoke("todo-state:reorder", orderedIds),
   },
   window: {
     minimize: () => ipcRenderer.send("window:minimize"),

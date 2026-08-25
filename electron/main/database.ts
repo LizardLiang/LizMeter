@@ -22,10 +22,18 @@ import type {
   SaveSessionInput,
   SaveSessionWithTrackingInput,
   Session,
+  CreateTodoInput,
+  CreateTodoStateInput,
+  ListTodosInput,
   Tag,
   TimerSettings,
   TimerType,
+  Todo,
+  TodoSource,
+  TodoState,
   UpdateTagInput,
+  UpdateTodoInput,
+  UpdateTodoStateInput,
   WorklogStatus,
 } from "../../src/shared/types.ts";
 import type { InternalTrackRecord } from "./music/internal-types.ts";
@@ -169,6 +177,40 @@ export function initDatabase(dbPath?: string): void {
 
     CREATE INDEX IF NOT EXISTS idx_playlist_tracks_playlist_position ON playlist_tracks(playlist_id, position);
     CREATE INDEX IF NOT EXISTS idx_playlist_tracks_track ON playlist_tracks(track_id);
+
+    -- Declared before todos: the todos.state_id foreign key points at it.
+    CREATE TABLE IF NOT EXISTS todo_states (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      label        TEXT NOT NULL,
+      color        TEXT NOT NULL DEFAULT '#7aa2f7',
+      position     INTEGER NOT NULL,
+      is_completed INTEGER NOT NULL DEFAULT 0,
+      is_default   INTEGER NOT NULL DEFAULT 0,
+      created_at   TEXT NOT NULL,
+      UNIQUE(label COLLATE NOCASE)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_todo_states_position ON todo_states(position);
+
+    CREATE TABLE IF NOT EXISTS todos (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      title        TEXT NOT NULL,
+      notes        TEXT,
+      state_id     INTEGER REFERENCES todo_states(id),
+      project      TEXT,
+      milestone    TEXT,
+      start_date   TEXT,
+      due_date     TEXT,
+      source       TEXT NOT NULL DEFAULT 'user',
+      source_label TEXT,
+      created_at   TEXT NOT NULL,
+      completed_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_todos_source ON todos(source);
+    -- Indexes on state_id / project / due_date are created by migrateTodosToStates.
+    -- On an existing database those columns do not exist yet at this point.
   `);
 
   // Idempotent migration: add issue columns if they don't exist yet
@@ -188,6 +230,148 @@ export function initDatabase(dbPath?: string): void {
     db.exec("ALTER TABLE sessions ADD COLUMN worklog_status TEXT NOT NULL DEFAULT 'not_logged'");
     db.exec("ALTER TABLE sessions ADD COLUMN worklog_id TEXT");
   }
+
+  seedTodoStates(db);
+  migrateTodosToStates(db);
+}
+
+type DbHandle = ReturnType<typeof getDb>;
+
+/** The states a fresh install starts with. Users may rename, recolor, reorder, add, and delete these. */
+const SEED_TODO_STATES: Array<{ label: string; color: string; isCompleted: boolean; isDefault: boolean }> = [
+  { label: "Backlog", color: "#565f89", isCompleted: false, isDefault: false },
+  { label: "Todo", color: "#7aa2f7", isCompleted: false, isDefault: true },
+  { label: "Processing", color: "#e0af68", isCompleted: false, isDefault: false },
+  { label: "Testing", color: "#bb9af7", isCompleted: false, isDefault: false },
+  { label: "Done", color: "#9ece6a", isCompleted: true, isDefault: false },
+  { label: "Deprecated", color: "#f7768e", isCompleted: false, isDefault: false },
+];
+
+/**
+ * Seeds the default states into an empty table, then makes sure the table is usable.
+ *
+ * Seeding only-when-empty matters: doing it on every boot would resurrect states the
+ * user deleted. Doing it in a transaction matters just as much -- a crash midway
+ * through would otherwise leave rows behind with no completed state, and every later
+ * boot would throw before the app could start.
+ */
+function seedTodoStates(database: DbHandle): void {
+  const { count } = database
+    .prepare("SELECT COUNT(*) AS count FROM todo_states")
+    .get() as { count: number };
+
+  if (count === 0) {
+    const createdAt = new Date().toISOString();
+    const insert = database.prepare(
+      "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    const seed = database.transaction(() => {
+      SEED_TODO_STATES.forEach((state, index) => {
+        insert.run(state.label, state.color, index, state.isCompleted ? 1 : 0, state.isDefault ? 1 : 0, createdAt);
+      });
+    });
+    seed();
+  }
+
+  repairTodoStateFlags(database);
+}
+
+/**
+ * Guarantees the table has exactly the flags the rest of the app relies on.
+ *
+ * Without this, a database left inconsistent by hand-editing or an interrupted write
+ * makes startup fail permanently: the app shows a modal error before it can open, so
+ * the user has no way in to fix it. Repairing is always better than refusing to boot.
+ */
+function repairTodoStateFlags(database: DbHandle): void {
+  const states = database
+    .prepare("SELECT id, is_completed, is_default FROM todo_states ORDER BY position ASC")
+    .all() as Array<{ id: number; is_completed: number; is_default: number }>;
+  if (states.length === 0) return;
+
+  const repair = database.transaction(() => {
+    // Exactly one completed state. Prefer the last one, which is where a finished
+    // item naturally sits in a left-to-right workflow.
+    const completed = states.filter((s) => s.is_completed === 1);
+    if (completed.length === 0) {
+      database.prepare("UPDATE todo_states SET is_completed = 1 WHERE id = ?").run(states[states.length - 1]!.id);
+    } else if (completed.length > 1) {
+      database
+        .prepare("UPDATE todo_states SET is_completed = 0 WHERE id != ?")
+        .run(completed[0]!.id);
+    }
+
+    // Exactly one default state. Prefer the first.
+    const defaults = states.filter((s) => s.is_default === 1);
+    if (defaults.length === 0) {
+      database.prepare("UPDATE todo_states SET is_default = 1 WHERE id = ?").run(states[0]!.id);
+    } else if (defaults.length > 1) {
+      database.prepare("UPDATE todo_states SET is_default = 0 WHERE id != ?").run(defaults[0]!.id);
+    }
+  });
+  repair();
+}
+
+/**
+ * Brings a pre-states todos table up to date: adds the new columns, moves every
+ * row onto a state, then removes the old `done` column.
+ *
+ * Runs at most once -- each step is guarded by what the table actually looks like.
+ */
+function migrateTodosToStates(database: DbHandle): void {
+  const columns = (database.prepare("PRAGMA table_info(todos)").all() as Array<{ name: string }>)
+    .map((c) => c.name);
+
+  if (!columns.includes("state_id")) {
+    database.exec("ALTER TABLE todos ADD COLUMN state_id INTEGER REFERENCES todo_states(id)");
+  }
+  if (!columns.includes("project")) {
+    database.exec("ALTER TABLE todos ADD COLUMN project TEXT");
+  }
+  if (!columns.includes("milestone")) database.exec("ALTER TABLE todos ADD COLUMN milestone TEXT");
+  if (!columns.includes("start_date")) database.exec("ALTER TABLE todos ADD COLUMN start_date TEXT");
+  if (!columns.includes("due_date")) {
+    database.exec("ALTER TABLE todos ADD COLUMN due_date TEXT");
+  }
+
+  // Safe now that every column above exists, on both a fresh and an upgraded database.
+  database.exec("CREATE INDEX IF NOT EXISTS idx_todos_state_id ON todos(state_id)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date)");
+
+  const completedId = getCompletedStateId(database);
+  const defaultId = getDefaultStateId(database);
+
+  // Backfill from the old boolean while it is still there.
+  if (columns.includes("done")) {
+    database
+      .prepare("UPDATE todos SET state_id = ? WHERE state_id IS NULL AND done = 1")
+      .run(completedId);
+    database
+      .prepare("UPDATE todos SET state_id = ? WHERE state_id IS NULL AND done = 0")
+      .run(defaultId);
+  }
+
+  // Any row still without a state (e.g. written between migration steps) lands on the default.
+  database.prepare("UPDATE todos SET state_id = ? WHERE state_id IS NULL").run(defaultId);
+
+  // SQLite refuses DROP COLUMN on an indexed column, so the index goes first.
+  // Requires SQLite >= 3.35; better-sqlite3 ships 3.51 and the sql.js test shim 3.49.
+  if (columns.includes("done")) {
+    database.exec("DROP INDEX IF EXISTS idx_todos_done");
+    database.exec("ALTER TABLE todos DROP COLUMN done");
+  }
+}
+
+/**
+ * Re-runs the todos-to-states migration against the open database.
+ *
+ * Exported so tests can build a pre-states `todos` table and prove real rows land on
+ * the right state. This is the riskiest path in the feature -- a wrong backfill loses
+ * the user's work items -- so it is worth the extra export.
+ */
+export function migrateTodosToStatesNow(): void {
+  migrateTodosToStates(getDb());
 }
 
 function getDefaultDbPath(): string {
@@ -1295,4 +1479,533 @@ export function reorderPlaylistTrack(playlistId: number, trackEntryId: number, t
   });
 
   reorder();
+}
+
+// --- Todo State Functions ---
+
+const MAX_TODO_STATE_LABEL_LENGTH = 32;
+
+/** Tag colors plus the muted grey used for de-emphasised UI, which suits a Backlog state. */
+const VALID_TODO_STATE_COLORS = new Set([
+  "#7aa2f7",
+  "#bb9af7",
+  "#7dcfff",
+  "#9ece6a",
+  "#f7768e",
+  "#ff9e64",
+  "#e0af68",
+  "#c678dd",
+  "#565f89",
+]);
+
+interface TodoStateRow {
+  id: number;
+  label: string;
+  color: string;
+  position: number;
+  is_completed: number;
+  is_default: number;
+  created_at: string;
+}
+
+const TODO_STATE_COLUMNS = "id, label, color, position, is_completed, is_default, created_at";
+
+function rowToTodoState(row: TodoStateRow): TodoState {
+  return {
+    id: row.id,
+    label: row.label,
+    color: row.color,
+    position: row.position,
+    isCompleted: row.is_completed === 1,
+    isDefault: row.is_default === 1,
+    createdAt: row.created_at,
+  };
+}
+
+function validateStateLabel(label: unknown): string {
+  if (typeof label !== "string" || label.trim().length === 0) {
+    throw new Error("State label must be a non-empty string");
+  }
+  const trimmed = label.trim();
+  if (trimmed.length > MAX_TODO_STATE_LABEL_LENGTH) {
+    throw new Error(`State label must be ${MAX_TODO_STATE_LABEL_LENGTH} characters or fewer`);
+  }
+  return trimmed;
+}
+
+function validateStateColor(color: unknown): string {
+  if (typeof color !== "string" || !VALID_TODO_STATE_COLORS.has(color)) {
+    throw new Error(`Invalid state color. Must be one of: ${[...VALID_TODO_STATE_COLORS].join(", ")}`);
+  }
+  return color;
+}
+
+/** The state new todos land in. Stable across label renames. */
+function getDefaultStateId(database: DbHandle): number {
+  const row = database
+    .prepare("SELECT id FROM todo_states WHERE is_default = 1 ORDER BY position ASC LIMIT 1")
+    .get() as { id: number } | undefined;
+  if (row) return row.id;
+  // Fall back to the first state so a hand-edited database cannot wedge the app.
+  const first = database.prepare("SELECT id FROM todo_states ORDER BY position ASC LIMIT 1").get() as
+    | { id: number }
+    | undefined;
+  if (!first) throw new Error("No todo states exist");
+  return first.id;
+}
+
+/** The state that means "finished". Everything completion-related resolves through this, never a label. */
+function getCompletedStateId(database: DbHandle): number {
+  const row = database
+    .prepare("SELECT id FROM todo_states WHERE is_completed = 1 ORDER BY position ASC LIMIT 1")
+    .get() as { id: number } | undefined;
+  if (!row) throw new Error("No state is marked as completed");
+  return row.id;
+}
+
+export function listTodoStates(): TodoState[] {
+  const database = getDb();
+  const rows = database
+    .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states ORDER BY position ASC`)
+    .all() as TodoStateRow[];
+  return rows.map(rowToTodoState);
+}
+
+/** Resolves a state by label, case-insensitively. Returns null when there is no match. */
+export function findTodoStateByLabel(label: string): TodoState | null {
+  const database = getDb();
+  const row = database
+    .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE label = ? COLLATE NOCASE`)
+    .get(label.trim()) as TodoStateRow | undefined;
+  return row ? rowToTodoState(row) : null;
+}
+
+export function createTodoState(input: CreateTodoStateInput): TodoState {
+  const database = getDb();
+  const label = validateStateLabel(input.label);
+  const color = input.color === undefined ? "#7aa2f7" : validateStateColor(input.color);
+
+  const existing = database
+    .prepare("SELECT id FROM todo_states WHERE label = ? COLLATE NOCASE")
+    .get(label) as { id: number } | undefined;
+  if (existing) throw new Error(`A state named "${label}" already exists`);
+
+  const { next } = database
+    .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_states")
+    .get() as { next: number };
+
+  database
+    .prepare(
+      "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at) VALUES (?, ?, ?, 0, 0, ?)",
+    )
+    .run(label, color, next, new Date().toISOString());
+
+  const row = database
+    .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = last_insert_rowid()`)
+    .get() as TodoStateRow;
+  return rowToTodoState(row);
+}
+
+export function updateTodoState(input: UpdateTodoStateInput): TodoState {
+  const database = getDb();
+
+  const existing = database
+    .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = ?`)
+    .get(input.id) as TodoStateRow | undefined;
+  if (!existing) throw new Error(`State with id ${input.id} not found`);
+
+  const label = input.label === undefined ? existing.label : validateStateLabel(input.label);
+  const color = input.color === undefined ? existing.color : validateStateColor(input.color);
+
+  if (label.toLowerCase() !== existing.label.toLowerCase()) {
+    const clash = database
+      .prepare("SELECT id FROM todo_states WHERE label = ? COLLATE NOCASE AND id != ?")
+      .get(label, input.id) as { id: number } | undefined;
+    if (clash) throw new Error(`A state named "${label}" already exists`);
+  }
+
+  const isCompleted = input.isCompleted === undefined ? existing.is_completed === 1 : input.isCompleted;
+  const isDefault = input.isDefault === undefined ? existing.is_default === 1 : input.isDefault;
+
+  // At least one state must mean "completed", or todo_complete has nowhere to go.
+  if (!isCompleted && existing.is_completed === 1) {
+    const { count } = database
+      .prepare("SELECT COUNT(*) AS count FROM todo_states WHERE is_completed = 1")
+      .get() as { count: number };
+    if (count <= 1) throw new Error("At least one state must be marked as completed");
+  }
+  if (!isDefault && existing.is_default === 1) {
+    throw new Error("Pick another state as the default rather than clearing this one");
+  }
+
+  const apply = database.transaction(() => {
+    // Default and completed are single-winner flags.
+    if (isDefault) database.prepare("UPDATE todo_states SET is_default = 0 WHERE id != ?").run(input.id);
+    if (isCompleted) database.prepare("UPDATE todo_states SET is_completed = 0 WHERE id != ?").run(input.id);
+
+    database
+      .prepare("UPDATE todo_states SET label = ?, color = ?, is_completed = ?, is_default = ? WHERE id = ?")
+      .run(label, color, isCompleted ? 1 : 0, isDefault ? 1 : 0, input.id);
+  });
+  apply();
+
+  const row = database
+    .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = ?`)
+    .get(input.id) as TodoStateRow;
+  return rowToTodoState(row);
+}
+
+/**
+ * Deletes a state and moves every todo using it onto `reassignToId`.
+ * Todos are work items -- they are never deleted as a side effect of tidying states.
+ * Returns how many todos moved.
+ */
+export function deleteTodoState(id: number, reassignToId: number): number {
+  const database = getDb();
+
+  const target = database.prepare("SELECT id, is_default, is_completed FROM todo_states WHERE id = ?").get(id) as
+    | { id: number; is_default: number; is_completed: number }
+    | undefined;
+  if (!target) throw new Error(`State with id ${id} not found`);
+  if (id === reassignToId) throw new Error("Cannot reassign todos to the state being deleted");
+
+  const replacement = database.prepare("SELECT id FROM todo_states WHERE id = ?").get(reassignToId) as
+    | { id: number }
+    | undefined;
+  if (!replacement) throw new Error(`State with id ${reassignToId} not found`);
+
+  if (target.is_default === 1) throw new Error("Pick another default state before deleting this one");
+  if (target.is_completed === 1) throw new Error("Pick another completed state before deleting this one");
+
+  const { count } = database
+    .prepare("SELECT COUNT(*) AS count FROM todos WHERE state_id = ?")
+    .get(id) as { count: number };
+
+  const apply = database.transaction(() => {
+    database.prepare("UPDATE todos SET state_id = ? WHERE state_id = ?").run(reassignToId, id);
+    database.prepare("DELETE FROM todo_states WHERE id = ?").run(id);
+
+    // Keep positions contiguous so reordering stays predictable.
+    const remaining = database
+      .prepare("SELECT id FROM todo_states ORDER BY position ASC")
+      .all() as Array<{ id: number }>;
+    const setPosition = database.prepare("UPDATE todo_states SET position = ? WHERE id = ?");
+    remaining.forEach((row, index) => setPosition.run(index, row.id));
+  });
+  apply();
+
+  return count;
+}
+
+/** Rewrites positions to match the given order. Ids not listed keep their relative order at the end. */
+export function reorderTodoStates(orderedIds: number[]): TodoState[] {
+  const database = getDb();
+  const all = database.prepare("SELECT id FROM todo_states ORDER BY position ASC").all() as Array<{ id: number }>;
+  const known = new Set(all.map((r) => r.id));
+
+  for (const id of orderedIds) {
+    if (!known.has(id)) throw new Error(`State with id ${id} not found`);
+  }
+
+  const seen = new Set(orderedIds);
+  const finalOrder = [...orderedIds, ...all.map((r) => r.id).filter((id) => !seen.has(id))];
+
+  const apply = database.transaction(() => {
+    const setPosition = database.prepare("UPDATE todo_states SET position = ? WHERE id = ?");
+    finalOrder.forEach((id, index) => setPosition.run(index, id));
+  });
+  apply();
+
+  return listTodoStates();
+}
+
+// --- Todo Functions ---
+
+const MAX_TODO_TITLE_LENGTH = 500;
+const MAX_TODO_NOTES_LENGTH = 4000;
+const MAX_TODO_SOURCE_LABEL_LENGTH = 64;
+const MAX_TODO_TEXT_FIELD_LENGTH = 120;
+const VALID_TODO_SOURCES = new Set<TodoSource>(["user", "ai"]);
+
+interface TodoRow {
+  id: number;
+  title: string;
+  notes: string | null;
+  project: string | null;
+  milestone: string | null;
+  start_date: string | null;
+  due_date: string | null;
+  source: string;
+  source_label: string | null;
+  created_at: string;
+  completed_at: string | null;
+  state_id: number;
+  state_label: string;
+  state_color: string;
+  state_position: number;
+  state_is_completed: number;
+  state_is_default: number;
+  state_created_at: string;
+}
+
+const TODO_SELECT = `
+  SELECT t.id, t.title, t.notes, t.project, t.milestone, t.start_date, t.due_date,
+         t.source, t.source_label, t.created_at, t.completed_at,
+         s.id AS state_id, s.label AS state_label, s.color AS state_color,
+         s.position AS state_position, s.is_completed AS state_is_completed,
+         s.is_default AS state_is_default, s.created_at AS state_created_at
+  FROM todos t
+  INNER JOIN todo_states s ON s.id = t.state_id`;
+
+function rowToTodo(row: TodoRow): Todo {
+  return {
+    id: row.id,
+    title: row.title,
+    notes: row.notes,
+    state: {
+      id: row.state_id,
+      label: row.state_label,
+      color: row.state_color,
+      position: row.state_position,
+      isCompleted: row.state_is_completed === 1,
+      isDefault: row.state_is_default === 1,
+      createdAt: row.state_created_at,
+    },
+    project: row.project,
+    milestone: row.milestone,
+    startDate: row.start_date,
+    dueDate: row.due_date,
+    source: VALID_TODO_SOURCES.has(row.source as TodoSource) ? (row.source as TodoSource) : "user",
+    sourceLabel: row.source_label,
+    createdAt: row.created_at,
+    completedAt: row.completed_at,
+  };
+}
+
+function validateTodoTitle(title: unknown): string {
+  if (typeof title !== "string" || title.trim().length === 0) {
+    throw new Error("Todo title must be a non-empty string");
+  }
+  const trimmed = title.trim();
+  if (trimmed.length > MAX_TODO_TITLE_LENGTH) {
+    throw new Error(`Todo title must be ${MAX_TODO_TITLE_LENGTH} characters or fewer`);
+  }
+  return trimmed;
+}
+
+function validateTodoNotes(notes: unknown): string | null {
+  if (notes === undefined || notes === null) return null;
+  if (typeof notes !== "string") throw new Error("Todo notes must be a string or null");
+  const trimmed = notes.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > MAX_TODO_NOTES_LENGTH) {
+    throw new Error(`Todo notes must be ${MAX_TODO_NOTES_LENGTH} characters or fewer`);
+  }
+  return trimmed;
+}
+
+/** Shared by project and milestone: optional short free text, blank normalised to null. */
+function validateTodoTextField(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") throw new Error(`Todo ${field} must be a string or null`);
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > MAX_TODO_TEXT_FIELD_LENGTH) {
+    throw new Error(`Todo ${field} must be ${MAX_TODO_TEXT_FIELD_LENGTH} characters or fewer`);
+  }
+  return trimmed;
+}
+
+function validateTodoDate(value: unknown, field: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") throw new Error(`Todo ${field} must be a string or null`);
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+    throw new Error(`Todo ${field} must be in YYYY-MM-DD format`);
+  }
+  const parsed = new Date(`${trimmed}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) throw new Error(`Todo ${field} is not a real date`);
+  return trimmed;
+}
+
+function assertDateOrder(startDate: string | null, dueDate: string | null): void {
+  if (startDate && dueDate && startDate > dueDate) {
+    throw new Error("Todo startDate must not be after dueDate");
+  }
+}
+
+function validateTodoSourceLabel(label: unknown): string | null {
+  if (label === undefined || label === null) return null;
+  if (typeof label !== "string") throw new Error("Todo source label must be a string or null");
+  const trimmed = label.trim();
+  if (trimmed.length === 0) return null;
+  return trimmed.slice(0, MAX_TODO_SOURCE_LABEL_LENGTH);
+}
+
+function resolveStateId(database: DbHandle, stateId: number | undefined): number {
+  if (stateId === undefined) return getDefaultStateId(database);
+  const row = database.prepare("SELECT id FROM todo_states WHERE id = ?").get(stateId) as
+    | { id: number }
+    | undefined;
+  if (!row) throw new Error(`State with id ${stateId} not found`);
+  return row.id;
+}
+
+function isCompletedState(database: DbHandle, stateId: number): boolean {
+  const row = database.prepare("SELECT is_completed FROM todo_states WHERE id = ?").get(stateId) as
+    | { is_completed: number }
+    | undefined;
+  return row?.is_completed === 1;
+}
+
+export function createTodo(input: CreateTodoInput): Todo {
+  const database = getDb();
+  const title = validateTodoTitle(input.title);
+  const notes = validateTodoNotes(input.notes);
+  const project = validateTodoTextField(input.project, "project");
+  const milestone = validateTodoTextField(input.milestone, "milestone");
+  const startDate = validateTodoDate(input.startDate, "startDate");
+  const dueDate = validateTodoDate(input.dueDate, "dueDate");
+  assertDateOrder(startDate, dueDate);
+
+  const source: TodoSource = VALID_TODO_SOURCES.has(input.source as TodoSource)
+    ? (input.source as TodoSource)
+    : "user";
+  // A source label only makes sense for AI-written todos.
+  const sourceLabel = source === "ai" ? validateTodoSourceLabel(input.sourceLabel) : null;
+
+  const stateId = resolveStateId(database, input.stateId);
+  const completedAt = isCompletedState(database, stateId) ? new Date().toISOString() : null;
+
+  database
+    .prepare(
+      `INSERT INTO todos (title, notes, state_id, project, milestone, start_date, due_date, source, source_label, created_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      title,
+      notes,
+      stateId,
+      project,
+      milestone,
+      startDate,
+      dueDate,
+      source,
+      sourceLabel,
+      new Date().toISOString(),
+      completedAt,
+    );
+
+  // last_insert_rowid() rather than result.lastInsertRowid: the same statement works
+  // under better-sqlite3 and the sql.js test shim, which does not return that field.
+  const row = database.prepare(`${TODO_SELECT} WHERE t.id = last_insert_rowid()`).get() as TodoRow;
+  return rowToTodo(row);
+}
+
+export function listTodos(input: ListTodosInput = {}): Todo[] {
+  const database = getDb();
+  const filter = input.filter ?? "all";
+
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+
+  if (filter === "active") clauses.push("s.is_completed = 0");
+  else if (filter === "done") clauses.push("s.is_completed = 1");
+  else if (filter === "ai") clauses.push("t.source = 'ai'");
+
+  if (input.stateId !== undefined) {
+    clauses.push("t.state_id = ?");
+    params.push(input.stateId);
+  }
+  if (input.project !== undefined && input.project !== null && input.project.trim().length > 0) {
+    clauses.push("t.project = ? COLLATE NOCASE");
+    params.push(input.project.trim());
+  }
+
+  const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+
+  // Completed sink to the bottom; among the rest, dated before undated and soonest first.
+  // Once todos carry due dates, "what is due next" beats "what did I add last".
+  const order = ` ORDER BY s.is_completed ASC, (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC`;
+
+  const rows = database.prepare(`${TODO_SELECT}${where}${order}`).all(...params) as TodoRow[];
+  return rows.map(rowToTodo);
+}
+
+export function updateTodo(input: UpdateTodoInput): Todo {
+  const database = getDb();
+
+  const existing = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow | undefined;
+  if (!existing) throw new Error(`Todo with id ${input.id} not found`);
+
+  const title = input.title === undefined ? existing.title : validateTodoTitle(input.title);
+  const notes = input.notes === undefined ? existing.notes : validateTodoNotes(input.notes);
+  const project = input.project === undefined ? existing.project : validateTodoTextField(input.project, "project");
+  const milestone = input.milestone === undefined
+    ? existing.milestone
+    : validateTodoTextField(input.milestone, "milestone");
+  const startDate = input.startDate === undefined
+    ? existing.start_date
+    : validateTodoDate(input.startDate, "startDate");
+  const dueDate = input.dueDate === undefined ? existing.due_date : validateTodoDate(input.dueDate, "dueDate");
+  assertDateOrder(startDate, dueDate);
+
+  const stateId = input.stateId === undefined ? existing.state_id : resolveStateId(database, input.stateId);
+
+  const wasCompleted = existing.state_is_completed === 1;
+  const nowCompleted = isCompletedState(database, stateId);
+
+  let completedAt = existing.completed_at;
+  if (nowCompleted && !wasCompleted) completedAt = new Date().toISOString();
+  else if (!nowCompleted) completedAt = null;
+  // Editing a todo that is already completed keeps its original completion time.
+
+  database
+    .prepare(
+      `UPDATE todos SET title = ?, notes = ?, state_id = ?, project = ?, milestone = ?,
+                        start_date = ?, due_date = ?, completed_at = ?
+       WHERE id = ?`,
+    )
+    .run(title, notes, stateId, project, milestone, startDate, dueDate, completedAt, input.id);
+
+  const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow;
+  return rowToTodo(row);
+}
+
+export function deleteTodo(id: number): void {
+  const database = getDb();
+  database.prepare("DELETE FROM todos WHERE id = ?").run(id);
+}
+
+/** Removes every todo sitting in a completed state. Returns how many rows were deleted. */
+export function clearCompletedTodos(): number {
+  const database = getDb();
+  // Counted before the delete rather than read from result.changes: the sql.js
+  // test shim does not populate that field, and the app is a single writer.
+  const { count } = database
+    .prepare("SELECT COUNT(*) AS count FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1")
+    .get() as { count: number };
+  database.exec(
+    "DELETE FROM todos WHERE state_id IN (SELECT id FROM todo_states WHERE is_completed = 1)",
+  );
+  return count;
+}
+
+/** Distinct project names already in use, for the autocomplete datalist. */
+export function listTodoProjects(): string[] {
+  const database = getDb();
+  const rows = database
+    .prepare("SELECT DISTINCT project FROM todos WHERE project IS NOT NULL ORDER BY project COLLATE NOCASE ASC")
+    .all() as Array<{ project: string }>;
+  return rows.map((r) => r.project);
+}
+
+/** Distinct milestone names already in use, for the autocomplete datalist. */
+export function listTodoMilestones(): string[] {
+  const database = getDb();
+  const rows = database
+    .prepare("SELECT DISTINCT milestone FROM todos WHERE milestone IS NOT NULL ORDER BY milestone COLLATE NOCASE ASC")
+    .all() as Array<{ milestone: string }>;
+  return rows.map((r) => r.milestone);
 }
