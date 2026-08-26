@@ -15,7 +15,10 @@ import {
   findTodoStateByLabel,
   initDatabase,
   listNvimActivityByDate,
+  listTodoLabels,
+  listTodoProjects,
   listTodos,
+  listTodoStates,
 } from "../database.ts";
 import { processLine } from "../pipe-server.ts";
 
@@ -442,5 +445,252 @@ describe("todo.complete after renaming the completed state", () => {
     const reply = send({ id: 3, type: "todo.complete", todoId });
     expect(reply?.ok).toBe(true);
     expect(listTodos()[0]?.state.isCompleted).toBe(true);
+  });
+});
+
+// --- Taxonomy: projects ------------------------------------------------------
+
+/** Adds a todo through the pipe and returns its id, so a taxonomy test can check what moved. */
+function addTodo(fields: Record<string, unknown>): number {
+  const reply = send({ id: 99, type: "todo.add", title: "x", ...fields });
+  return (reply?.result as { todo: { id: number; }; }).todo.id;
+}
+
+describe("todo.project.create", () => {
+  it("creates a project the agent can then assign", () => {
+    const reply = send({ id: 1, type: "todo.project.create", name: "LizMeter" });
+
+    expect(reply?.ok).toBe(true);
+    expect(listTodoProjects().map((p) => p.name)).toEqual(["LizMeter"]);
+    expect(send({ id: 2, type: "todo.add", title: "x", project: "lizmeter" })?.ok).toBe(true);
+  });
+
+  it("rejects a duplicate name rather than making a second row", () => {
+    createTodoProject({ name: "LizMeter" });
+    const reply = send({ id: 1, type: "todo.project.create", name: "lizmeter" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/already exists/);
+    expect(listTodoProjects()).toHaveLength(1);
+  });
+
+  it("requires a name", () => {
+    const reply = send({ id: 1, type: "todo.project.create", name: "  " });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/'name' is required/);
+  });
+
+  it("rejects a colour outside the palette", () => {
+    const reply = send({ id: 1, type: "todo.project.create", name: "LizMeter", color: "#123456" });
+    expect(reply?.ok).toBe(false);
+    expect(listTodoProjects()).toHaveLength(0);
+  });
+});
+
+describe("todo.project.rename", () => {
+  it("reaches every todo already in the project, because they hold an id not a name", () => {
+    createTodoProject({ name: "Old" });
+    addTodo({ project: "Old" });
+
+    const reply = send({ id: 1, type: "todo.project.rename", name: "old", newName: "New" });
+
+    expect(reply?.ok).toBe(true);
+    expect(listTodos()[0]?.project?.name).toBe("New");
+  });
+
+  it("lists the valid projects when the old name is unknown", () => {
+    createTodoProject({ name: "LizMeter" });
+    const reply = send({ id: 1, type: "todo.project.rename", name: "Nope", newName: "New" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/Valid projects: LizMeter/);
+  });
+
+  it("requires a newName", () => {
+    createTodoProject({ name: "LizMeter" });
+    const reply = send({ id: 1, type: "todo.project.rename", name: "LizMeter" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/'newName' is required/);
+  });
+});
+
+describe("todo.project.delete", () => {
+  it("refuses a project still on todos and says how many", () => {
+    createTodoProject({ name: "LizMeter" });
+    addTodo({ project: "LizMeter" });
+    addTodo({ project: "LizMeter" });
+
+    const reply = send({ id: 1, type: "todo.project.delete", name: "LizMeter" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/still on 2 todos/);
+    expect(listTodoProjects()).toHaveLength(1);
+  });
+
+  it("goes ahead with force and reports what it detached", () => {
+    createTodoProject({ name: "LizMeter" });
+    addTodo({ project: "LizMeter" });
+
+    const reply = send({ id: 1, type: "todo.project.delete", name: "LizMeter", force: true });
+
+    expect(reply?.result).toEqual({ name: "LizMeter", detached: 1 });
+    expect(listTodoProjects()).toHaveLength(0);
+    // The todo survives the delete -- it only loses the grouping.
+    expect(listTodos()).toHaveLength(1);
+    expect(listTodos()[0]?.project).toBeNull();
+  });
+
+  it("needs no force when nothing is using it", () => {
+    createTodoProject({ name: "Unused" });
+    const reply = send({ id: 1, type: "todo.project.delete", name: "Unused" });
+
+    expect(reply?.result).toEqual({ name: "Unused", detached: 0 });
+    expect(listTodoProjects()).toHaveLength(0);
+  });
+});
+
+// --- Taxonomy: labels --------------------------------------------------------
+
+describe("todo.label.create", () => {
+  it("creates a label and flags it as new", () => {
+    const reply = send({ id: 1, type: "todo.label.create", name: "bug" });
+
+    expect((reply?.result as { created: boolean; }).created).toBe(true);
+    expect(listTodoLabels().map((l) => l.name)).toEqual(["bug"]);
+  });
+
+  it("reports an existing label as not created, matching the in-app picker", () => {
+    createTodoLabel({ name: "bug" });
+    const reply = send({ id: 1, type: "todo.label.create", name: "BUG" });
+
+    expect(reply?.ok).toBe(true);
+    expect((reply?.result as { created: boolean; }).created).toBe(false);
+    expect(listTodoLabels()).toHaveLength(1);
+  });
+});
+
+describe("todo.label.rename", () => {
+  it("renames the label on every todo carrying it", () => {
+    createTodoLabel({ name: "bug" });
+    addTodo({ labels: ["bug"] });
+
+    const reply = send({ id: 1, type: "todo.label.rename", name: "bug", newName: "defect" });
+
+    expect(reply?.ok).toBe(true);
+    expect(listTodos()[0]?.labels.map((l) => l.name)).toEqual(["defect"]);
+  });
+
+  it("lists the valid labels when the old name is unknown", () => {
+    createTodoLabel({ name: "bug" });
+    const reply = send({ id: 1, type: "todo.label.rename", name: "nope", newName: "defect" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/Valid labels: bug/);
+  });
+});
+
+describe("todo.label.delete", () => {
+  it("refuses a label still on a todo and says how many", () => {
+    createTodoLabel({ name: "bug" });
+    addTodo({ labels: ["bug"] });
+
+    const reply = send({ id: 1, type: "todo.label.delete", name: "bug" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/still on 1 todo\./);
+    expect(listTodoLabels()).toHaveLength(1);
+  });
+
+  it("detaches and deletes with force", () => {
+    createTodoLabel({ name: "bug" });
+    addTodo({ labels: ["bug"] });
+
+    const reply = send({ id: 1, type: "todo.label.delete", name: "bug", force: true });
+
+    expect(reply?.result).toEqual({ name: "bug", detached: 1 });
+    expect(listTodoLabels()).toHaveLength(0);
+    expect(listTodos()[0]?.labels).toEqual([]);
+  });
+});
+
+// --- Taxonomy: states --------------------------------------------------------
+
+describe("todo.state.create", () => {
+  it("creates an ordinary stage, neither the default nor the completed one", () => {
+    const reply = send({ id: 1, type: "todo.state.create", name: "Blocked" });
+
+    expect(reply?.ok).toBe(true);
+    const created = listTodoStates().find((s) => s.label === "Blocked");
+    expect(created?.isDefault).toBe(false);
+    expect(created?.isCompleted).toBe(false);
+    // The default is untouched, so new todos still land where they did before.
+    expect(listTodoStates().find((s) => s.isDefault)?.label).toBe("Todo");
+  });
+
+  it("rejects a duplicate label", () => {
+    const reply = send({ id: 1, type: "todo.state.create", name: "todo" });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/already exists/);
+  });
+});
+
+describe("todo.state.rename", () => {
+  it("renames the state without disturbing its flags", () => {
+    const reply = send({ id: 1, type: "todo.state.rename", name: "Done", newName: "Shipped" });
+
+    expect(reply?.ok).toBe(true);
+    const renamed = listTodoStates().find((s) => s.label === "Shipped");
+    expect(renamed?.isCompleted).toBe(true);
+  });
+
+  it("lists the valid states when the old label is unknown", () => {
+    const reply = send({ id: 1, type: "todo.state.rename", name: "Nope", newName: "Shipped" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/Valid states: /);
+  });
+});
+
+describe("todo.state.delete", () => {
+  it("needs a reassignTo, because todos are never deleted as a side effect", () => {
+    const reply = send({ id: 1, type: "todo.state.delete", name: "Backlog" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/needs 'reassignTo'/);
+    expect(listTodoStates().some((s) => s.label === "Backlog")).toBe(true);
+  });
+
+  it("moves every todo in the state to the target and reports the count", () => {
+    addTodo({ state: "Backlog" });
+    addTodo({ state: "Backlog" });
+
+    const reply = send({ id: 1, type: "todo.state.delete", name: "backlog", reassignTo: "processing" });
+
+    expect(reply?.result).toEqual({ name: "Backlog", reassignedTo: "Processing", moved: 2 });
+    expect(listTodoStates().some((s) => s.label === "Backlog")).toBe(false);
+    expect(listTodos().every((t) => t.state.label === "Processing")).toBe(true);
+  });
+
+  it("refuses the default state, which new todos depend on", () => {
+    const reply = send({ id: 1, type: "todo.state.delete", name: "Todo", reassignTo: "Backlog" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/default/);
+  });
+
+  it("refuses the completed state, which todo.complete depends on", () => {
+    const reply = send({ id: 1, type: "todo.state.delete", name: "Done", reassignTo: "Backlog" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/completed/);
+  });
+
+  it("lists the valid states when reassignTo is unknown", () => {
+    const reply = send({ id: 1, type: "todo.state.delete", name: "Backlog", reassignTo: "Nope" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/Unknown state 'Nope'/);
+    expect(listTodoStates().some((s) => s.label === "Backlog")).toBe(true);
   });
 });

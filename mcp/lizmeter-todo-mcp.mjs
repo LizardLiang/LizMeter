@@ -18,7 +18,7 @@ const DEFAULT_PIPE_PATH = process.platform === "win32" ? "\\\\.\\pipe\\lizmeter"
 const PIPE_PATH = process.env.LIZMETER_PIPE_PATH || DEFAULT_PIPE_PATH;
 const REQUEST_TIMEOUT_MS = 5000;
 const SERVER_NAME = "lizmeter-todo";
-const SERVER_VERSION = "1.0.0";
+const SERVER_VERSION = "1.1.0";
 const DEFAULT_PROTOCOL_VERSION = "2024-11-05";
 
 // --- Pipe client ---
@@ -92,17 +92,19 @@ const FIELD_PROPERTIES = {
     type: "string",
     description:
       "Optional project name, e.g. 'LizMeter' (case-insensitive). Projects are user-defined rows, not "
-      + "free text: an unknown name is rejected and the error lists every valid one. Call todo_projects "
-      + "to see them. Pass null to clear the project.",
+      + "free text: an unknown name is rejected here and the error lists every valid one. Call "
+      + "todo_projects to see them, or todo_projects with action 'create' to add the one you need "
+      + "first. Pass null to clear the project.",
   },
   labels: {
     type: "array",
     items: { type: "string" },
     description:
       "Optional label names, e.g. ['bug', 'ui'] (case-insensitive). Like projects these must already "
-      + "exist -- an unknown name is rejected and the error lists the valid ones. Call todo_labels to "
-      + "see them. On todo_update this REPLACES the whole set, so pass every label the todo should end "
-      + "up with, and [] to remove them all.",
+      + "exist -- an unknown name is rejected here and the error lists the valid ones. Call todo_labels "
+      + "to see them, or todo_labels with action 'create' to add the one you need first. On "
+      + "todo_update this REPLACES the whole set, so pass every label the todo should end up with, and "
+      + "[] to remove them all.",
   },
   milestone: {
     type: "string",
@@ -126,8 +128,8 @@ const FIELD_PROPERTIES = {
     type: "string",
     description:
       "Optional workflow state, by label (case-insensitive). Labels are user-defined and can be renamed, "
-      + "so do not assume a fixed set. If you pass an unknown one the error lists every valid label. "
-      + "Omit it to use the user's default state.",
+      + "so do not assume a fixed set -- call todo_states to see them. If you pass an unknown one the "
+      + "error lists every valid label. Omit it to use the user's default state.",
   },
   parentId: {
     type: ["number", "null"],
@@ -138,6 +140,41 @@ const FIELD_PROPERTIES = {
       + "children untouched, so break work down freely.",
   },
 };
+
+/**
+ * Builds the shared input schema for the three taxonomy tools (projects, labels, states).
+ *
+ * They are one shape on purpose: no arguments lists, an action changes the set. An agent that has
+ * learned one has learned all three, and the tool list stays at seven entries instead of fifteen.
+ */
+function taxonomySchema(noun, extra = {}) {
+  return {
+    type: "object",
+    properties: {
+      action: {
+        type: "string",
+        enum: ["list", "create", "rename", "delete"],
+        description: "What to do. Defaults to 'list', which is also what passing no arguments gives you.",
+      },
+      name: {
+        type: "string",
+        description: "The " + noun + "'s name, matched case-insensitively. Required for create, rename, and delete.",
+      },
+      newName: {
+        type: "string",
+        description: "The new name. Required for rename. Renaming reaches every todo at once, since todos "
+          + "point at the " + noun + " by id rather than holding a copy of its name.",
+      },
+      color: {
+        type: "string",
+        description:
+          "Optional hex colour for create, e.g. '#7aa2f7'. It must come from LizMeter's palette -- an "
+          + "unknown value is rejected and the error lists the valid ones. Omit it to take the default.",
+      },
+      ...extra,
+    },
+  };
+}
 
 const TOOLS = [
   {
@@ -222,16 +259,55 @@ const TOOLS = [
   {
     name: "todo_projects",
     description:
-      "List the projects defined in LizMeter. Call this before assigning a project with todo_add or "
-      + "todo_update: project names must already exist, and this is how you learn which do.",
-    inputSchema: { type: "object", properties: {} },
+      "List, create, rename, or delete the projects defined in LizMeter. Call it with no arguments "
+      + "to list them, which you should do before assigning a project with todo_add or todo_update: "
+      + "those reject an unknown name rather than creating it. Use action 'create' when the user "
+      + "names a project that does not exist yet. Deleting a project never deletes its todos -- they "
+      + "only lose the grouping -- but you must pass force: true if any still hold it.",
+    inputSchema: taxonomySchema("project", {
+      force: {
+        type: "boolean",
+        description:
+          "Pass true to delete a project that is still on todos. Without it the delete is refused "
+          + "and the error tells you how many todos would be affected.",
+      },
+    }),
   },
   {
     name: "todo_labels",
     description:
-      "List the labels defined in LizMeter. Call this before attaching labels with todo_add or "
-      + "todo_update: label names must already exist, and this is how you learn which do.",
-    inputSchema: { type: "object", properties: {} },
+      "List, create, rename, or delete the labels defined in LizMeter. Call it with no arguments to "
+      + "list them, which you should do before attaching labels with todo_add or todo_update: those "
+      + "reject an unknown name rather than creating it. Creating a label that already exists is a "
+      + "no-op and says so. Deleting a label detaches it from every todo that carried it, so you "
+      + "must pass force: true if any still do.",
+    inputSchema: taxonomySchema("label", {
+      force: {
+        type: "boolean",
+        description:
+          "Pass true to delete a label that is still on todos. Without it the delete is refused and "
+          + "the error tells you how many todos would be affected.",
+      },
+    }),
+  },
+  {
+    name: "todo_states",
+    description:
+      "List, create, rename, or delete LizMeter's workflow states -- the stages a todo moves "
+      + "through. Call it with no arguments to list them; the listing marks which state new todos "
+      + "land in and which one means finished. States are user-defined and renameable, so never "
+      + "assume a fixed set. Deleting a state requires reassignTo: every todo sitting in it moves "
+      + "there instead, because todos are work items and are never deleted as a side effect. New "
+      + "states are created as ordinary stages -- which one is the default and which one means "
+      + "finished stay the user's choice, made in the app.",
+    inputSchema: taxonomySchema("state", {
+      reassignTo: {
+        type: "string",
+        description:
+          "Required for delete: the state every todo currently sitting in the deleted one moves to. "
+          + "The default state and the completed state cannot be deleted at all.",
+      },
+    }),
   },
   {
     name: "todo_complete",
@@ -249,6 +325,43 @@ const TOOLS = [
 ];
 
 // --- Tool execution ---
+
+const TAXONOMY_ACTIONS = new Set(["list", "create", "rename", "delete"]);
+
+/** Reads the action off a taxonomy call. No action at all means the read, which is the safe default. */
+function taxonomyAction(args) {
+  const action = args.action ?? "list";
+  if (!TAXONOMY_ACTIONS.has(action)) {
+    throw new Error("Unknown action '" + action + "'. Use list, create, rename, or delete.");
+  }
+  return action;
+}
+
+/** Rejects a missing argument here rather than sending a half-formed command to the app. */
+function requireArg(args, key, action) {
+  const value = args[key];
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error("'" + key + "' is required for action '" + action + "'");
+  }
+  return value.trim();
+}
+
+/** Says what a project or label delete cost, so the agent can report it without guessing. */
+function detachSuffix(count) {
+  if (!count) return " It was not on any todo.";
+  return " Removed from " + count + (count === 1 ? " todo." : " todos.");
+}
+
+/**
+ * Renders one state, flagging the two that carry meaning.
+ * Neither flag can be read off the label -- the user is free to rename "Done" to anything.
+ */
+function formatState(state) {
+  const flags = [];
+  if (state.isDefault) flags.push("default for new todos");
+  if (state.isCompleted) flags.push("means completed");
+  return "- " + state.label + (flags.length > 0 ? " (" + flags.join(", ") + ")" : "");
+}
 
 /** Collects the optional shared fields, leaving absent ones absent so updates stay partial. */
 function fieldArgs(args) {
@@ -338,17 +451,98 @@ async function callTool(name, args = {}) {
     }
 
     case "todo_projects": {
-      const result = await sendCommand("todo.projects", {});
-      const projects = result.projects ?? [];
-      if (projects.length === 0) return "No projects defined yet.";
-      return projects.map((project) => "- " + project.name).join("\n");
+      const action = taxonomyAction(args);
+      if (action === "list") {
+        const result = await sendCommand("todo.projects", {});
+        const projects = result.projects ?? [];
+        if (projects.length === 0) return "No projects defined yet.";
+        return projects.map((project) => "- " + project.name).join("\n");
+      }
+      if (action === "create") {
+        const result = await sendCommand("todo.project.create", {
+          name: requireArg(args, "name", action),
+          color: args.color,
+        });
+        return "Created project '" + result.project.name + "'.";
+      }
+      if (action === "rename") {
+        const from = requireArg(args, "name", action);
+        const result = await sendCommand("todo.project.rename", {
+          name: from,
+          newName: requireArg(args, "newName", action),
+        });
+        return "Renamed project '" + from + "' to '" + result.project.name + "'.";
+      }
+      const result = await sendCommand("todo.project.delete", {
+        name: requireArg(args, "name", action),
+        force: args.force === true,
+      });
+      return "Deleted project '" + result.name + "'." + detachSuffix(result.detached);
     }
 
     case "todo_labels": {
-      const result = await sendCommand("todo.labels", {});
-      const labels = result.labels ?? [];
-      if (labels.length === 0) return "No labels defined yet.";
-      return labels.map((label) => "- " + label.name).join("\n");
+      const action = taxonomyAction(args);
+      if (action === "list") {
+        const result = await sendCommand("todo.labels", {});
+        const labels = result.labels ?? [];
+        if (labels.length === 0) return "No labels defined yet.";
+        return labels.map((label) => "- " + label.name).join("\n");
+      }
+      if (action === "create") {
+        const result = await sendCommand("todo.label.create", {
+          name: requireArg(args, "name", action),
+          color: args.color,
+        });
+        return result.created
+          ? "Created label '" + result.label.name + "'."
+          : "Label '" + result.label.name + "' already exists -- nothing to do.";
+      }
+      if (action === "rename") {
+        const from = requireArg(args, "name", action);
+        const result = await sendCommand("todo.label.rename", {
+          name: from,
+          newName: requireArg(args, "newName", action),
+        });
+        return "Renamed label '" + from + "' to '" + result.label.name + "'.";
+      }
+      const result = await sendCommand("todo.label.delete", {
+        name: requireArg(args, "name", action),
+        force: args.force === true,
+      });
+      return "Deleted label '" + result.name + "'." + detachSuffix(result.detached);
+    }
+
+    case "todo_states": {
+      const action = taxonomyAction(args);
+      if (action === "list") {
+        const result = await sendCommand("todo.states", {});
+        const states = result.states ?? [];
+        if (states.length === 0) return "No states defined yet.";
+        return states.map(formatState).join("\n");
+      }
+      if (action === "create") {
+        const result = await sendCommand("todo.state.create", {
+          name: requireArg(args, "name", action),
+          color: args.color,
+        });
+        return "Created state '" + result.state.label + "'.";
+      }
+      if (action === "rename") {
+        const from = requireArg(args, "name", action);
+        const result = await sendCommand("todo.state.rename", {
+          name: from,
+          newName: requireArg(args, "newName", action),
+        });
+        return "Renamed state '" + from + "' to '" + result.state.label + "'.";
+      }
+      const result = await sendCommand("todo.state.delete", {
+        name: requireArg(args, "name", action),
+        reassignTo: requireArg(args, "reassignTo", action),
+      });
+      const moved = result.moved === 0
+        ? "No todos were in it."
+        : "Moved " + result.moved + (result.moved === 1 ? " todo" : " todos") + " to '" + result.reassignedTo + "'.";
+      return "Deleted state '" + result.name + "'. " + moved;
     }
 
     case "todo_complete": {

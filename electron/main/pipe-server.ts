@@ -15,6 +15,12 @@ import fs from "node:fs";
 import {
   clearCompletedTodos,
   createTodo,
+  createTodoLabel,
+  createTodoProject,
+  createTodoState,
+  deleteTodoLabel,
+  deleteTodoProject,
+  deleteTodoState,
   findTodoLabelByName,
   findTodoProjectByName,
   findTodoStateByLabel,
@@ -25,10 +31,13 @@ import {
   listTodos,
   listTodoStates,
   updateTodo,
+  updateTodoLabel,
+  updateTodoProject,
+  updateTodoState,
 } from "./database.ts";
 import { collectAttachmentBlobs } from "./attachment-store.ts";
 import { getMainWindow } from "./index.ts";
-import type { TodoFilter } from "../../src/shared/types.ts";
+import type { TodoFilter, TodoLabel, TodoProject, TodoState } from "../../src/shared/types.ts";
 
 // --- Constants ---
 
@@ -113,9 +122,10 @@ function resolveStateLabel(label: unknown): number | undefined {
  * Returns `undefined` for an absent field and `null` for an explicit null, so an update can
  * distinguish "leave the project alone" from "clear it".
  *
- * Unknown names are rejected rather than created. The picker in the app creates a project by
- * typing one, but that is a person confirming a new grouping on screen; an agent typo would
- * quietly fragment the user's projects instead.
+ * Unknown names are rejected rather than created, even though `todo.project.create` exists. The
+ * picker in the app creates a project by typing one, but that is a person confirming a new
+ * grouping on screen; an agent typo here would quietly fragment the user's projects. Creating
+ * stays a deliberate, separate call.
  */
 function resolveProjectName(name: unknown): number | null | undefined {
   if (name === undefined) return undefined;
@@ -130,7 +140,7 @@ function resolveProjectName(name: unknown): number | null | undefined {
   throw new Error(
     valid.length > 0
       ? `Unknown project '${name.trim()}'. Valid projects: ${valid}`
-      : `Unknown project '${name.trim()}'. No projects exist yet -- create one in the app first.`,
+      : `Unknown project '${name.trim()}'. No projects exist yet -- create one before assigning it.`,
   );
 }
 
@@ -150,7 +160,7 @@ function resolveLabelNames(value: unknown, field: string): number[] | undefined 
       throw new Error(
         valid.length > 0
           ? `Unknown label '${entry.trim()}'. Valid labels: ${valid}`
-          : `Unknown label '${entry.trim()}'. No labels exist yet -- create one in the app first.`,
+          : `Unknown label '${entry.trim()}'. No labels exist yet -- create one before attaching it.`,
       );
     }
     ids.push(label.id);
@@ -186,6 +196,83 @@ function requireTodoId(data: Record<string, unknown>, command: string): number {
     throw new Error(`${command} requires an integer 'todoId'`);
   }
   return id;
+}
+
+// --- Taxonomy commands ---
+//
+// Projects, labels and states are the vocabulary every other todo command resolves against, so an
+// agent that cannot create them is stuck the moment the user names something new. Reads stay
+// permissive. Writes are blunt -- a delete rewrites every todo holding the thing -- so each one is
+// keyed by name, reports what it touched, and refuses to strip todos without an explicit go-ahead.
+
+/** Reads a required non-empty name, so a missing one fails here rather than inside the database. */
+function requireName(value: unknown, field: string): string {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    throw new Error(`'${field}' is required and must be a non-empty string`);
+  }
+  return value.trim();
+}
+
+/** Optional palette colour. Absent means "let the database pick its default". */
+function optionalColor(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new Error("'color' must be a string");
+  return value;
+}
+
+/**
+ * Refuses a detaching delete that would touch todos unless the caller passed `force`.
+ *
+ * Deleting a project or a label silently rewrites every todo holding it and the agent cannot undo
+ * that. One rejected round trip naming the count turns a mis-aimed call into a decision the agent
+ * has to make twice.
+ */
+function requireForce(inUse: number, kind: string, name: string, force: unknown): void {
+  if (inUse === 0 || force === true) return;
+  const todos = inUse === 1 ? "1 todo" : `${inUse} todos`;
+  throw new Error(
+    `${kind} '${name}' is still on ${todos}. Deleting it removes it from ${
+      inUse === 1 ? "that todo" : "those todos"
+    }. Pass force: true to go ahead.`,
+  );
+}
+
+/** Resolves a project for a write. On a miss the error enumerates the valid names. */
+function projectByName(value: unknown): TodoProject {
+  const wanted = requireName(value, "name");
+  const project = findTodoProjectByName(wanted);
+  if (project) return project;
+
+  const valid = listTodoProjects().map((p) => p.name).join(", ");
+  throw new Error(
+    valid.length > 0
+      ? `Unknown project '${wanted}'. Valid projects: ${valid}`
+      : `Unknown project '${wanted}'. No projects exist yet.`,
+  );
+}
+
+/** Resolves a label for a write, the same contract as {@link projectByName}. */
+function labelByName(value: unknown): TodoLabel {
+  const wanted = requireName(value, "name");
+  const label = findTodoLabelByName(wanted);
+  if (label) return label;
+
+  const valid = listTodoLabels().map((l) => l.name).join(", ");
+  throw new Error(
+    valid.length > 0
+      ? `Unknown label '${wanted}'. Valid labels: ${valid}`
+      : `Unknown label '${wanted}'. No labels exist yet.`,
+  );
+}
+
+/** Resolves a state for a write, the same contract as {@link projectByName}. */
+function stateByName(value: unknown, field = "name"): TodoState {
+  const wanted = requireName(value, field);
+  const state = findTodoStateByLabel(wanted);
+  if (state) return state;
+
+  const valid = listTodoStates().map((s) => s.label).join(", ");
+  throw new Error(`Unknown state '${wanted}'. Valid states: ${valid}`);
 }
 
 function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
@@ -268,6 +355,91 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
       collectAttachmentBlobs(deletedShas);
       notifyTodosChanged();
       return { removed: count };
+    }
+
+    // Taxonomy writes. Each is keyed by name rather than id: names are what the read commands
+    // hand out and what the user says out loud, and they are unique case-insensitively anyway.
+
+    case "todo.project.create": {
+      const project = createTodoProject({
+        name: requireName(data.name, "name"),
+        color: optionalColor(data.color),
+      });
+      notifyTodosChanged();
+      return { project };
+    }
+
+    case "todo.project.rename": {
+      const existing = projectByName(data.name);
+      const project = updateTodoProject({ id: existing.id, name: requireName(data.newName, "newName") });
+      notifyTodosChanged();
+      return { project };
+    }
+
+    case "todo.project.delete": {
+      const existing = projectByName(data.name);
+      requireForce(listTodos({ projectId: existing.id }).length, "Project", existing.name, data.force);
+      const detached = deleteTodoProject(existing.id);
+      notifyTodosChanged();
+      return { name: existing.name, detached };
+    }
+
+    case "todo.label.create": {
+      const name = requireName(data.name, "name");
+      // createTodoLabel is get-or-create, matching the in-app picker. Report which one happened
+      // so the agent does not announce a creation that was really a no-op.
+      const existing = findTodoLabelByName(name);
+      const label = createTodoLabel({ name, color: optionalColor(data.color) });
+      notifyTodosChanged();
+      return { label, created: existing === null };
+    }
+
+    case "todo.label.rename": {
+      const existing = labelByName(data.name);
+      const label = updateTodoLabel({ id: existing.id, name: requireName(data.newName, "newName") });
+      notifyTodosChanged();
+      return { label };
+    }
+
+    case "todo.label.delete": {
+      const existing = labelByName(data.name);
+      requireForce(listTodos({ labelId: existing.id }).length, "Label", existing.name, data.force);
+      const detached = deleteTodoLabel(existing.id);
+      notifyTodosChanged();
+      return { name: existing.name, detached };
+    }
+
+    case "todo.state.create": {
+      // New states land non-default and non-completed. Which state new todos fall into, and which
+      // one means finished, are workflow decisions the user makes in the app -- not an agent's.
+      const state = createTodoState({
+        label: requireName(data.name, "name"),
+        color: optionalColor(data.color),
+      });
+      notifyTodosChanged();
+      return { state };
+    }
+
+    case "todo.state.rename": {
+      const existing = stateByName(data.name);
+      const state = updateTodoState({ id: existing.id, label: requireName(data.newName, "newName") });
+      notifyTodosChanged();
+      return { state };
+    }
+
+    case "todo.state.delete": {
+      const existing = stateByName(data.name);
+      // No force flag here: todos are moved rather than stripped, so naming the destination is
+      // the safeguard. deleteTodoState separately refuses the default and the completed state.
+      if (data.reassignTo === undefined || data.reassignTo === null) {
+        throw new Error(
+          `Deleting state '${existing.label}' needs 'reassignTo': the state every todo sitting in it moves to.`,
+        );
+      }
+      const target = stateByName(data.reassignTo, "reassignTo");
+      const moved = deleteTodoState(existing.id, target.id);
+      notifyTodosChanged();
+      return { name: existing.label, reassignedTo: target.label, moved };
     }
 
     default:
