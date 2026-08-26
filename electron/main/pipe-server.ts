@@ -107,6 +107,19 @@ function optionalString(value: unknown, field: string): string | null | undefine
   return value;
 }
 
+/**
+ * Reads an optional numeric field. Absent leaves the value alone on an update; explicit null
+ * clears it. Anything else is rejected rather than coerced, so a typo cannot silently unlink.
+ */
+function optionalNumber(value: unknown, field: string): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error(`'${field}' must be an integer or null`);
+  }
+  return value;
+}
+
 function requireTodoId(data: Record<string, unknown>, command: string): number {
   // 'todoId', not 'id': 'id' is the request envelope's correlation field and
   // a payload key of the same name would silently overwrite it.
@@ -134,6 +147,7 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
         milestone: optionalString(data.milestone, "milestone") ?? null,
         startDate: optionalString(data.startDate, "startDate") ?? null,
         dueDate: optionalString(data.dueDate, "dueDate") ?? null,
+        parentId: optionalNumber(data.parentId, "parentId") ?? null,
         // Anything arriving over the pipe is by definition not typed by the user.
         source: "ai",
         sourceLabel: (data.agent as string | null | undefined) ?? null,
@@ -153,6 +167,7 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
         milestone: optionalString(data.milestone, "milestone"),
         startDate: optionalString(data.startDate, "startDate"),
         dueDate: optionalString(data.dueDate, "dueDate"),
+        parentId: optionalNumber(data.parentId, "parentId"),
       });
       notifyTodosChanged();
       return { todo };
@@ -165,7 +180,8 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
         : "all";
       const project = optionalString(data.project, "project") ?? undefined;
       const stateId = resolveStateLabel(data.state);
-      return { todos: listTodos({ filter, project, stateId }) };
+      const parentId = optionalNumber(data.parentId, "parentId") ?? undefined;
+      return { todos: listTodos({ filter, project, stateId, parentId }) };
     }
 
     case "todo.complete": {

@@ -35,6 +35,9 @@ function makeTodo(id: number, title: string, state: TodoState, extra: Partial<To
     dueDate: null,
     source: "user",
     sourceLabel: null,
+    parentId: null,
+    parentTitle: null,
+    childCount: 0,
     createdAt: "2026-05-08T00:00:00.000Z",
     completedAt: null,
     ...extra,
@@ -195,5 +198,173 @@ describe("TodosPage selection", () => {
     fireEvent.keyDown(document.body, { key: "Escape" });
 
     expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
+  });
+});
+
+describe("TodosPage drag and drop", () => {
+  it("registers each row body as a draggable", async () => {
+    await renderPage();
+
+    const row = screen.getByRole("button", { name: "Edit Old prod to new prod migration" });
+    expect(row).toHaveAttribute("aria-roledescription", "draggable");
+  });
+
+  // The pointer gesture itself belongs to E2E -- jsdom reports every rect as 0x0, so dnd-kit
+  // collision detection cannot resolve a group. What is guarded here is the wiring around it.
+  it("leaves the checkbox and the row menu outside the drag grip", async () => {
+    await renderPage();
+
+    expect(screen.getByLabelText("Select Old prod to new prod migration"))
+      .not.toHaveAttribute("aria-roledescription");
+  });
+
+  it("still opens the editor on a plain click, which the drag guard must not swallow", async () => {
+    await renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Edit Old prod to new prod migration" }));
+
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+describe("TodosPage nesting", () => {
+  //  200 Ship v1.14
+  //    └─ 201 Write the migration
+  //  202 Unrelated chore
+  const nestedTodos: Todo[] = [
+    makeTodo(200, "Ship v1.14", todoState, { childCount: 1 }),
+    makeTodo(201, "Write the migration", todoState, { parentId: 200, parentTitle: "Ship v1.14" }),
+    makeTodo(202, "Unrelated chore", backlogState),
+  ];
+
+  async function renderNested() {
+    mockTodoAPI.list.mockResolvedValue(nestedTodos);
+    render(<TodosPage />);
+    await screen.findByText("Ship v1.14");
+  }
+
+  it("draws the parent title as a breadcrumb on a sub-issue row", async () => {
+    await renderNested();
+
+    expect(screen.getByTitle("Sub-issue of Ship v1.14")).toHaveTextContent("Ship v1.14");
+  });
+
+  it("draws a sub-issue count on a row that has children", async () => {
+    await renderNested();
+
+    expect(screen.getByTitle("1 sub-issue")).toHaveTextContent("1");
+  });
+
+  it("keeps sub-issues as ordinary rows in their own state group", async () => {
+    await renderNested();
+
+    // Flat list: the child sits beside its parent under Todo, not indented inside it.
+    expect(screen.getByText("Todo").parentElement).toHaveTextContent("Todo2");
+    expect(screen.getByLabelText("Select Write the migration")).toBeInTheDocument();
+  });
+
+  it("offers 'Remove from parent' only on a row that has one", async () => {
+    await renderNested();
+
+    fireEvent.click(screen.getByLabelText("Actions for Write the migration"));
+    expect(screen.getByRole("menuitem", { name: "Remove from parent" })).toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Change parent..." })).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    fireEvent.click(screen.getByLabelText("Actions for Ship v1.14"));
+    expect(screen.queryByRole("menuitem", { name: "Remove from parent" })).not.toBeInTheDocument();
+    expect(screen.getByRole("menuitem", { name: "Make sub-issue of..." })).toBeInTheDocument();
+  });
+
+  it("'Remove from parent' lifts the todo to the top level", async () => {
+    await renderNested();
+
+    fireEvent.click(screen.getByLabelText("Actions for Write the migration"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove from parent" }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 201, parentId: null }));
+  });
+
+  it("picking a parent from the row menu writes the new link", async () => {
+    await renderNested();
+
+    fireEvent.click(screen.getByLabelText("Actions for Ship v1.14"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make sub-issue of..." }));
+
+    const picker = await screen.findByRole("dialog", { name: /Nest #200/ });
+    fireEvent.click(within(picker).getByText("Unrelated chore"));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 200, parentId: 202 }));
+  });
+
+  it("keeps a todo's own subtree out of the parent picker", async () => {
+    await renderNested();
+
+    fireEvent.click(screen.getByLabelText("Actions for Ship v1.14"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Make sub-issue of..." }));
+
+    const picker = await screen.findByRole("dialog", { name: /Nest #200/ });
+    // 201 is its child and 200 is itself, so only the unrelated todo can be offered.
+    expect(within(picker).queryByText("Write the migration")).not.toBeInTheDocument();
+    expect(within(picker).queryByText("Ship v1.14")).not.toBeInTheDocument();
+    expect(within(picker).getByText("Unrelated chore")).toBeInTheDocument();
+  });
+
+  it("shows the sub-issue block in the edit dialog", async () => {
+    await renderNested();
+    mockTodoAPI.list.mockResolvedValue([nestedTodos[1]!]);
+
+    fireEvent.click(screen.getByLabelText("Edit Ship v1.14"));
+
+    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
+    const block = within(dialog).getByLabelText("Sub-issues");
+    await waitFor(() => expect(block).toHaveTextContent("Write the migration"));
+    expect(within(block).getByLabelText("New sub-issue title")).toBeInTheDocument();
+  });
+
+  it("adds a sub-issue from the edit dialog under the open todo", async () => {
+    await renderNested();
+
+    fireEvent.click(screen.getByLabelText("Edit Ship v1.14"));
+    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
+
+    const input = within(dialog).getByLabelText("New sub-issue title");
+    fireEvent.change(input, { target: { value: "Back up the database" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+
+    await waitFor(() =>
+      expect(mockTodoAPI.create).toHaveBeenCalledWith({
+        title: "Back up the database",
+        parentId: 200,
+        source: "user",
+      })
+    );
+  });
+
+  it("unlinking a sub-issue from the dialog clears its parent rather than deleting it", async () => {
+    await renderNested();
+    mockTodoAPI.list.mockResolvedValue([nestedTodos[1]!]);
+
+    fireEvent.click(screen.getByLabelText("Edit Ship v1.14"));
+    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
+
+    const unlink = await within(dialog).findByLabelText("Remove Write the migration from this todo");
+    fireEvent.click(unlink);
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 201, parentId: null }));
+    expect(mockTodoAPI.delete).not.toHaveBeenCalled();
+  });
+
+  it("saving the dialog carries the parent it was opened with", async () => {
+    await renderNested();
+
+    fireEvent.click(screen.getByLabelText("Edit Write the migration"));
+    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(mockTodoAPI.update).toHaveBeenCalledWith(expect.objectContaining({ id: 201, parentId: 200 }))
+    );
   });
 });

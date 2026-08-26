@@ -158,6 +158,12 @@ export interface Todo {
   source: TodoSource;
   /** Free-text label for the specific agent that created it, e.g. "claude-code". Null for user todos. */
   sourceLabel: string | null;
+  /** The todo this one sits under. Null at the top level. Nesting is unbounded. */
+  parentId: number | null;
+  /** Joined alongside `parentId` so a row can draw its breadcrumb without a second lookup. */
+  parentTitle: string | null;
+  /** How many todos name this one as their parent. Counts direct children only, not the whole subtree. */
+  childCount: number;
   createdAt: string;
   completedAt: string | null;
 }
@@ -173,6 +179,8 @@ export interface CreateTodoInput {
   dueDate?: string | null;
   source?: TodoSource;
   sourceLabel?: string | null;
+  /** Nest the new todo under this one. Rejected if the id does not exist. */
+  parentId?: number | null;
 }
 
 export interface UpdateTodoInput {
@@ -184,6 +192,8 @@ export interface UpdateTodoInput {
   milestone?: string | null;
   startDate?: string | null;
   dueDate?: string | null;
+  /** Re-parent the todo. `null` lifts it back to the top level. Rejected if it would form a cycle. */
+  parentId?: number | null;
 }
 
 export type TodoFilter = "all" | "active" | "done" | "ai";
@@ -192,6 +202,8 @@ export interface ListTodosInput {
   filter?: TodoFilter;
   stateId?: number;
   project?: string;
+  /** Only the direct children of this todo. Ignores `filter`-style narrowing of the parent itself. */
+  parentId?: number;
 }
 
 // --- Issue Tracker Types ---

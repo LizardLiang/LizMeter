@@ -330,3 +330,147 @@ describe("listTodoProjects / listTodoMilestones", () => {
     expect(listTodoMilestones()).toEqual([]);
   });
 });
+
+// --- Nesting -----------------------------------------------------------------
+
+describe("todo nesting", () => {
+  it("creates a top-level todo with no parent and no children", () => {
+    const todo = createTodo({ title: "root" });
+
+    expect(todo.parentId).toBeNull();
+    expect(todo.parentTitle).toBeNull();
+    expect(todo.childCount).toBe(0);
+  });
+
+  it("files a new todo under a parent and joins the parent title", () => {
+    const parent = createTodo({ title: "Ship v1.14" });
+    const child = createTodo({ title: "Write the migration", parentId: parent.id });
+
+    expect(child.parentId).toBe(parent.id);
+    expect(child.parentTitle).toBe("Ship v1.14");
+  });
+
+  it("counts direct children only, not the whole subtree", () => {
+    const root = createTodo({ title: "root" });
+    const mid = createTodo({ title: "mid", parentId: root.id });
+    createTodo({ title: "leaf", parentId: mid.id });
+
+    const byId = new Map(listTodos().map((t) => [t.id, t]));
+    expect(byId.get(root.id)?.childCount).toBe(1);
+    expect(byId.get(mid.id)?.childCount).toBe(1);
+  });
+
+  it("rejects a parent id that does not exist", () => {
+    expect(() => createTodo({ title: "orphan", parentId: 9999 })).toThrow(/not found/i);
+  });
+
+  it("re-parents an existing todo", () => {
+    const first = createTodo({ title: "first" });
+    const second = createTodo({ title: "second" });
+    const child = createTodo({ title: "child", parentId: first.id });
+
+    const moved = updateTodo({ id: child.id, parentId: second.id });
+    expect(moved.parentId).toBe(second.id);
+    expect(moved.parentTitle).toBe("second");
+  });
+
+  it("lifts a todo back to the top level when parentId is null", () => {
+    const parent = createTodo({ title: "parent" });
+    const child = createTodo({ title: "child", parentId: parent.id });
+
+    const lifted = updateTodo({ id: child.id, parentId: null });
+    expect(lifted.parentId).toBeNull();
+    expect(lifted.parentTitle).toBeNull();
+  });
+
+  it("leaves the link alone when parentId is omitted", () => {
+    const parent = createTodo({ title: "parent" });
+    const child = createTodo({ title: "child", parentId: parent.id });
+
+    expect(updateTodo({ id: child.id, title: "renamed" }).parentId).toBe(parent.id);
+  });
+
+  it("refuses to make a todo its own parent", () => {
+    const todo = createTodo({ title: "solo" });
+    expect(() => updateTodo({ id: todo.id, parentId: todo.id })).toThrow(/own parent/i);
+  });
+
+  it("refuses a direct cycle", () => {
+    const parent = createTodo({ title: "parent" });
+    const child = createTodo({ title: "child", parentId: parent.id });
+
+    expect(() => updateTodo({ id: parent.id, parentId: child.id })).toThrow(/own subtree/i);
+  });
+
+  it("refuses a cycle several levels deep", () => {
+    const a = createTodo({ title: "a" });
+    const b = createTodo({ title: "b", parentId: a.id });
+    const c = createTodo({ title: "c", parentId: b.id });
+    const d = createTodo({ title: "d", parentId: c.id });
+
+    expect(() => updateTodo({ id: a.id, parentId: d.id })).toThrow(/own subtree/i);
+  });
+
+  it("allows nesting to an arbitrary depth", () => {
+    let parentId = createTodo({ title: "level 0" }).id;
+    for (let level = 1; level <= 8; level++) {
+      parentId = createTodo({ title: `level ${level}`, parentId }).id;
+    }
+
+    const deepest = listTodos().find((t) => t.title === "level 8");
+    expect(deepest?.parentTitle).toBe("level 7");
+  });
+
+  it("allows moving a grandchild up to be a direct child", () => {
+    const root = createTodo({ title: "root" });
+    const mid = createTodo({ title: "mid", parentId: root.id });
+    const leaf = createTodo({ title: "leaf", parentId: mid.id });
+
+    expect(updateTodo({ id: leaf.id, parentId: root.id }).parentId).toBe(root.id);
+  });
+
+  it("lists only the direct children of a parent", () => {
+    const root = createTodo({ title: "root" });
+    createTodo({ title: "child a", parentId: root.id });
+    const mid = createTodo({ title: "child b", parentId: root.id });
+    createTodo({ title: "grandchild", parentId: mid.id });
+    createTodo({ title: "unrelated" });
+
+    const children = listTodos({ parentId: root.id }).map((t) => t.title);
+    expect(children.sort()).toEqual(["child a", "child b"]);
+  });
+
+  it("keeps children when their parent is deleted", () => {
+    const parent = createTodo({ title: "parent" });
+    const child = createTodo({ title: "child", parentId: parent.id });
+
+    deleteTodo(parent.id);
+
+    const survivors = listTodos();
+    expect(survivors.map((t) => t.title)).toEqual(["child"]);
+    expect(survivors[0]?.id).toBe(child.id);
+    expect(survivors[0]?.parentId).toBeNull();
+  });
+
+  it("keeps children when their parent is swept by clearCompleted", () => {
+    const parent = createTodo({ title: "parent" });
+    createTodo({ title: "child", parentId: parent.id });
+    complete(parent.id);
+
+    expect(clearCompletedTodos()).toBe(1);
+
+    const survivors = listTodos();
+    expect(survivors.map((t) => t.title)).toEqual(["child"]);
+    expect(survivors[0]?.parentId).toBeNull();
+  });
+
+  it("completing a parent leaves its children in their own state", () => {
+    const parent = createTodo({ title: "parent" });
+    const child = createTodo({ title: "child", parentId: parent.id });
+
+    complete(parent.id);
+
+    const stillOpen = listTodos({ filter: "active" }).map((t) => t.id);
+    expect(stillOpen).toContain(child.id);
+  });
+});
