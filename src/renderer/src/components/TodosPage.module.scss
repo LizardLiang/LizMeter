@@ -456,6 +456,23 @@
   }
 }
 
+// A label is a filled pill, deliberately unlike the outlined project box next to it:
+// a todo has at most one project but any number of labels, so they must not read alike.
+// Border, text and background colours are set inline from the label's own colour.
+.label {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .project {
   flex-shrink: 0;
   display: flex;

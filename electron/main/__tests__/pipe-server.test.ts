@@ -9,7 +9,14 @@ vi.mock("../index.ts", () => ({
   getMainWindow: () => null,
 }));
 
-import { findTodoStateByLabel, initDatabase, listNvimActivityByDate, listTodos } from "../database.ts";
+import {
+  createTodoLabel,
+  createTodoProject,
+  findTodoStateByLabel,
+  initDatabase,
+  listNvimActivityByDate,
+  listTodos,
+} from "../database.ts";
 import { processLine } from "../pipe-server.ts";
 
 /** Runs one line through the protocol and returns the parsed reply, if any. */
@@ -207,6 +214,7 @@ describe("todo.clear-completed", () => {
 
 describe("todo.add with the extended fields", () => {
   it("stores project, milestone, and dates", () => {
+    createTodoProject({ name: "LizMeter" });
     send({
       id: 1,
       type: "todo.add",
@@ -218,10 +226,49 @@ describe("todo.add with the extended fields", () => {
     });
 
     const todo = listTodos()[0]!;
-    expect(todo.project).toBe("LizMeter");
+    expect(todo.project?.name).toBe("LizMeter");
     expect(todo.milestone).toBe("v1.14");
     expect(todo.startDate).toBe("2026-08-25");
     expect(todo.dueDate).toBe("2026-08-30");
+  });
+
+  it("resolves a project by name, case-insensitively", () => {
+    createTodoProject({ name: "LizMeter" });
+    send({ id: 1, type: "todo.add", title: "x", project: "lizmeter" });
+
+    expect(listTodos()[0]?.project?.name).toBe("LizMeter");
+  });
+
+  it("rejects an unknown project with the valid list", () => {
+    createTodoProject({ name: "LizMeter" });
+    const reply = send({ id: 1, type: "todo.add", title: "x", project: "Nope" });
+
+    // Agents cannot invent a project the way the in-app picker can, so the error has to
+    // teach the vocabulary in one round trip.
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/Valid projects: LizMeter/);
+  });
+
+  it("says so when no projects exist at all", () => {
+    const reply = send({ id: 1, type: "todo.add", title: "x", project: "Nope" });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/No projects exist yet/);
+  });
+
+  it("attaches labels by name", () => {
+    createTodoLabel({ name: "bug" });
+    createTodoLabel({ name: "ui" });
+    send({ id: 1, type: "todo.add", title: "x", labels: ["ui", "BUG"] });
+
+    expect(listTodos()[0]?.labels.map((l) => l.name)).toEqual(["bug", "ui"]);
+  });
+
+  it("rejects an unknown label with the valid list", () => {
+    createTodoLabel({ name: "bug" });
+    const reply = send({ id: 1, type: "todo.add", title: "x", labels: ["nope"] });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/Valid labels: bug/);
   });
 
   it("accepts a state by label, case-insensitively", () => {
@@ -281,12 +328,32 @@ describe("todo.update", () => {
   });
 
   it("changes only the fields passed", () => {
+    createTodoProject({ name: "LizMeter" });
     const todoId = addOne();
     send({ id: 2, type: "todo.update", todoId, project: "LizMeter" });
 
     const todo = listTodos()[0]!;
     expect(todo.title).toBe("original");
-    expect(todo.project).toBe("LizMeter");
+    expect(todo.project?.name).toBe("LizMeter");
+  });
+
+  it("clears the project when null is passed", () => {
+    const project = createTodoProject({ name: "LizMeter" });
+    const todoId = addOne();
+    send({ id: 2, type: "todo.update", todoId, project: project.name });
+    send({ id: 3, type: "todo.update", todoId, project: null });
+
+    expect(listTodos()[0]?.project).toBeNull();
+  });
+
+  it("replaces the whole label set", () => {
+    const bug = createTodoLabel({ name: "bug" });
+    createTodoLabel({ name: "ui" });
+    const todoId = addOne();
+    send({ id: 2, type: "todo.update", todoId, labels: [bug.name] });
+    send({ id: 3, type: "todo.update", todoId, labels: ["ui"] });
+
+    expect(listTodos()[0]?.labels.map((l) => l.name)).toEqual(["ui"]);
   });
 
   it("stamps completedAt when moved into the completed state", () => {
@@ -323,7 +390,10 @@ describe("todo.update", () => {
 
 describe("todo.list filters", () => {
   beforeEach(() => {
-    send({ id: 1, type: "todo.add", title: "a", project: "LizMeter", state: "Testing" });
+    createTodoProject({ name: "LizMeter" });
+    createTodoProject({ name: "Other" });
+    createTodoLabel({ name: "bug" });
+    send({ id: 1, type: "todo.add", title: "a", project: "LizMeter", state: "Testing", labels: ["bug"] });
     send({ id: 2, type: "todo.add", title: "b", project: "Other" });
   });
 
@@ -331,6 +401,18 @@ describe("todo.list filters", () => {
     const reply = send({ id: 3, type: "todo.list", project: "LizMeter" });
     const result = reply?.result as { todos: Array<{ title: string; }>; };
     expect(result.todos.map((t) => t.title)).toEqual(["a"]);
+  });
+
+  it("filters by label", () => {
+    const reply = send({ id: 3, type: "todo.list", label: "bug" });
+    const result = reply?.result as { todos: Array<{ title: string; }>; };
+    expect(result.todos.map((t) => t.title)).toEqual(["a"]);
+  });
+
+  it("rejects an unknown project filter with the valid list", () => {
+    const reply = send({ id: 3, type: "todo.list", project: "nope" });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/Valid projects:/);
   });
 
   it("filters by state label", () => {

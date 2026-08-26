@@ -13,6 +13,12 @@ interface Props {
   placeholder?: string;
   className?: string;
   maxLength?: number;
+  /**
+   * Called when a value is settled rather than merely typed: Enter, or picking a suggestion.
+   * Lets a caller treat the box as an "add one of these" control instead of a single field.
+   * The committed value still arrives through `onChange` first.
+   */
+  onCommit?: (value: string) => void;
 }
 
 const MIN_WIDTH = 160;
@@ -37,7 +43,9 @@ function ChevronIcon() {
  * Free-text field with themed suggestions -- the editable sibling of `Select`.
  * A native <input list> hands its popup to the OS renderer, which ignores the theme.
  */
-export function Combobox({ value, onChange, options, ariaLabel, placeholder, className, maxLength }: Props) {
+export function Combobox(
+  { value, onChange, options, ariaLabel, placeholder, className, maxLength, onCommit }: Props,
+) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1);
   const [pos, setPos] = useState({ top: 0, left: 0, width: MIN_WIDTH });
@@ -94,10 +102,11 @@ export function Combobox({ value, onChange, options, ariaLabel, placeholder, cla
 
   const pick = useCallback((next: string) => {
     onChange(next);
+    onCommit?.(next);
     setOpen(false);
     setActive(-1);
     inputRef.current?.focus();
-  }, [onChange]);
+  }, [onChange, onCommit]);
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown") {
@@ -114,6 +123,13 @@ export function Combobox({ value, onChange, options, ariaLabel, placeholder, cla
       e.preventDefault();
       const match = matches[active];
       if (match) pick(match);
+    } else if (e.key === "Enter" && onCommit !== undefined) {
+      // With a commit handler the box owns Enter outright, otherwise typing a brand-new
+      // value and pressing Enter would submit the surrounding form instead of adding it.
+      e.preventDefault();
+      onCommit(value);
+      setOpen(false);
+      setActive(-1);
     } else if (e.key === "Escape" && open) {
       e.stopPropagation();
       e.preventDefault();

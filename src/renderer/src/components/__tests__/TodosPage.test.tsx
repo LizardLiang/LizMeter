@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Todo, TodoState } from "../../../../shared/types.ts";
+import type { Todo, TodoLabel, TodoProject, TodoState } from "../../../../shared/types.ts";
 import { TodosPage } from "../TodosPage.tsx";
 
 const todoState: TodoState = {
@@ -23,6 +23,21 @@ const backlogState: TodoState = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+const infraProject: TodoProject = {
+  id: 7,
+  name: "Infra",
+  color: "#bb9af7",
+  position: 0,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+const bugLabel: TodoLabel = {
+  id: 11,
+  name: "bug",
+  color: "#f7768e",
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
 function makeTodo(id: number, title: string, state: TodoState, extra: Partial<Todo> = {}): Todo {
   return {
     id,
@@ -30,6 +45,7 @@ function makeTodo(id: number, title: string, state: TodoState, extra: Partial<To
     notes: null,
     state,
     project: null,
+    labels: [],
     milestone: null,
     priority: 0,
     startDate: null,
@@ -47,7 +63,7 @@ function makeTodo(id: number, title: string, state: TodoState, extra: Partial<To
 
 const sampleTodos: Todo[] = [
   makeTodo(152, "Old prod to new prod migration", todoState),
-  makeTodo(100, "Fix misc code quality issues", todoState, { project: "Infra" }),
+  makeTodo(100, "Fix misc code quality issues", todoState, { project: infraProject }),
   makeTodo(162, "Server-side PDF optimization", backlogState),
 ];
 
@@ -57,7 +73,6 @@ const mockTodoAPI = {
   update: vi.fn(),
   delete: vi.fn(),
   clearCompleted: vi.fn(),
-  listProjects: vi.fn(),
   listMilestones: vi.fn(),
   onChanged: vi.fn(),
 };
@@ -70,17 +85,40 @@ const mockTodoStateAPI = {
   reorder: vi.fn(),
 };
 
+const mockTodoProjectAPI = {
+  list: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  delete: vi.fn(),
+  reorder: vi.fn(),
+};
+
+const mockTodoLabelAPI = {
+  list: vi.fn(),
+  create: vi.fn(),
+  update: vi.fn(),
+  delete: vi.fn(),
+};
+
 beforeEach(() => {
   localStorage.clear();
-  vi.stubGlobal("electronAPI", { todo: mockTodoAPI, todoState: mockTodoStateAPI });
+  vi.stubGlobal("electronAPI", {
+    todo: mockTodoAPI,
+    todoState: mockTodoStateAPI,
+    todoProject: mockTodoProjectAPI,
+    todoLabel: mockTodoLabelAPI,
+  });
   mockTodoAPI.list.mockResolvedValue(sampleTodos);
-  mockTodoAPI.listProjects.mockResolvedValue(["Infra"]);
   mockTodoAPI.listMilestones.mockResolvedValue([]);
   mockTodoAPI.delete.mockResolvedValue(undefined);
   mockTodoAPI.update.mockResolvedValue(sampleTodos[0]);
   mockTodoAPI.create.mockResolvedValue(sampleTodos[0]);
   mockTodoAPI.onChanged.mockReturnValue(() => {});
   mockTodoStateAPI.list.mockResolvedValue([todoState, backlogState]);
+  mockTodoProjectAPI.list.mockResolvedValue([infraProject]);
+  mockTodoProjectAPI.create.mockResolvedValue({ ...infraProject, id: 8, name: "Billing" });
+  mockTodoLabelAPI.list.mockResolvedValue([bugLabel]);
+  mockTodoLabelAPI.create.mockResolvedValue({ ...bugLabel, id: 12, name: "ui" });
 });
 
 afterEach(() => {
@@ -488,7 +526,7 @@ describe("TodosPage keyboard navigation", () => {
     expect(within(menu).queryByRole("button", { name: "2026-02-30" })).not.toBeInTheDocument();
   });
 
-  it("`P` offers the existing projects and writes the pick", async () => {
+  it("`⇧P` offers the existing projects and writes the pick", async () => {
     await renderPage();
     cursorTo(1);
 
@@ -497,10 +535,10 @@ describe("TodosPage keyboard navigation", () => {
     const menu = await screen.findByRole("dialog", { name: "Set project" });
     fireEvent.click(within(menu).getByRole("button", { name: /^Infra/ }));
 
-    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, project: "Infra" }));
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, projectId: infraProject.id }));
   });
 
-  it("`P` accepts a typed name that is not an existing project yet", async () => {
+  it("`⇧P` creates a project from a typed name, then files the todo under it", async () => {
     await renderPage();
     cursorTo(1);
 
@@ -510,7 +548,77 @@ describe("TodosPage keyboard navigation", () => {
 
     fireEvent.click(within(menu).getByRole("button", { name: /Create "Billing"/ }));
 
-    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, project: "Billing" }));
+    await waitFor(() => expect(mockTodoProjectAPI.create).toHaveBeenCalledWith({ name: "Billing" }));
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, projectId: 8 }));
+  });
+
+  it("`t` toggles a label on without closing the menu", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "t" });
+    const menu = await screen.findByRole("dialog", { name: "Toggle labels" });
+    fireEvent.click(within(menu).getByRole("button", { name: /^bug/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, labelIds: [bugLabel.id] }));
+    // Several labels are usually set in one visit, so the menu stays up after a pick.
+    expect(screen.getByRole("dialog", { name: "Toggle labels" })).toBeInTheDocument();
+  });
+
+  it("`t` toggles an attached label back off", async () => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState, { labels: [bugLabel] }),
+    ]);
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "t" });
+    const menu = await screen.findByRole("dialog", { name: "Toggle labels" });
+    fireEvent.click(within(menu).getByRole("button", { name: /^bug/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, labelIds: [] }));
+  });
+
+  it("`t` keeps earlier picks when several labels are toggled in one visit", async () => {
+    const uiLabel = { ...bugLabel, id: 12, name: "ui" };
+    mockTodoLabelAPI.list.mockResolvedValue([bugLabel, uiLabel]);
+
+    const withBug = makeTodo(152, "Old prod to new prod migration", todoState, { labels: [bugLabel] });
+    // The list reloads after the first toggle, so the second pick must read the refreshed
+    // todo. Reading the one captured when the menu opened would send [ui] and lose "bug".
+    mockTodoAPI.list
+      .mockResolvedValueOnce([makeTodo(152, "Old prod to new prod migration", todoState)])
+      .mockResolvedValue([withBug]);
+
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "t" });
+    const menu = await screen.findByRole("dialog", { name: "Toggle labels" });
+
+    fireEvent.click(within(menu).getByRole("button", { name: /^bug/ }));
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, labelIds: [bugLabel.id] }));
+
+    // Wait for the refreshed row before the second pick, so the menu is reading live data.
+    await waitFor(() => expect(screen.getByText("bug")).toBeInTheDocument());
+    fireEvent.click(within(menu).getByRole("button", { name: /^ui/ }));
+
+    await waitFor(() =>
+      expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, labelIds: [bugLabel.id, uiLabel.id] })
+    );
+  });
+
+  it("`t` creates a label from a typed name, then attaches it", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "t" });
+    const menu = await screen.findByRole("dialog", { name: "Toggle labels" });
+    fireEvent.change(within(menu).getByLabelText("Toggle labels"), { target: { value: "ui" } });
+    fireEvent.click(within(menu).getByRole("button", { name: /Create "ui"/ }));
+
+    await waitFor(() => expect(mockTodoLabelAPI.create).toHaveBeenCalledWith({ name: "ui" }));
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, labelIds: [12] }));
   });
 
   it("`l` opens the sub-issue picker on the cursor's row", async () => {
@@ -636,7 +744,7 @@ describe("TodosPage row context menu", () => {
     openRowMenu("Old prod to new prod migration");
 
     const menu = await screen.findByRole("menu", { name: "Actions for Old prod to new prod migration" });
-    for (const name of ["Edit", "Priority...", "Due date...", "Project...", "Add sub-issue", "Delete"]) {
+    for (const name of ["Edit", "Priority...", "Due date...", "Project...", "Labels...", "Add sub-issue", "Delete"]) {
       expect(within(menu).getByRole("menuitem", { name })).toBeInTheDocument();
     }
     // The row's own state is listed but not offered, so "move to" never means "stay put".
@@ -751,5 +859,121 @@ describe("TodosPage shortcut hints", () => {
     fireEvent.keyDown(document.body, { key: "c" });
 
     expect(screen.queryByRole("dialog", { name: "New todo" })).not.toBeInTheDocument();
+  });
+});
+
+// --- Projects and labels on the row -----------------------------------------
+
+describe("project and label chips", () => {
+  it("draws the project by name", async () => {
+    await renderPage();
+    expect(screen.getByText("Infra")).toBeInTheDocument();
+  });
+
+  it("draws every label a todo carries", async () => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState, {
+        labels: [bugLabel, { ...bugLabel, id: 12, name: "ui" }],
+      }),
+    ]);
+    await renderPage();
+
+    expect(screen.getByText("bug")).toBeInTheDocument();
+    expect(screen.getByText("ui")).toBeInTheDocument();
+  });
+
+  /** `Select` is a custom combobox, not a native <select>: open it, then pick the option. */
+  async function pickFromSelect(ariaLabel: string, optionName: RegExp) {
+    fireEvent.click(screen.getByRole("combobox", { name: ariaLabel }));
+    const list = await screen.findByRole("listbox", { name: ariaLabel });
+    fireEvent.click(within(list).getByRole("option", { name: optionName }));
+  }
+
+  it("filters the list by project id", async () => {
+    await renderPage();
+
+    await pickFromSelect("Filter by project", /^Infra/);
+
+    await waitFor(() =>
+      expect(mockTodoAPI.list).toHaveBeenCalledWith(expect.objectContaining({ projectId: infraProject.id }))
+    );
+  });
+
+  it("filters the list by label id", async () => {
+    await renderPage();
+
+    await pickFromSelect("Filter by label", /^bug/);
+
+    await waitFor(() =>
+      expect(mockTodoAPI.list).toHaveBeenCalledWith(expect.objectContaining({ labelId: bugLabel.id }))
+    );
+  });
+});
+
+// --- The Manage dialog -------------------------------------------------------
+
+describe("the Manage dialog", () => {
+  async function openManage() {
+    await renderPage();
+    fireEvent.click(screen.getByRole("button", { name: "Manage" }));
+    return screen.findByRole("dialog", { name: /Manage todo states/ });
+  }
+
+  it("opens on the States tab", async () => {
+    const dialog = await openManage();
+    expect(within(dialog).getByRole("tab", { name: "States" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("creates a project from the Projects tab", async () => {
+    const dialog = await openManage();
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Projects" }));
+
+    fireEvent.change(within(dialog).getByLabelText("New project name"), { target: { value: "Billing" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+
+    await waitFor(() => expect(mockTodoProjectAPI.create).toHaveBeenCalledWith({ name: "Billing", color: "#7aa2f7" }));
+  });
+
+  it("renames a project on blur", async () => {
+    const dialog = await openManage();
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Projects" }));
+
+    const input = within(dialog).getByLabelText("Rename Infra");
+    fireEvent.change(input, { target: { value: "Platform" } });
+    fireEvent.blur(input);
+
+    await waitFor(() =>
+      expect(mockTodoProjectAPI.update).toHaveBeenCalledWith({ id: infraProject.id, name: "Platform" })
+    );
+  });
+
+  it("says the todos survive before deleting a project", async () => {
+    const dialog = await openManage();
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Projects" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete Infra" }));
+
+    expect(within(dialog).getByText(/The todos themselves are kept/)).toBeInTheDocument();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete project" }));
+    await waitFor(() => expect(mockTodoProjectAPI.delete).toHaveBeenCalledWith(infraProject.id));
+  });
+
+  it("creates a label from the Labels tab", async () => {
+    const dialog = await openManage();
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Labels" }));
+
+    fireEvent.change(within(dialog).getByLabelText("New label name"), { target: { value: "chore" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
+
+    await waitFor(() => expect(mockTodoLabelAPI.create).toHaveBeenCalledWith({ name: "chore", color: "#7aa2f7" }));
+  });
+
+  it("recolors a label from the palette", async () => {
+    const dialog = await openManage();
+    fireEvent.click(within(dialog).getByRole("tab", { name: "Labels" }));
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Set bug to #9ece6a" }));
+
+    await waitFor(() => expect(mockTodoLabelAPI.update).toHaveBeenCalledWith({ id: bugLabel.id, color: "#9ece6a" }));
   });
 });

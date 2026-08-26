@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import type { CreateTodoInput, Todo, TodoState, UpdateTodoInput } from "../../../shared/types.ts";
+import type {
+  CreateTodoInput,
+  CreateTodoLabelInput,
+  CreateTodoProjectInput,
+  Todo,
+  TodoLabel,
+  TodoProject,
+  TodoState,
+  UpdateTodoInput,
+} from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS } from "../../../shared/types.ts";
 import { Combobox } from "./Combobox.tsx";
 import { DatePicker } from "./DatePicker.tsx";
@@ -17,8 +26,13 @@ interface Props {
   /** Create mode only: pre-fills the parent chip, so "add sub-issue" opens ready to type a title. */
   defaultParent?: { id: number; title: string; };
   states: TodoState[];
-  projects: string[];
+  projects: TodoProject[];
+  labels: TodoLabel[];
   milestones: string[];
+  /** Creates a project named in the Project box that does not exist yet. */
+  onCreateProject: (input: CreateTodoProjectInput) => Promise<TodoProject>;
+  /** Get-or-create, so naming an existing label in the Labels box reuses it. */
+  onCreateLabel: (input: CreateTodoLabelInput) => Promise<TodoLabel>;
   onSave: (input: UpdateTodoInput) => Promise<void>;
   onCreate: (input: CreateTodoInput) => Promise<void>;
   onDelete: (id: number) => Promise<void>;
@@ -43,14 +57,33 @@ function initialParent(
 }
 
 export function TodoEditDialog(
-  { todo, defaultStateId, defaultParent, states, projects, milestones, onSave, onCreate, onDelete, onClose }: Props,
+  {
+    todo,
+    defaultStateId,
+    defaultParent,
+    states,
+    projects,
+    labels,
+    milestones,
+    onCreateProject,
+    onCreateLabel,
+    onSave,
+    onCreate,
+    onDelete,
+    onClose,
+  }: Props,
 ) {
   const creating = todo === null;
 
   const [title, setTitle] = useState(todo?.title ?? "");
   const [notes, setNotes] = useState(todo?.notes ?? "");
   const [stateId, setStateId] = useState(() => initialStateId(todo, defaultStateId, states));
-  const [project, setProject] = useState(todo?.project ?? "");
+  // Held as the project's name rather than its id, so the box keeps accepting a new name.
+  // `submit` turns whatever is in it into a real row.
+  const [project, setProject] = useState(todo?.project?.name ?? "");
+  /** Staged label names. Resolved to ids on save, the same way `project` is. */
+  const [labelNames, setLabelNames] = useState<string[]>(() => todo?.labels.map((l) => l.name) ?? []);
+  const [labelDraft, setLabelDraft] = useState("");
   const [milestone, setMilestone] = useState(todo?.milestone ?? "");
   const [priority, setPriority] = useState(todo?.priority ?? 0);
   const [startDate, setStartDate] = useState(todo?.startDate ?? "");
@@ -112,23 +145,45 @@ export function TodoEditDialog(
     return () => document.removeEventListener("keydown", handler);
   }, [onClose, picking, notesExpanded]);
 
+  /** Resolves the typed project name to an id, creating the project when it is a new name. */
+  async function resolveProject(): Promise<number | null> {
+    const name = project.trim();
+    if (name.length === 0) return null;
+    const existing = projects.find((p) => p.name.toLowerCase() === name.toLowerCase());
+    if (existing) return existing.id;
+    return (await onCreateProject({ name })).id;
+  }
+
+  /** Same idea for labels, except creation there is get-or-create so a race cannot duplicate. */
+  async function resolveLabels(): Promise<number[]> {
+    const ids: number[] = [];
+    for (const name of labelNames) {
+      const existing = labels.find((l) => l.name.toLowerCase() === name.toLowerCase());
+      ids.push(existing ? existing.id : (await onCreateLabel({ name })).id);
+    }
+    return ids;
+  }
+
   async function submit() {
     if (!canSubmit) return;
 
-    const fields = {
-      title: title.trim(),
-      notes: notes.trim().length > 0 ? notes.trim() : null,
-      stateId,
-      project: project.trim().length > 0 ? project.trim() : null,
-      milestone: milestone.trim().length > 0 ? milestone.trim() : null,
-      priority,
-      startDate: startDate.length > 0 ? startDate : null,
-      dueDate: dueDate.length > 0 ? dueDate : null,
-      parentId: parent === null ? null : parent.id,
-    };
-
     setBusy(true);
     try {
+      // Resolved inside the try: a rejected name (too long, a clash) has to surface as a
+      // failed save rather than being quietly written as "no project".
+      const fields = {
+        title: title.trim(),
+        notes: notes.trim().length > 0 ? notes.trim() : null,
+        stateId,
+        projectId: await resolveProject(),
+        labelIds: await resolveLabels(),
+        milestone: milestone.trim().length > 0 ? milestone.trim() : null,
+        priority,
+        startDate: startDate.length > 0 ? startDate : null,
+        dueDate: dueDate.length > 0 ? dueDate : null,
+        parentId: parent === null ? null : parent.id,
+      };
+
       if (todo) await onSave({ id: todo.id, ...fields });
       else await onCreate({ ...fields, source: "user" });
       onClose();
@@ -137,6 +192,14 @@ export function TodoEditDialog(
     } finally {
       setBusy(false);
     }
+  }
+
+  function addLabel(name: string) {
+    const trimmed = name.trim();
+    if (trimmed.length === 0) return;
+    if (labelNames.some((n) => n.toLowerCase() === trimmed.toLowerCase())) return;
+    setLabelNames((current) => [...current, trimmed]);
+    setLabelDraft("");
   }
 
   async function handleSubmit(event: React.FormEvent) {
@@ -295,10 +358,47 @@ export function TodoEditDialog(
                 ariaLabel="Project"
                 className={styles.selectTrigger}
                 value={project}
-                options={projects}
+                options={projects.map((p) => p.name)}
                 onChange={setProject}
-                maxLength={120}
+                maxLength={60}
               />
+            </div>
+
+            <div className={styles.fieldWide}>
+              <span className={styles.label}>Labels</span>
+              <div className={styles.labelRow}>
+                {labelNames.map((name) => {
+                  const known = labels.find((l) => l.name.toLowerCase() === name.toLowerCase());
+                  return (
+                    <span
+                      key={name}
+                      className={styles.labelChip}
+                      style={known ? { borderColor: known.color + "66", color: known.color } : undefined}
+                    >
+                      {name}
+                      <button
+                        type="button"
+                        className={styles.labelRemove}
+                        onClick={() => setLabelNames((current) => current.filter((n) => n !== name))}
+                        aria-label={`Remove label ${name}`}
+                      >
+                        &times;
+                      </button>
+                    </span>
+                  );
+                })}
+                <Combobox
+                  ariaLabel="Add label"
+                  className={styles.labelBox}
+                  value={labelDraft}
+                  options={labels
+                    .map((l) => l.name)
+                    .filter((n) => !labelNames.some((picked) => picked.toLowerCase() === n.toLowerCase()))}
+                  onChange={setLabelDraft}
+                  onCommit={() => addLabel(labelDraft)}
+                  maxLength={40}
+                />
+              </div>
             </div>
 
             <div className={styles.field}>

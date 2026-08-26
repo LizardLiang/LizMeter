@@ -4,7 +4,7 @@ import type { Todo, TodoState } from "../../../shared/types.ts";
 import styles from "./TodoRowMenu.module.scss";
 
 /** The single-key menus the page already owns. An item here just hands off to one of them. */
-export type QuickMenuKind = "state" | "priority" | "due" | "project";
+export type QuickMenuKind = "state" | "priority" | "due" | "project" | "label";
 
 /** Where a menu hangs. `top`/`bottom` bracket the trigger so the panel can flip above it. */
 export interface MenuAnchor {
@@ -123,6 +123,10 @@ export function TodoActionMenu(props: MenuProps) {
       <button className={styles.item} type="button" role="menuitem" onClick={pick(() => onQuickMenu("project"))}>
         Project...
         <Hint keys={["⇧", "P"]} />
+      </button>
+      <button className={styles.item} type="button" role="menuitem" onClick={pick(() => onQuickMenu("label"))}>
+        Labels...
+        <Hint keys={["T"]} />
       </button>
 
       <div className={styles.divider} />

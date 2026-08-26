@@ -25,6 +25,12 @@ interface Props {
    * arbitrary YYYY-MM-DD gets in. Returning null rejects the query and keeps the menu open.
    */
   acceptQuery?: (query: string) => QuickMenuItem | null;
+  /**
+   * Toggle mode: picking an item leaves the menu open so several can be set in one visit,
+   * and `current` reads as "attached" rather than "this is the value". Labels use it;
+   * state, priority, due date and project are single-valued and do not.
+   */
+  multi?: boolean;
   onPick: (value: string) => void;
   onClose: () => void;
 }
@@ -43,9 +49,13 @@ const ROW_HEIGHT = 30;
  * somewhere to land that never steals focus away from the list for longer than one choice.
  * Portalled, so the panel's backdrop-filter cannot clip it or trap its fixed positioning.
  */
-export function TodoQuickMenu({ heading, items, anchor, placeholder, acceptQuery, onPick, onClose }: Props) {
+export function TodoQuickMenu(
+  { heading, items, anchor, placeholder, acceptQuery, multi = false, onPick, onClose }: Props,
+) {
   const [query, setQuery] = useState("");
-  const [active, setActive] = useState(() => Math.max(0, items.findIndex((i) => i.current === true)));
+  // In toggle mode the first attached item is not a useful starting point -- there may be
+  // several -- so the highlight begins at the top of the list instead.
+  const [active, setActive] = useState(() => (multi ? 0 : Math.max(0, items.findIndex((i) => i.current === true))));
   const listRef = useRef<HTMLUListElement>(null);
 
   const matches = useMemo(() => {
@@ -103,7 +113,8 @@ export function TodoQuickMenu({ heading, items, anchor, placeholder, acceptQuery
       const item = rows[active];
       if (item) {
         onPick(item.value);
-        onClose();
+        if (!multi) onClose();
+        else setQuery("");
       }
     }
   }
@@ -147,7 +158,8 @@ export function TodoQuickMenu({ heading, items, anchor, placeholder, acceptQuery
                   onMouseEnter={() => setActive(index)}
                   onClick={() => {
                     onPick(item.value);
-                    onClose();
+                    if (!multi) onClose();
+                    else setQuery("");
                   }}
                 >
                   {item.color !== undefined && (
@@ -159,7 +171,9 @@ export function TodoQuickMenu({ heading, items, anchor, placeholder, acceptQuery
                   )}
                   <span className={styles.label}>{item.label}</span>
                   {item.hint !== undefined && <span className={styles.hint}>{item.hint}</span>}
-                  {item.current === true && <span className={styles.check} aria-label="Current">&#10003;</span>}
+                  {item.current === true && (
+                    <span className={styles.check} aria-label={multi ? "Attached" : "Current"}>&#10003;</span>
+                  )}
                 </button>
               </li>
             ))}

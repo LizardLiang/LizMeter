@@ -11,6 +11,8 @@ import type {
   AssignTagInput,
   CreateTagInput,
   CreateTodoInput,
+  CreateTodoLabelInput,
+  CreateTodoProjectInput,
   CreateTodoStateInput,
   IssueProviderStatus,
   IssuesListInput,
@@ -27,6 +29,8 @@ import type {
   TodoAttachment,
   UpdateTagInput,
   UpdateTodoInput,
+  UpdateTodoLabelInput,
+  UpdateTodoProjectInput,
   UpdateTodoStateInput,
   WidgetControlAction,
   WidgetSettings,
@@ -49,12 +53,16 @@ import {
   createTag,
   createTodo,
   createTodoAttachment,
+  createTodoLabel,
+  createTodoProject,
   createTodoState,
   deleteSession,
   deleteSettingValue,
   deleteTag,
   deleteTodo,
   deleteTodoAttachment,
+  deleteTodoLabel,
+  deleteTodoProject,
   deleteTodoState,
   getClaudeCodeDataForSession,
   getTodoAttachment,
@@ -66,10 +74,12 @@ import {
   listTags,
   listTagsForSession,
   listTodoAttachments,
+  listTodoLabels,
   listTodoMilestones,
   listTodoProjects,
   listTodos,
   listTodoStates,
+  reorderTodoProjects,
   reorderTodoStates,
   saveSession,
   saveSessionWithTracking,
@@ -79,6 +89,8 @@ import {
   updateSessionDuration,
   updateTag,
   updateTodo,
+  updateTodoLabel,
+  updateTodoProject,
   updateTodoState,
   updateWorklogStatus,
 } from "./database.ts";
@@ -202,10 +214,6 @@ export function registerIpcHandlers(): void {
     return count;
   });
 
-  ipcMain.handle("todo:list-projects", () => {
-    return listTodoProjects();
-  });
-
   ipcMain.handle("todo:list-milestones", () => {
     return listTodoMilestones();
   });
@@ -322,6 +330,44 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("todo-state:reorder", (_event, orderedIds: number[]) => {
     return reorderTodoStates(orderedIds);
+  });
+
+  // Todo project handlers
+  ipcMain.handle("todo-project:list", () => {
+    return listTodoProjects();
+  });
+
+  ipcMain.handle("todo-project:create", (_event, input: CreateTodoProjectInput) => {
+    return createTodoProject(input);
+  });
+
+  ipcMain.handle("todo-project:update", (_event, input: UpdateTodoProjectInput) => {
+    return updateTodoProject(input);
+  });
+
+  ipcMain.handle("todo-project:delete", (_event, id: number) => {
+    return deleteTodoProject(id);
+  });
+
+  ipcMain.handle("todo-project:reorder", (_event, orderedIds: number[]) => {
+    return reorderTodoProjects(orderedIds);
+  });
+
+  // Todo label handlers
+  ipcMain.handle("todo-label:list", () => {
+    return listTodoLabels();
+  });
+
+  ipcMain.handle("todo-label:create", (_event, input: CreateTodoLabelInput) => {
+    return createTodoLabel(input);
+  });
+
+  ipcMain.handle("todo-label:update", (_event, input: UpdateTodoLabelInput) => {
+    return updateTodoLabel(input);
+  });
+
+  ipcMain.handle("todo-label:delete", (_event, id: number) => {
+    return deleteTodoLabel(id);
   });
 
   // Issue tracker handlers (GitHub)

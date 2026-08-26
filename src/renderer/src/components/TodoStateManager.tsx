@@ -1,20 +1,8 @@
 import { useEffect, useState } from "react";
 import type { CreateTodoStateInput, TodoState, UpdateTodoStateInput } from "../../../shared/types.ts";
+import { TODO_COLORS } from "../../../shared/types.ts";
 import { Select } from "./Select.tsx";
 import styles from "./TodoStateManager.module.scss";
-
-/** Tag palette plus the muted grey, matching VALID_TODO_STATE_COLORS in the main process. */
-const STATE_COLORS = [
-  "#7aa2f7",
-  "#bb9af7",
-  "#7dcfff",
-  "#9ece6a",
-  "#f7768e",
-  "#ff9e64",
-  "#e0af68",
-  "#c678dd",
-  "#565f89",
-];
 
 interface Props {
   states: TodoState[];
@@ -24,10 +12,9 @@ interface Props {
   onUpdate: (input: UpdateTodoStateInput) => Promise<void>;
   onDelete: (id: number, reassignToId: number) => Promise<number>;
   onReorder: (orderedIds: number[]) => Promise<void>;
-  onClose: () => void;
 }
 
-function ArrowIcon({ direction }: { direction: "up" | "down"; }) {
+export function ArrowIcon({ direction }: { direction: "up" | "down"; }) {
   return (
     <svg
       width="13"
@@ -50,7 +37,7 @@ function ArrowIcon({ direction }: { direction: "up" | "down"; }) {
  * Committing per keystroke would fire an IPC write and a full list refresh for every
  * character, and would reject half-typed labels that momentarily collide with another.
  */
-function StateLabelInput(
+export function CommitOnBlurInput(
   { value, onCommit, ariaLabel }: { value: string; onCommit: (label: string) => void; ariaLabel: string; },
 ) {
   const [draft, setDraft] = useState(value);
@@ -85,11 +72,15 @@ function StateLabelInput(
   );
 }
 
-export function TodoStateManager(props: Props) {
-  const { states, countsByState, onCreate, onUpdate, onDelete, onReorder, onClose } = props;
+/**
+ * The States tab of the Manage dialog. The overlay, heading and close button live in
+ * {@link TodoManageDialog}, which is what lets Projects and Labels share the same chrome.
+ */
+export function StatesTab(props: Props) {
+  const { states, countsByState, onCreate, onUpdate, onDelete, onReorder } = props;
 
   const [newLabel, setNewLabel] = useState("");
-  const [newColor, setNewColor] = useState(STATE_COLORS[0]!);
+  const [newColor, setNewColor] = useState<string>(TODO_COLORS[0]);
   const [pendingDelete, setPendingDelete] = useState<TodoState | null>(null);
   const [reassignTo, setReassignTo] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -138,153 +129,140 @@ export function TodoStateManager(props: Props) {
   }
 
   return (
-    <div className={styles.overlay} onClick={onClose} role="presentation">
-      <div
-        className={styles.dialog}
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Manage todo states"
-      >
-        <div className={styles.header}>
-          <h2 className={styles.heading}>Todo States</h2>
-          <button className={styles.closeBtn} onClick={onClose} aria-label="Close">x</button>
-        </div>
+    <>
+      <p className={styles.hint}>
+        Rename, recolor, and reorder freely. One state is where new todos land, and one means finished &mdash; those two
+        roles survive renaming.
+      </p>
 
-        <p className={styles.hint}>
-          Rename, recolor, and reorder freely. One state is where new todos land, and one means finished &mdash; those
-          two roles survive renaming.
-        </p>
-
-        <ul className={styles.list}>
-          {states.map((state, index) => {
-            const count = countsByState[state.id] ?? 0;
-            return (
-              <li key={state.id} className={styles.row}>
-                <div className={styles.reorder}>
-                  <button
-                    className={styles.moveBtn}
-                    onClick={() => move(index, -1)}
-                    disabled={index === 0}
-                    aria-label={`Move ${state.label} up`}
-                  >
-                    <ArrowIcon direction="up" />
-                  </button>
-                  <button
-                    className={styles.moveBtn}
-                    onClick={() => move(index, 1)}
-                    disabled={index === states.length - 1}
-                    aria-label={`Move ${state.label} down`}
-                  >
-                    <ArrowIcon direction="down" />
-                  </button>
-                </div>
-
-                <StateLabelInput
-                  value={state.label}
-                  onCommit={(label) => void onUpdate({ id: state.id, label })}
-                  ariaLabel={`Rename ${state.label}`}
-                />
-
-                <div className={styles.swatches}>
-                  {STATE_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      className={color === state.color ? styles.swatchActive : styles.swatch}
-                      style={{ background: color }}
-                      onClick={() => void onUpdate({ id: state.id, color })}
-                      aria-label={`Set ${state.label} to ${color}`}
-                    />
-                  ))}
-                </div>
-
-                <label className={styles.flag} title="New todos land here">
-                  <input
-                    type="radio"
-                    name="todo-state-default"
-                    checked={state.isDefault}
-                    onChange={() => void onUpdate({ id: state.id, isDefault: true })}
-                  />
-                  Default
-                </label>
-
-                <label className={styles.flag} title="Counts as finished">
-                  <input
-                    type="radio"
-                    name="todo-state-completed"
-                    checked={state.isCompleted}
-                    onChange={() => void onUpdate({ id: state.id, isCompleted: true })}
-                  />
-                  Done
-                </label>
-
-                <span className={styles.count}>{count}</span>
-
+      <ul className={styles.list}>
+        {states.map((state, index) => {
+          const count = countsByState[state.id] ?? 0;
+          return (
+            <li key={state.id} className={styles.row}>
+              <div className={styles.reorder}>
                 <button
-                  className={styles.deleteBtn}
-                  onClick={() => startDelete(state)}
-                  disabled={state.isDefault || state.isCompleted || states.length <= 1}
-                  title={state.isDefault || state.isCompleted
-                    ? "Pick another state for this role first"
-                    : "Delete this state"}
-                  aria-label={`Delete ${state.label}`}
+                  className={styles.moveBtn}
+                  onClick={() => move(index, -1)}
+                  disabled={index === 0}
+                  aria-label={`Move ${state.label} up`}
                 >
-                  Delete
+                  <ArrowIcon direction="up" />
                 </button>
-              </li>
-            );
-          })}
-        </ul>
+                <button
+                  className={styles.moveBtn}
+                  onClick={() => move(index, 1)}
+                  disabled={index === states.length - 1}
+                  aria-label={`Move ${state.label} down`}
+                >
+                  <ArrowIcon direction="down" />
+                </button>
+              </div>
 
-        <form className={styles.addForm} onSubmit={handleCreate}>
-          <input
-            className={styles.labelInput}
-            value={newLabel}
-            onChange={(e) => setNewLabel(e.target.value)}
-            placeholder="New state..."
-            aria-label="New state label"
-            maxLength={32}
-          />
-          <div className={styles.swatches}>
-            {STATE_COLORS.map((color) => (
+              <CommitOnBlurInput
+                value={state.label}
+                onCommit={(label) => void onUpdate({ id: state.id, label })}
+                ariaLabel={`Rename ${state.label}`}
+              />
+
+              <div className={styles.swatches}>
+                {TODO_COLORS.map((color) => (
+                  <button
+                    key={color}
+                    className={color === state.color ? styles.swatchActive : styles.swatch}
+                    style={{ background: color }}
+                    onClick={() => void onUpdate({ id: state.id, color })}
+                    aria-label={`Set ${state.label} to ${color}`}
+                  />
+                ))}
+              </div>
+
+              <label className={styles.flag} title="New todos land here">
+                <input
+                  type="radio"
+                  name="todo-state-default"
+                  checked={state.isDefault}
+                  onChange={() => void onUpdate({ id: state.id, isDefault: true })}
+                />
+                Default
+              </label>
+
+              <label className={styles.flag} title="Counts as finished">
+                <input
+                  type="radio"
+                  name="todo-state-completed"
+                  checked={state.isCompleted}
+                  onChange={() => void onUpdate({ id: state.id, isCompleted: true })}
+                />
+                Done
+              </label>
+
+              <span className={styles.count}>{count}</span>
+
               <button
-                key={color}
-                type="button"
-                className={color === newColor ? styles.swatchActive : styles.swatch}
-                style={{ background: color }}
-                onClick={() => setNewColor(color)}
-                aria-label={`Use ${color}`}
-              />
-            ))}
-          </div>
-          <button className={styles.addBtn} type="submit" disabled={newLabel.trim().length === 0 || busy}>
-            Add
-          </button>
-        </form>
-
-        {pendingDelete && (
-          <div className={styles.confirm}>
-            <p className={styles.confirmText}>
-              {countsByState[pendingDelete.id] ?? 0} todo(s) use <strong>{pendingDelete.label}</strong>. Move them to:
-            </p>
-            <div className={styles.confirmRow}>
-              <Select
-                ariaLabel="Reassign to state"
-                className={styles.select}
-                value={reassignTo === null ? "" : String(reassignTo)}
-                options={states
-                  .filter((s) => s.id !== pendingDelete.id)
-                  .map((s) => ({ value: String(s.id), label: s.label, color: s.color }))}
-                onChange={(next) => setReassignTo(Number(next))}
-              />
-              <button className={styles.confirmBtn} onClick={() => void confirmDelete()} disabled={busy}>
-                Move and delete
+                className={styles.deleteBtn}
+                onClick={() => startDelete(state)}
+                disabled={state.isDefault || state.isCompleted || states.length <= 1}
+                title={state.isDefault || state.isCompleted
+                  ? "Pick another state for this role first"
+                  : "Delete this state"}
+                aria-label={`Delete ${state.label}`}
+              >
+                Delete
               </button>
-              <button className={styles.cancelBtn} onClick={() => setPendingDelete(null)}>Cancel</button>
-            </div>
+            </li>
+          );
+        })}
+      </ul>
+
+      <form className={styles.addForm} onSubmit={handleCreate}>
+        <input
+          className={styles.labelInput}
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          placeholder="New state..."
+          aria-label="New state label"
+          maxLength={32}
+        />
+        <div className={styles.swatches}>
+          {TODO_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={color === newColor ? styles.swatchActive : styles.swatch}
+              style={{ background: color }}
+              onClick={() => setNewColor(color)}
+              aria-label={`Use ${color}`}
+            />
+          ))}
+        </div>
+        <button className={styles.addBtn} type="submit" disabled={newLabel.trim().length === 0 || busy}>
+          Add
+        </button>
+      </form>
+
+      {pendingDelete && (
+        <div className={styles.confirm}>
+          <p className={styles.confirmText}>
+            {countsByState[pendingDelete.id] ?? 0} todo(s) use <strong>{pendingDelete.label}</strong>. Move them to:
+          </p>
+          <div className={styles.confirmRow}>
+            <Select
+              ariaLabel="Reassign to state"
+              className={styles.select}
+              value={reassignTo === null ? "" : String(reassignTo)}
+              options={states
+                .filter((s) => s.id !== pendingDelete.id)
+                .map((s) => ({ value: String(s.id), label: s.label, color: s.color }))}
+              onChange={(next) => setReassignTo(Number(next))}
+            />
+            <button className={styles.confirmBtn} onClick={() => void confirmDelete()} disabled={busy}>
+              Move and delete
+            </button>
+            <button className={styles.cancelBtn} onClick={() => setPendingDelete(null)}>Cancel</button>
           </div>
-        )}
-      </div>
-    </div>
+        </div>
+      )}
+    </>
   );
 }
