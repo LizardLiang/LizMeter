@@ -7,15 +7,21 @@ interface Props {
   todoId: number;
   todoTitle: string;
   currentStateId: number;
+  /** Drives whether "Remove from parent" is offered. */
+  hasParent: boolean;
   states: TodoState[];
   onEdit: () => void;
   onSetState: (stateId: number) => void;
+  onSetParent: () => void;
+  onClearParent: () => void;
   onDelete: () => void;
 }
 
 const MENU_WIDTH = 190;
-/** Header + Edit + Delete + one line per state. Only used to decide flip-up vs flip-down. */
+/** Header + the fixed items + one line per state. Only used to decide flip-up vs flip-down. */
 const ROW_HEIGHT = 28;
+/** Edit, the two nesting items, Delete, and the two section labels. */
+const FIXED_ROWS = 6;
 
 function DotsIcon() {
   return (
@@ -30,7 +36,9 @@ function DotsIcon() {
 /**
  * Per-row "..." menu. Rendered through a portal so the list's overflow does not clip it.
  */
-export function TodoRowMenu({ todoId, todoTitle, currentStateId, states, onEdit, onSetState, onDelete }: Props) {
+export function TodoRowMenu(props: Props) {
+  const { todoId, todoTitle, currentStateId, hasParent, states } = props;
+  const { onEdit, onSetState, onSetParent, onClearParent, onDelete } = props;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState({ top: 0, left: 0 });
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -44,7 +52,7 @@ export function TodoRowMenu({ todoId, todoTitle, currentStateId, states, onEdit,
     if (!btn) return;
 
     const rect = btn.getBoundingClientRect();
-    const height = (states.length + 4) * ROW_HEIGHT;
+    const height = (states.length + FIXED_ROWS) * ROW_HEIGHT;
     const left = Math.max(8, Math.min(rect.left, window.innerWidth - MENU_WIDTH - 8));
     const top = rect.bottom + 2 + height > window.innerHeight
       ? Math.max(8, rect.top - height - 2)
@@ -107,6 +115,17 @@ export function TodoRowMenu({ todoId, todoTitle, currentStateId, states, onEdit,
           <button className={styles.item} type="button" role="menuitem" onClick={pick(onEdit)}>
             Edit
           </button>
+
+          <div className={styles.divider} />
+          <p className={styles.sectionLabel}>Nesting</p>
+          <button className={styles.item} type="button" role="menuitem" onClick={pick(onSetParent)}>
+            {hasParent ? "Change parent..." : "Make sub-issue of..."}
+          </button>
+          {hasParent && (
+            <button className={styles.item} type="button" role="menuitem" onClick={pick(onClearParent)}>
+              Remove from parent
+            </button>
+          )}
 
           <div className={styles.divider} />
           <p className={styles.sectionLabel}>Move to</p>

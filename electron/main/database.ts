@@ -203,13 +203,16 @@ export function initDatabase(dbPath?: string): void {
       due_date     TEXT,
       source       TEXT NOT NULL DEFAULT 'user',
       source_label TEXT,
+      -- Self-referencing: a todo nests under another todo, to any depth. Deleting a parent
+      -- lifts its children to the top level rather than taking them with it.
+      parent_id    INTEGER REFERENCES todos(id) ON DELETE SET NULL,
       created_at   TEXT NOT NULL,
       completed_at TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_todos_source ON todos(source);
-    -- Indexes on state_id / project / due_date are created by migrateTodosToStates.
+    -- Indexes on state_id / project / due_date / parent_id are created by migrateTodosToStates.
     -- On an existing database those columns do not exist yet at this point.
   `);
 
@@ -313,8 +316,8 @@ function repairTodoStateFlags(database: DbHandle): void {
 }
 
 /**
- * Brings a pre-states todos table up to date: adds the new columns, moves every
- * row onto a state, then removes the old `done` column.
+ * Brings an older todos table up to date: adds every column the current schema declares,
+ * moves each row onto a state, then removes the old `done` column.
  *
  * Runs at most once -- each step is guarded by what the table actually looks like.
  */
@@ -333,11 +336,17 @@ function migrateTodosToStates(database: DbHandle): void {
   if (!columns.includes("due_date")) {
     database.exec("ALTER TABLE todos ADD COLUMN due_date TEXT");
   }
+  if (!columns.includes("parent_id")) {
+    // SQLite allows a REFERENCES clause on ADD COLUMN as long as the default is NULL,
+    // which it is. ON DELETE SET NULL backs up the explicit orphaning in deleteTodo.
+    database.exec("ALTER TABLE todos ADD COLUMN parent_id INTEGER REFERENCES todos(id) ON DELETE SET NULL");
+  }
 
   // Safe now that every column above exists, on both a fresh and an upgraded database.
   database.exec("CREATE INDEX IF NOT EXISTS idx_todos_state_id ON todos(state_id)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_todos_parent_id ON todos(parent_id)");
 
   const completedId = getCompletedStateId(database);
   const defaultId = getDefaultStateId(database);
@@ -1737,6 +1746,9 @@ interface TodoRow {
   due_date: string | null;
   source: string;
   source_label: string | null;
+  parent_id: number | null;
+  parent_title: string | null;
+  child_count: number;
   created_at: string;
   completed_at: string | null;
   state_id: number;
@@ -1750,12 +1762,15 @@ interface TodoRow {
 
 const TODO_SELECT = `
   SELECT t.id, t.title, t.notes, t.project, t.milestone, t.start_date, t.due_date,
-         t.source, t.source_label, t.created_at, t.completed_at,
+         t.source, t.source_label, t.created_at, t.completed_at, t.parent_id,
+         p.title AS parent_title,
+         (SELECT COUNT(*) FROM todos c WHERE c.parent_id = t.id) AS child_count,
          s.id AS state_id, s.label AS state_label, s.color AS state_color,
          s.position AS state_position, s.is_completed AS state_is_completed,
          s.is_default AS state_is_default, s.created_at AS state_created_at
   FROM todos t
-  INNER JOIN todo_states s ON s.id = t.state_id`;
+  INNER JOIN todo_states s ON s.id = t.state_id
+  LEFT JOIN todos p ON p.id = t.parent_id`;
 
 function rowToTodo(row: TodoRow): Todo {
   return {
@@ -1777,6 +1792,9 @@ function rowToTodo(row: TodoRow): Todo {
     dueDate: row.due_date,
     source: VALID_TODO_SOURCES.has(row.source as TodoSource) ? (row.source as TodoSource) : "user",
     sourceLabel: row.source_label,
+    parentId: row.parent_id,
+    parentTitle: row.parent_title,
+    childCount: row.child_count,
     createdAt: row.created_at,
     completedAt: row.completed_at,
   };
@@ -1852,6 +1870,40 @@ function resolveStateId(database: DbHandle, stateId: number | undefined): number
   return row.id;
 }
 
+/**
+ * Validates `parentId` as the new parent of `childId` and returns it unchanged.
+ *
+ * Nesting is unbounded, so the one structural rule is that a todo must never end up inside its
+ * own subtree. Walking up from the proposed parent catches the direct case and every deeper one.
+ * The `seen` set bounds the walk, so a cycle already sitting in the data cannot hang the app.
+ *
+ * `childId` is null when creating, where no cycle is possible yet -- existence is the only check.
+ */
+function resolveParentId(database: DbHandle, childId: number | null, parentId: number): number {
+  if (!Number.isInteger(parentId)) throw new Error("Todo parentId must be an integer or null");
+
+  const parent = database.prepare("SELECT id FROM todos WHERE id = ?").get(parentId) as
+    | { id: number }
+    | undefined;
+  if (!parent) throw new Error(`Parent todo with id ${parentId} not found`);
+
+  if (childId === null) return parentId;
+  if (parentId === childId) throw new Error("A todo cannot be its own parent");
+
+  const readParent = database.prepare("SELECT parent_id FROM todos WHERE id = ?");
+  const seen = new Set<number>();
+  let cursor: number | null = parentId;
+  while (cursor !== null && !seen.has(cursor)) {
+    if (cursor === childId) {
+      throw new Error("That would nest the todo inside its own subtree");
+    }
+    seen.add(cursor);
+    const row = readParent.get(cursor) as { parent_id: number | null } | undefined;
+    cursor = row?.parent_id ?? null;
+  }
+  return parentId;
+}
+
 function isCompletedState(database: DbHandle, stateId: number): boolean {
   const row = database.prepare("SELECT is_completed FROM todo_states WHERE id = ?").get(stateId) as
     | { is_completed: number }
@@ -1877,11 +1929,14 @@ export function createTodo(input: CreateTodoInput): Todo {
 
   const stateId = resolveStateId(database, input.stateId);
   const completedAt = isCompletedState(database, stateId) ? new Date().toISOString() : null;
+  const parentId = input.parentId === undefined || input.parentId === null
+    ? null
+    : resolveParentId(database, null, input.parentId);
 
   database
     .prepare(
-      `INSERT INTO todos (title, notes, state_id, project, milestone, start_date, due_date, source, source_label, created_at, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO todos (title, notes, state_id, project, milestone, start_date, due_date, source, source_label, parent_id, created_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       title,
@@ -1893,6 +1948,7 @@ export function createTodo(input: CreateTodoInput): Todo {
       dueDate,
       source,
       sourceLabel,
+      parentId,
       new Date().toISOString(),
       completedAt,
     );
@@ -1921,6 +1977,10 @@ export function listTodos(input: ListTodosInput = {}): Todo[] {
   if (input.project !== undefined && input.project !== null && input.project.trim().length > 0) {
     clauses.push("t.project = ? COLLATE NOCASE");
     params.push(input.project.trim());
+  }
+  if (input.parentId !== undefined) {
+    clauses.push("t.parent_id = ?");
+    params.push(input.parentId);
   }
 
   const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
@@ -1953,6 +2013,12 @@ export function updateTodo(input: UpdateTodoInput): Todo {
 
   const stateId = input.stateId === undefined ? existing.state_id : resolveStateId(database, input.stateId);
 
+  // Three-way: absent leaves the link alone, null lifts the todo to the top level.
+  let parentId: number | null;
+  if (input.parentId === undefined) parentId = existing.parent_id;
+  else if (input.parentId === null) parentId = null;
+  else parentId = resolveParentId(database, input.id, input.parentId);
+
   const wasCompleted = existing.state_is_completed === 1;
   const nowCompleted = isCompletedState(database, stateId);
 
@@ -1964,18 +2030,29 @@ export function updateTodo(input: UpdateTodoInput): Todo {
   database
     .prepare(
       `UPDATE todos SET title = ?, notes = ?, state_id = ?, project = ?, milestone = ?,
-                        start_date = ?, due_date = ?, completed_at = ?
+                        start_date = ?, due_date = ?, parent_id = ?, completed_at = ?
        WHERE id = ?`,
     )
-    .run(title, notes, stateId, project, milestone, startDate, dueDate, completedAt, input.id);
+    .run(title, notes, stateId, project, milestone, startDate, dueDate, parentId, completedAt, input.id);
 
   const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow;
   return rowToTodo(row);
 }
 
+/**
+ * Deletes one todo and lifts its children to the top level.
+ *
+ * Parent and child states are independent, so removing a parent must never take its children
+ * with it. Both statements run in one transaction: with `foreign_keys = ON` the delete would
+ * otherwise be rejected while a child still points at the row.
+ */
 export function deleteTodo(id: number): void {
   const database = getDb();
-  database.prepare("DELETE FROM todos WHERE id = ?").run(id);
+  const remove = database.transaction(() => {
+    database.prepare("UPDATE todos SET parent_id = NULL WHERE parent_id = ?").run(id);
+    database.prepare("DELETE FROM todos WHERE id = ?").run(id);
+  });
+  remove();
 }
 
 /** Removes every todo sitting in a completed state. Returns how many rows were deleted. */
@@ -1986,9 +2063,20 @@ export function clearCompletedTodos(): number {
   const { count } = database
     .prepare("SELECT COUNT(*) AS count FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1")
     .get() as { count: number };
-  database.exec(
-    "DELETE FROM todos WHERE state_id IN (SELECT id FROM todo_states WHERE is_completed = 1)",
-  );
+  const clear = database.transaction(() => {
+    // Children of a cleared todo survive at the top level, the same as a single delete.
+    database.exec(`
+      UPDATE todos SET parent_id = NULL
+      WHERE parent_id IN (
+        SELECT t.id FROM todos t
+        INNER JOIN todo_states s ON s.id = t.state_id
+        WHERE s.is_completed = 1
+      )`);
+    database.exec(
+      "DELETE FROM todos WHERE state_id IN (SELECT id FROM todo_states WHERE is_completed = 1)",
+    );
+  });
+  clear();
   return count;
 }
 

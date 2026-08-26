@@ -111,6 +111,14 @@ const FIELD_PROPERTIES = {
       + "so do not assume a fixed set. If you pass an unknown one the error lists every valid label. "
       + "Omit it to use the user's default state.",
   },
+  parentId: {
+    type: ["number", "null"],
+    description:
+      "Optional numeric id of the todo this one nests under, making it a sub-issue. Get ids from "
+      + "todo_list. Nesting has no depth limit, but a todo cannot be placed inside its own subtree. "
+      + "Pass null to lift it back to the top level. Completing or deleting a parent leaves its "
+      + "children untouched, so break work down freely.",
+  },
 };
 
 const TOOLS = [
@@ -119,7 +127,8 @@ const TOOLS = [
     description:
       "Add a todo to the user's LizMeter todo list. Use this when the user asks you to remember, "
       + "track, or note down something to do later. The todo is tagged as AI-written so the user "
-      + "can tell it apart from ones they typed themselves.",
+      + "can tell it apart from ones they typed themselves. Pass parentId to file it as a sub-issue "
+      + "of an existing todo, which is how you break a large task into steps.",
     inputSchema: {
       type: "object",
       properties: {
@@ -164,6 +173,10 @@ const TOOLS = [
           type: "string",
           description: "Optional: only todos in this state, by label. An unknown label lists the valid ones.",
         },
+        parentId: {
+          type: "number",
+          description: "Optional: only the direct sub-issues of this todo id.",
+        },
       },
     },
   },
@@ -171,7 +184,8 @@ const TOOLS = [
     name: "todo_update",
     description:
       "Change an existing LizMeter todo: move it between states, set a due date, assign a project or "
-      + "milestone, or edit its text. Only the fields you pass are changed. Get ids from todo_list.",
+      + "milestone, re-file it under a different parent, or edit its text. Only the fields you pass "
+      + "are changed. Get ids from todo_list.",
     inputSchema: {
       type: "object",
       properties: {
@@ -203,7 +217,7 @@ const TOOLS = [
 /** Collects the optional shared fields, leaving absent ones absent so updates stay partial. */
 function fieldArgs(args) {
   const out = {};
-  for (const key of ["project", "milestone", "startDate", "dueDate", "state"]) {
+  for (const key of ["project", "milestone", "startDate", "dueDate", "state", "parentId"]) {
     if (args[key] !== undefined) out[key] = args[key];
   }
   return out;
@@ -225,6 +239,8 @@ function formatTodo(todo) {
   if (todo.milestone) meta.push(todo.milestone);
   const dates = formatDateRange(todo);
   if (dates) meta.push(dates);
+  if (todo.parentId) meta.push("sub-issue of #" + todo.parentId + " " + (todo.parentTitle ?? ""));
+  if (todo.childCount) meta.push(todo.childCount + " sub-issue" + (todo.childCount === 1 ? "" : "s"));
   if (todo.source === "ai") meta.push(todo.sourceLabel ? "ai: " + todo.sourceLabel : "ai");
 
   const metaLine = meta.length > 0 ? "\n      " + meta.join(" | ") : "";
@@ -252,6 +268,7 @@ async function callTool(name, args = {}) {
       const payload = { filter: args.filter ?? "all" };
       if (args.project !== undefined) payload.project = args.project;
       if (args.state !== undefined) payload.state = args.state;
+      if (args.parentId !== undefined) payload.parentId = args.parentId;
       const result = await sendCommand("todo.list", payload);
       const todos = result.todos ?? [];
       if (todos.length === 0) return "No todos match that filter.";

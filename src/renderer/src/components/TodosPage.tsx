@@ -1,8 +1,25 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  DndContext,
+  type DragEndEvent,
+  type DragOverEvent,
+  DragOverlay,
+  type DragStartEvent,
+  MeasuringStrategy,
+  PointerSensor,
+  pointerWithin,
+  useDraggable,
+  useDroppable,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Todo, TodoFilter, TodoState } from "../../../shared/types.ts";
 import { useTodos } from "../hooks/useTodos.ts";
+import { droppedStateId, stateDropId, todosToMove } from "../utils/todoDrag.ts";
 import { Select } from "./Select.tsx";
 import { TodoEditDialog } from "./TodoEditDialog.tsx";
+import { TodoPicker } from "./TodoPicker.tsx";
 import { TodoRowMenu } from "./TodoRowMenu.tsx";
 import styles from "./TodosPage.module.scss";
 import { TodoStateManager } from "./TodoStateManager.tsx";
@@ -66,6 +83,25 @@ function ProjectIcon() {
   );
 }
 
+/** An elbow connector: the flattest way to say "this row has work filed under it". */
+function SubIssueIcon() {
+  return (
+    <svg
+      className={styles.subIcon}
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M5 2.5v6a2 2 0 0 0 2 2h4" />
+      <path d="M9 8.5 11.5 10.5 9 12.5" />
+    </svg>
+  );
+}
+
 function StateDot({ state }: { state: TodoState; }) {
   return (
     <span
@@ -82,18 +118,32 @@ interface RowProps {
   todo: Todo;
   states: TodoState[];
   selected: boolean;
+  /** Dimmed while this row is one of the rows in flight. */
+  dragging: boolean;
   onToggleSelect: (id: number, shiftKey: boolean) => void;
   onEdit: (todo: Todo) => void;
   onSetState: (id: number, stateId: number) => void;
+  onSetParent: (todo: Todo) => void;
+  onClearParent: (id: number) => void;
   onDelete: (id: number) => void;
+  /** True for the click a browser fires at the end of a drag -- that one must not open the editor. */
+  wasJustDragged: () => boolean;
 }
 
-function TodoRow({ todo, states, selected, onToggleSelect, onEdit, onSetState, onDelete }: RowProps) {
+function TodoRow(props: RowProps) {
+  const { todo, states, selected, dragging, onToggleSelect, onEdit, wasJustDragged } = props;
+  const { onSetState, onSetParent, onClearParent, onDelete } = props;
+  const { attributes, listeners, setNodeRef } = useDraggable({ id: todo.id });
+
   const overdue = todo.dueDate !== null && !todo.state.isCompleted && todo.dueDate < todayIso();
   const dateIso = todo.dueDate ?? todo.createdAt.slice(0, 10);
 
+  let rowClass = styles.row;
+  if (dragging) rowClass = styles.rowDragging;
+  else if (selected) rowClass = styles.rowSelected;
+
   return (
-    <li className={selected ? styles.rowSelected : styles.row}>
+    <li ref={setNodeRef} className={rowClass}>
       <input
         type="checkbox"
         className={styles.check}
@@ -111,22 +161,48 @@ function TodoRow({ todo, states, selected, onToggleSelect, onEdit, onSetState, o
           todoId={todo.id}
           todoTitle={todo.title}
           currentStateId={todo.state.id}
+          hasParent={todo.parentId !== null}
           states={states}
           onEdit={() => onEdit(todo)}
           onSetState={(stateId) => onSetState(todo.id, stateId)}
+          onSetParent={() => onSetParent(todo)}
+          onClearParent={() => onClearParent(todo.id)}
           onDelete={() => onDelete(todo.id)}
         />
       </span>
 
+      {
+        /* The row body doubles as the drag grip. The checkbox and the "..." menu keep working
+          because the drag listeners never reach them. */
+      }
       <button
         className={styles.rowBody}
-        onClick={() => onEdit(todo)}
+        {...attributes}
+        {...listeners}
+        onClick={() => {
+          if (wasJustDragged()) return;
+          onEdit(todo);
+        }}
         title={todo.notes ?? undefined}
         aria-label={`Edit ${todo.title}`}
       >
         <span className={styles.id}>#{todo.id}</span>
         <StateDot state={todo.state} />
+        {todo.parentTitle !== null && (
+          <span className={styles.parentCrumb} title={`Sub-issue of ${todo.parentTitle}`}>
+            {todo.parentTitle} &rsaquo;
+          </span>
+        )}
         <span className={todo.state.isCompleted ? styles.titleDone : styles.title}>{todo.title}</span>
+        {todo.childCount > 0 && (
+          <span
+            className={styles.subCount}
+            title={`${todo.childCount} sub-issue${todo.childCount === 1 ? "" : "s"}`}
+          >
+            <SubIssueIcon />
+            {todo.childCount}
+          </span>
+        )}
         {todo.milestone && <span className={styles.crumb}>&rsaquo; {todo.milestone}</span>}
 
         <span className={styles.spacer} />
@@ -145,6 +221,113 @@ function TodoRow({ todo, states, selected, onToggleSelect, onEdit, onSetState, o
         <span className={overdue ? styles.dateOverdue : styles.date}>{formatDay(dateIso)}</span>
       </button>
     </li>
+  );
+}
+
+/** What follows the cursor during a drag. Smaller than a row on purpose, so the target stays visible. */
+function DragGhost({ todo, count }: { todo: Todo; count: number; }) {
+  return (
+    <div className={styles.ghost}>
+      <StateDot state={todo.state} />
+      <span className={styles.ghostTitle}>{todo.title}</span>
+      {count > 1 && <span className={styles.ghostCount}>+{count - 1}</span>}
+    </div>
+  );
+}
+
+// ---- Group ----
+
+interface GroupProps {
+  state: TodoState;
+  items: Todo[];
+  states: TodoState[];
+  collapsed: boolean;
+  /** A drag is in flight somewhere on the page. */
+  dragActive: boolean;
+  draggingIds: Set<number>;
+  selected: Set<number>;
+  onToggleCollapsed: (stateId: number) => void;
+  onAdd: (stateId: number) => void;
+  onToggleSelect: (id: number, shiftKey: boolean) => void;
+  onEdit: (todo: Todo) => void;
+  onSetState: (id: number, stateId: number) => void;
+  onSetParent: (todo: Todo) => void;
+  onClearParent: (id: number) => void;
+  onDelete: (id: number) => void;
+  wasJustDragged: () => boolean;
+}
+
+function TodoGroup(props: GroupProps) {
+  const {
+    state,
+    items,
+    states,
+    collapsed,
+    dragActive,
+    draggingIds,
+    selected,
+    onToggleCollapsed,
+    onAdd,
+    onToggleSelect,
+    onEdit,
+    onSetState,
+    onSetParent,
+    onClearParent,
+    onDelete,
+    wasJustDragged,
+  } = props;
+
+  // The whole group is the drop target -- band included, so a collapsed group still takes a drop.
+  const { setNodeRef, isOver } = useDroppable({ id: stateDropId(state.id) });
+  const highlighted = dragActive && isOver;
+
+  return (
+    <section ref={setNodeRef} className={highlighted ? styles.groupOver : styles.group}>
+      <div className={styles.groupBand}>
+        <button
+          className={styles.chevBtn}
+          onClick={() => onToggleCollapsed(state.id)}
+          aria-expanded={!collapsed}
+          aria-label={`${collapsed ? "Expand" : "Collapse"} ${state.label}`}
+        >
+          <span className={collapsed ? styles.chev : styles.chevOpen}>&#9654;</span>
+        </button>
+        <StateDot state={state} />
+        <span className={styles.groupName}>{state.label}</span>
+        <span className={styles.groupCount}>{items.length}</span>
+        <button
+          className={styles.groupAdd}
+          onClick={() => onAdd(state.id)}
+          aria-label={`Add todo to ${state.label}`}
+        >
+          +
+        </button>
+      </div>
+
+      {!collapsed && items.length > 0 && (
+        <ul className={styles.rows}>
+          {items.map((todo) => (
+            <TodoRow
+              key={todo.id}
+              todo={todo}
+              states={states}
+              selected={selected.has(todo.id)}
+              dragging={draggingIds.has(todo.id)}
+              onToggleSelect={onToggleSelect}
+              onEdit={onEdit}
+              onSetState={onSetState}
+              onSetParent={onSetParent}
+              onClearParent={onClearParent}
+              onDelete={onDelete}
+              wasJustDragged={wasJustDragged}
+            />
+          ))}
+        </ul>
+      )}
+
+      {/* An empty group is a 34px band, which is a mean target. Give it a strip while dragging. */}
+      {!collapsed && items.length === 0 && dragActive && <p className={styles.emptyDrop}>Drop here</p>}
+    </section>
   );
 }
 
@@ -179,9 +362,13 @@ export function TodosPage() {
   /** Non-null while the create dialog is open. `stateId` is the group whose "+" was clicked. */
   const [creating, setCreating] = useState<{ stateId: number | null; } | null>(null);
   const [managingStates, setManagingStates] = useState(false);
+  /** The todo whose parent is being chosen from the row menu. */
+  const [reparenting, setReparenting] = useState<Todo | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(loadCollapsed);
   const [selectedRaw, setSelectedRaw] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
+  /** Non-null while a row is in flight. `ids` is every todo the drop will move. */
+  const [dragging, setDragging] = useState<{ todo: Todo; ids: number[]; } | null>(null);
 
   // A todo removed elsewhere (bulk delete, the MCP server) must drop out of the selection.
   // Deriving that here rather than pruning in an effect keeps the render the single source.
@@ -192,7 +379,7 @@ export function TodosPage() {
     return next.size === selectedRaw.size ? selectedRaw : next;
   }, [selectedRaw, todos]);
 
-  const dialogOpen = editing !== null || creating !== null || managingStates;
+  const dialogOpen = editing !== null || creating !== null || managingStates || reparenting !== null;
   const doneCount = todos.filter((todo) => todo.state.isCompleted).length;
 
   const countsByState = useMemo(() => {
@@ -247,6 +434,55 @@ export function TodosPage() {
     setAnchor(id);
   }, [anchor, visibleIds]);
 
+  // ---- Drag and drop ----
+
+  // 5px of travel before a drag starts, so a plain click still opens the editor.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const dragEndedAtRef = useRef(0);
+
+  /**
+   * A browser still fires `click` on the element a drag started from. Without this guard the
+   * drop would immediately open the edit dialog for the row you just moved.
+   */
+  const wasJustDragged = useCallback(() => performance.now() - dragEndedAtRef.current < 250, []);
+
+  const draggingIds = useMemo(() => new Set(dragging?.ids ?? []), [dragging]);
+
+  const handleDragStart = useCallback((event: DragStartEvent) => {
+    const id = Number(event.active.id);
+    const todo = todos.find((t) => t.id === id);
+    if (todo === undefined) return;
+    // Dragging a row that is already selected moves the whole selection, like the bulk bar does.
+    setDragging({ todo, ids: selected.has(id) ? [...selected] : [id] });
+  }, [todos, selected]);
+
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const stateId = droppedStateId(event.over);
+    // Hovering a collapsed group opens it, so you can see where the rows land.
+    if (stateId !== null && collapsed.has(stateId)) toggleCollapsed(stateId);
+  }, [collapsed, toggleCollapsed]);
+
+  const handleDragEnd = useCallback((event: DragEndEvent) => {
+    dragEndedAtRef.current = performance.now();
+    const inFlight = dragging;
+    setDragging(null);
+
+    const stateId = droppedStateId(event.over);
+    if (stateId === null || inFlight === null) return;
+
+    const moving = todosToMove(inFlight.ids, todos, stateId);
+    if (moving.length === 0) return;
+
+    if (moving.length === 1) void setTodoState(moving[0]!, stateId);
+    else void setTodosState(moving, stateId);
+  }, [dragging, todos, setTodoState, setTodosState]);
+
+  const handleDragCancel = useCallback(() => {
+    dragEndedAtRef.current = performance.now();
+    setDragging(null);
+  }, []);
+
   // `c` opens the create dialog, Escape drops the selection -- both are Linear bindings.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
@@ -269,6 +505,15 @@ export function TodosPage() {
   }, [dialogOpen, selected.size]);
 
   const selectedIds = useMemo(() => [...selected], [selected]);
+
+  const handleAdd = useCallback((stateId: number) => setCreating({ stateId }), []);
+  const handleSetState = useCallback((id: number, stateId: number) => void setTodoState(id, stateId), [setTodoState]);
+  const handleDelete = useCallback((id: number) => void deleteTodo(id), [deleteTodo]);
+  const handleSetParent = useCallback((todo: Todo) => setReparenting(todo), []);
+  const handleClearParent = useCallback(
+    (id: number) => void updateTodo({ id, parentId: null }),
+    [updateTodo],
+  );
 
   return (
     <div className={styles.page}>
@@ -315,54 +560,53 @@ export function TodosPage() {
       {loading
         ? <p className={styles.stateMsg}>Loading...</p>
         : (
-          <div className={styles.panel}>
-            {groups.map(({ state, items }) => {
-              const isCollapsed = collapsed.has(state.id);
-              return (
-                <section key={state.id} className={styles.group}>
-                  <div className={styles.groupBand}>
-                    <button
-                      className={styles.chevBtn}
-                      onClick={() => toggleCollapsed(state.id)}
-                      aria-expanded={!isCollapsed}
-                      aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${state.label}`}
-                    >
-                      <span className={isCollapsed ? styles.chev : styles.chevOpen}>&#9654;</span>
-                    </button>
-                    <StateDot state={state} />
-                    <span className={styles.groupName}>{state.label}</span>
-                    <span className={styles.groupCount}>{items.length}</span>
-                    <button
-                      className={styles.groupAdd}
-                      onClick={() => setCreating({ stateId: state.id })}
-                      aria-label={`Add todo to ${state.label}`}
-                    >
-                      +
-                    </button>
-                  </div>
+          <DndContext
+            sensors={sensors}
+            collisionDetection={pointerWithin}
+            // A hovered group can expand mid-drag, so every rect has to be re-read as it moves.
+            measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+            onDragStart={handleDragStart}
+            onDragOver={handleDragOver}
+            onDragEnd={handleDragEnd}
+            onDragCancel={handleDragCancel}
+          >
+            <div className={styles.panel}>
+              {groups.map(({ state, items }) => (
+                <TodoGroup
+                  key={state.id}
+                  state={state}
+                  items={items}
+                  states={states}
+                  collapsed={collapsed.has(state.id)}
+                  dragActive={dragging !== null}
+                  draggingIds={draggingIds}
+                  selected={selected}
+                  onToggleCollapsed={toggleCollapsed}
+                  onAdd={handleAdd}
+                  onToggleSelect={toggleSelect}
+                  onEdit={setEditing}
+                  onSetState={handleSetState}
+                  onSetParent={handleSetParent}
+                  onClearParent={handleClearParent}
+                  onDelete={handleDelete}
+                  wasJustDragged={wasJustDragged}
+                />
+              ))}
 
-                  {!isCollapsed && items.length > 0 && (
-                    <ul className={styles.rows}>
-                      {items.map((todo) => (
-                        <TodoRow
-                          key={todo.id}
-                          todo={todo}
-                          states={states}
-                          selected={selected.has(todo.id)}
-                          onToggleSelect={toggleSelect}
-                          onEdit={setEditing}
-                          onSetState={(id, sid) => void setTodoState(id, sid)}
-                          onDelete={(id) => void deleteTodo(id)}
-                        />
-                      ))}
-                    </ul>
-                  )}
-                </section>
-              );
-            })}
+              {groups.length === 0 && <p className={styles.stateMsg}>Nothing here yet.</p>}
+            </div>
 
-            {groups.length === 0 && <p className={styles.stateMsg}>Nothing here yet.</p>}
-          </div>
+            {
+              /* Portaled: the panel's backdrop-filter would otherwise become the containing block
+                for the fixed-position overlay and trap the ghost inside the list. */
+            }
+            {createPortal(
+              <DragOverlay dropAnimation={null}>
+                {dragging !== null && <DragGhost todo={dragging.todo} count={dragging.ids.length} />}
+              </DragOverlay>,
+              document.body,
+            )}
+          </DndContext>
         )}
 
       {selected.size > 0 && (
@@ -407,6 +651,15 @@ export function TodosPage() {
             setEditing(null);
             setCreating(null);
           }}
+        />
+      )}
+
+      {reparenting !== null && (
+        <TodoPicker
+          heading={`Nest #${reparenting.id} ${reparenting.title} under`}
+          mode={{ kind: "parent", todoId: reparenting.id, currentParentId: reparenting.parentId }}
+          onPick={(picked) => void updateTodo({ id: reparenting.id, parentId: picked.id })}
+          onClose={() => setReparenting(null)}
         />
       )}
 
