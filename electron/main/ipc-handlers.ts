@@ -5,6 +5,8 @@ import { Notification, app, dialog, globalShortcut, ipcMain, screen, shell } fro
 import fs from "node:fs";
 import path from "node:path";
 import type {
+  AddTodoAttachmentBufferInput,
+  AddTodoAttachmentInput,
   AvatarPaths,
   AssignTagInput,
   CreateTagInput,
@@ -22,6 +24,7 @@ import type {
   SaveSessionInput,
   SaveSessionWithTrackingInput,
   TimerSettings,
+  TodoAttachment,
   UpdateTagInput,
   UpdateTodoInput,
   UpdateTodoStateInput,
@@ -31,6 +34,13 @@ import type {
 } from "../../src/shared/types.ts";
 import { WIDGET_SETTINGS_KEYS } from "../../src/shared/types.ts";
 import { isUploadableSession, summarizeMergedWorklogSessions } from "../../src/shared/worklog.ts";
+import {
+  attachmentPathFor,
+  collectAttachmentBlobs,
+  deleteBlobIfUnreferenced,
+  storeBuffer,
+} from "./attachment-store.ts";
+import { extFromFileName } from "./attachment-url.ts";
 import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widget-window.ts";
 import { getMainWindow } from "./index.ts";
 import {
@@ -38,13 +48,16 @@ import {
   clearCompletedTodos,
   createTag,
   createTodo,
+  createTodoAttachment,
   createTodoState,
   deleteSession,
   deleteSettingValue,
   deleteTag,
   deleteTodo,
+  deleteTodoAttachment,
   deleteTodoState,
   getClaudeCodeDataForSession,
+  getTodoAttachment,
   getSessionById,
   getSettingValue,
   getSettings,
@@ -52,6 +65,7 @@ import {
   listSessions,
   listTags,
   listTagsForSession,
+  listTodoAttachments,
   listTodoMilestones,
   listTodoProjects,
   listTodos,
@@ -177,11 +191,15 @@ export function registerIpcHandlers(): void {
   });
 
   ipcMain.handle("todo:delete", (_event, id: number) => {
-    return deleteTodo(id);
+    // Blobs outlive the row only until nothing references them; the shas come back from the
+    // delete because a cascade leaves nothing to read afterwards.
+    collectAttachmentBlobs(deleteTodo(id));
   });
 
   ipcMain.handle("todo:clear-completed", () => {
-    return clearCompletedTodos();
+    const { count, deletedShas } = clearCompletedTodos();
+    collectAttachmentBlobs(deletedShas);
+    return count;
   });
 
   ipcMain.handle("todo:list-projects", () => {
@@ -190,6 +208,99 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("todo:list-milestones", () => {
     return listTodoMilestones();
+  });
+
+  // --- Todo attachment handlers ---
+
+  const ATTACHMENT_PICKER_FILTERS = [
+    { name: "Images", extensions: ["png", "jpg", "jpeg", "gif", "webp", "avif"] },
+    { name: "Documents", extensions: ["pdf", "txt", "md", "csv", "doc", "docx", "xls", "xlsx", "ppt", "pptx"] },
+    { name: "All Files", extensions: ["*"] },
+  ];
+
+  /** Guesses a MIME type from the extension. Display metadata only — nothing branches on it. */
+  function mimeTypeForExt(ext: string): string {
+    const map: Record<string, string> = {
+      png: "image/png",
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      gif: "image/gif",
+      webp: "image/webp",
+      avif: "image/avif",
+      pdf: "application/pdf",
+      txt: "text/plain",
+      md: "text/markdown",
+      csv: "text/csv",
+      zip: "application/zip",
+    };
+    return map[ext] ?? "application/octet-stream";
+  }
+
+  ipcMain.handle(
+    "attachment:add",
+    async (_event, input: AddTodoAttachmentInput): Promise<TodoAttachment | null> => {
+      const result = await dialog.showOpenDialog({
+        title: "Attach a file to this todo",
+        filters: ATTACHMENT_PICKER_FILTERS,
+        properties: ["openFile"],
+      });
+      if (result.canceled || result.filePaths.length === 0) return null;
+
+      const srcPath = result.filePaths[0]!;
+      const fileName = path.basename(srcPath);
+      // Read into memory rather than copying: storeBuffer has to hash the bytes anyway, and
+      // ATTACHMENT_MAX_BYTES keeps the buffer bounded at 25 MB.
+      const data = fs.readFileSync(srcPath);
+      const stored = storeBuffer(data, fileName);
+
+      return createTodoAttachment({
+        todoId: input.todoId,
+        sha256: stored.sha256,
+        fileName,
+        mimeType: mimeTypeForExt(stored.ext),
+        sizeBytes: stored.sizeBytes,
+      });
+    },
+  );
+
+  ipcMain.handle(
+    "attachment:add-buffer",
+    (_event, input: AddTodoAttachmentBufferInput): TodoAttachment => {
+      const stored = storeBuffer(Buffer.from(input.data), input.fileName);
+      return createTodoAttachment({
+        todoId: input.todoId,
+        sha256: stored.sha256,
+        fileName: input.fileName,
+        mimeType: input.mimeType || mimeTypeForExt(stored.ext),
+        sizeBytes: stored.sizeBytes,
+      });
+    },
+  );
+
+  ipcMain.handle("attachment:list", (_event, todoId: number): TodoAttachment[] => {
+    return listTodoAttachments(todoId);
+  });
+
+  ipcMain.handle("attachment:delete", (_event, id: number): void => {
+    const removed = deleteTodoAttachment(id);
+    if (!removed) return;
+    deleteBlobIfUnreferenced(removed.sha256, extFromFileName(removed.fileName));
+  });
+
+  ipcMain.handle("attachment:open", async (_event, id: number): Promise<string | null> => {
+    const attachment = getTodoAttachment(id);
+    if (!attachment) return "Attachment not found";
+    const file = attachmentPathFor(attachment.sha256, extFromFileName(attachment.fileName));
+    if (!fs.existsSync(file)) return "The attached file is missing from disk";
+    // shell.openPath resolves with "" on success and an error message otherwise.
+    const error = await shell.openPath(file);
+    return error === "" ? null : error;
+  });
+
+  ipcMain.handle("attachment:reveal", (_event, id: number): void => {
+    const attachment = getTodoAttachment(id);
+    if (!attachment) return;
+    shell.showItemInFolder(attachmentPathFor(attachment.sha256, extFromFileName(attachment.fileName)));
   });
 
   // Todo state handlers

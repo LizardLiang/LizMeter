@@ -22,6 +22,7 @@ import {
   listTodoStates,
   updateTodo,
 } from "./database.ts";
+import { collectAttachmentBlobs } from "./attachment-store.ts";
 import { getMainWindow } from "./index.ts";
 import type { TodoFilter } from "../../src/shared/types.ts";
 
@@ -33,8 +34,10 @@ const DEFAULT_PIPE_PATH =
 
 const PIPE_PATH = process.env.LIZMETER_PIPE_PATH || DEFAULT_PIPE_PATH;
 
-// Raised from the original 4 KB: a todo may carry up to 4 000 characters of notes.
-const MAX_BUFFER_SIZE = 65_536;
+// A todo may carry up to NOTES_MAX_LENGTH (32 000) characters of markdown notes. At 64 KB a
+// note that long could overflow this buffer once JSON escaping is applied and the write would
+// fail silently, so the ceiling is 256 KB.
+const MAX_BUFFER_SIZE = 262_144;
 
 const VALID_TODO_FILTERS = new Set<TodoFilter>(["all", "active", "done", "ai"]);
 
@@ -197,9 +200,10 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
     }
 
     case "todo.clear-completed": {
-      const removed = clearCompletedTodos();
+      const { count, deletedShas } = clearCompletedTodos();
+      collectAttachmentBlobs(deletedShas);
       notifyTodosChanged();
-      return { removed };
+      return { removed: count };
     }
 
     default:

@@ -1,0 +1,466 @@
+@use "../styles/mixins" as *;
+
+// MarkdownEditor.module.scss
+// Tokyo Night on a CodeMirror surface. The chrome copies the glass input formula the rest of
+// TodoEditDialog uses, so the notes field still reads as one field among many rather than as
+// an embedded IDE. Token colours come from `classHighlighter`, which emits stable `.tok-*`
+// class names -- the default highlight style is off precisely because its classes are
+// generated at runtime and cannot be reached from here.
+
+.wrapper {
+  width: 100%;
+  // Anchors the expand button, which overlays the editor's bottom-right corner.
+  position: relative;
+
+  :global(.cm-editor) {
+    border-radius: 8px;
+    border: 1px solid rgba(41, 46, 66, 0.8);
+    background: rgba(12, 13, 24, 0.55);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    overflow: hidden;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+
+  :global(.cm-editor.cm-focused) {
+    outline: none;
+    border-color: rgba(122, 162, 247, 0.5);
+    box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.08);
+  }
+
+  :global(.cm-scroller) {
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+
+  :global(.cm-content) {
+    padding: 9px 0;
+    color: #c0caf5;
+    caret-color: #7aa2f7;
+  }
+
+  :global(.cm-line) {
+    padding: 0 12px;
+  }
+
+  :global(.cm-cursor),
+  :global(.cm-dropCursor) {
+    border-left-color: #7aa2f7;
+    border-left-width: 2px;
+  }
+
+  :global(.cm-selectionBackground),
+  :global(.cm-content ::selection) {
+    background: rgba(122, 162, 247, 0.22);
+  }
+
+  :global(.cm-focused .cm-selectionBackground) {
+    background: rgba(122, 162, 247, 0.3);
+  }
+
+  :global(.cm-placeholder) {
+    color: #565f89;
+  }
+
+  // ── Markdown tokens ──
+
+  :global(.tok-heading) {
+    color: #bb9af7;
+    font-weight: 700;
+  }
+
+  :global(.tok-strong) {
+    color: #c0caf5;
+    font-weight: 700;
+  }
+
+  :global(.tok-emphasis) {
+    color: #c0caf5;
+    font-style: italic;
+  }
+
+  :global(.tok-strikethrough) {
+    color: #a9b1d6;
+    text-decoration: line-through;
+  }
+
+  :global(.tok-link),
+  :global(.tok-url) {
+    color: #7aa2f7;
+  }
+
+  :global(.tok-quote) {
+    color: #a9b1d6;
+    font-style: italic;
+  }
+
+  :global(.tok-list) {
+    color: #7aa2f7;
+  }
+
+  // Fence bodies, inline code and the `#`/`>`/`-` punctuation lezer marks as processing
+  // instructions. Monospace stays inside these spans only; prose above inherits the UI font.
+  :global(.tok-monospace) {
+    color: #9ece6a;
+    font-family: "SFMono-Regular", "Consolas", "Liberation Mono", "Menlo", monospace;
+    font-size: 0.92em;
+  }
+
+  :global(.tok-processingInstruction),
+  :global(.tok-meta) {
+    color: #565f89;
+  }
+
+  // ── Live preview ──
+  // Applied by livePreviewPlugin to the line the cursor is NOT on. The matching syntax
+  // characters are collapsed by a replace decoration, so these rules style what is left. They
+  // sit after the `.tok-*` rules on purpose: same specificity, so the later rule wins wherever
+  // the two disagree about the same span.
+
+  :global(.cm-md-strong) {
+    color: var(--tn-text, #c0caf5);
+    font-weight: 700;
+  }
+
+  :global(.cm-md-em) {
+    font-style: italic;
+  }
+
+  :global(.cm-md-strike) {
+    color: var(--tn-muted, #565f89);
+    text-decoration: line-through;
+  }
+
+  :global(.cm-md-code) {
+    color: var(--tn-green, #9ece6a);
+    font-family: "SFMono-Regular", "Consolas", "Liberation Mono", "Menlo", monospace;
+    font-size: 0.92em;
+    background: rgba(158, 206, 106, 0.08);
+    border-radius: 3px;
+    padding: 0.1em 0.3em;
+  }
+
+  :global(.cm-md-link) {
+    color: var(--tn-blue, #7aa2f7);
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  // Headings share a colour and weight; only the scale changes. Sizes stay modest -- this is a
+  // notes field inside a dialog, not a document view, and a 2em h1 would push the body around
+  // every time the cursor left the line.
+  :global(.cm-md-h1),
+  :global(.cm-md-h2),
+  :global(.cm-md-h3),
+  :global(.cm-md-h4),
+  :global(.cm-md-h5),
+  :global(.cm-md-h6) {
+    color: var(--tn-purple, #bb9af7);
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  :global(.cm-md-h1) {
+    font-size: 1.5em;
+  }
+
+  :global(.cm-md-h2) {
+    font-size: 1.3em;
+  }
+
+  :global(.cm-md-h3) {
+    font-size: 1.15em;
+  }
+
+  :global(.cm-md-h4) {
+    font-size: 1.05em;
+  }
+
+  :global(.cm-md-h5),
+  :global(.cm-md-h6) {
+    font-size: 1em;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  // The mark spans the whole blockquote, and CodeMirror splits a multi-line mark into one span
+  // per line, so the bar below repeats down the block and reads as one continuous rule.
+  :global(.cm-md-quote) {
+    color: var(--tn-text-dim, #a9b1d6);
+    font-style: italic;
+    border-left: 2px solid rgba(122, 162, 247, 0.45);
+    padding-left: 10px;
+  }
+
+  // Split per line the same way. The info string (```ts) keeps its own line and inherits this,
+  // which reads as a language label above the code.
+  :global(.cm-md-fence) {
+    font-family: "SFMono-Regular", "Consolas", "Liberation Mono", "Menlo", monospace;
+    font-size: 0.92em;
+    color: var(--tn-green, #9ece6a);
+    background: rgba(122, 162, 247, 0.07);
+  }
+
+  :global(.cm-md-bullet),
+  :global(.cm-md-list-mark) {
+    color: var(--tn-blue, #7aa2f7);
+    font-weight: 600;
+  }
+
+  // A widget with no text. It has to claim the line's width itself, since the `---` it
+  // replaced was only three characters wide.
+  :global(.cm-md-hr) {
+    display: inline-block;
+    width: 100%;
+    vertical-align: middle;
+    border-top: 1px solid rgba(86, 95, 137, 0.7);
+  }
+}
+
+// Inside the expanded surface the flex body owns the height, so the editor stretches to it
+// instead of carrying its own min/max. The rounded chrome goes too -- the card already has it.
+.wrapperFill {
+  height: 100%;
+
+  :global(.cm-editor) {
+    height: 100%;
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  :global(.cm-editor.cm-focused) {
+    box-shadow: none;
+  }
+
+  :global(.cm-scroller) {
+    font-size: 14px;
+  }
+
+  :global(.cm-content) {
+    padding: 14px 0;
+  }
+
+  :global(.cm-line) {
+    padding: 0 20px;
+  }
+}
+
+// ── Expand button ──
+
+.expandBtn {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 22px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 4px 0 0 0;
+  background: linear-gradient(to right, transparent, rgba(16, 17, 32, 0.9) 40%);
+  color: #7a8194;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease;
+  z-index: 1;
+
+  &:hover {
+    color: var(--tn-text-dim, #a9b1d6);
+  }
+
+  svg {
+    flex-shrink: 0;
+  }
+}
+
+// A refused or failed file drop. Floated over the bottom-left of the editor rather than laid
+// out below it: the notes field sits in a fixed-height dialog grid, and a block that appears
+// for five seconds would shove every field under it down and back.
+.dropHint {
+  position: absolute;
+  left: 8px;
+  right: 30px; // Clears the expand button in the opposite corner.
+  bottom: 8px;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid rgba(224, 175, 104, 0.35);
+  border-radius: 6px;
+  background: rgba(20, 16, 28, 0.92);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  color: var(--tn-yellow, #e0af68);
+  font-size: 0.75rem;
+  line-height: 1.4;
+  // A failed upload puts the OS error message in here, and it can be long.
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  z-index: 2;
+  animation: dropHintEntrance 0.16s ease-out;
+}
+
+@keyframes dropHintEntrance {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+// ── Expanded surface ──
+// Portalled to document.body, so it sits above the dialog's own overlay (z-index 60) rather
+// than inside it. The card repeats the glass dialog formula from TodoEditDialog.module.scss
+// so the two surfaces read as one material.
+
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(192, 202, 245, 0.06);
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+}
+
+.modalCard {
+  width: clamp(30rem, 62vw, 54rem);
+  max-width: 100%;
+  height: min(78vh, 44rem);
+  display: flex;
+  flex-direction: column;
+  border-radius: 18px;
+  border: 1px solid rgba(122, 162, 247, 0.4);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 32%, transparent 58%),
+    rgba(20, 23, 42, 0.55);
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.3),
+    0 16px 40px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  animation: modalEntrance 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid rgba(41, 46, 66, 0.8);
+  flex-shrink: 0;
+}
+
+.modalTitle {
+  font-size: 11px;
+  font-weight: 700;
+  color: #c0caf5;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.modalCloseBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: #a9b1d6;
+  cursor: pointer;
+  transition: color 0.15s, background-color 0.15s;
+
+  &:hover {
+    color: var(--tn-text, #c0caf5);
+    background-color: color-mix(in srgb, var(--tn-text, #c0caf5) 8%, transparent);
+  }
+}
+
+.modalBody {
+  flex: 1;
+  // Without this a flex child refuses to shrink below its content, so the editor grows the
+  // card past the viewport instead of scrolling inside it.
+  min-height: 0;
+  overflow: hidden;
+}
+
+.modalFooter {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid rgba(41, 46, 66, 0.8);
+  flex-shrink: 0;
+}
+
+.modalBtnCancel {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  border-radius: 6px;
+  background: transparent;
+  color: #a9b1d6;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background-color 0.15s;
+
+  &:hover {
+    color: var(--tn-text, #c0caf5);
+    border-color: #3b4261;
+    background-color: color-mix(in srgb, var(--tn-text, #c0caf5) 4%, transparent);
+  }
+}
+
+.modalBtnDone {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 6px;
+  background: var(--tn-blue, #7aa2f7);
+  color: #1a1b2e;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, opacity 0.15s;
+
+  &:hover {
+    background: color-mix(in srgb, var(--tn-blue, #7aa2f7) 85%, white);
+  }
+
+  &:active {
+    opacity: 0.85;
+  }
+}
+
+@keyframes modalEntrance {
+  from {
+    opacity: 0;
+    transform: scale(0.94) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}

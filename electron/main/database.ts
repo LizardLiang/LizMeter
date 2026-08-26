@@ -29,6 +29,8 @@ import type {
   TimerSettings,
   TimerType,
   Todo,
+  TodoAttachment,
+  TodoAttachmentKind,
   TodoSource,
   TodoState,
   UpdateTagInput,
@@ -36,7 +38,8 @@ import type {
   UpdateTodoStateInput,
   WorklogStatus,
 } from "../../src/shared/types.ts";
-import { MAX_TODO_PRIORITY, TODO_PRIORITY_LABELS } from "../../src/shared/types.ts";
+import { MAX_TODO_PRIORITY, NOTES_MAX_LENGTH, TODO_PRIORITY_LABELS } from "../../src/shared/types.ts";
+import { attachmentKindForExt, attachmentUrl, extFromFileName } from "./attachment-url.ts";
 import type { InternalTrackRecord } from "./music/internal-types.ts";
 import { toRendererTrack } from "./music/internal-types.ts";
 
@@ -217,6 +220,26 @@ export function initDatabase(dbPath?: string): void {
     CREATE INDEX IF NOT EXISTS idx_todos_source ON todos(source);
     -- Indexes on state_id / project / due_date / parent_id are created by migrateTodosToStates.
     -- On an existing database those columns do not exist yet at this point.
+
+    -- Files attached to a todo. The blob on disk is content-addressed (<sha256>.<ext>), so
+    -- UNIQUE(todo_id, sha256) makes attaching the same file twice to one todo a no-op while
+    -- two different todos can still reference a single shared blob.
+    CREATE TABLE IF NOT EXISTS todo_attachments (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      todo_id     INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,
+      sha256      TEXT NOT NULL,
+      file_name   TEXT NOT NULL,
+      mime_type   TEXT NOT NULL,
+      size_bytes  INTEGER NOT NULL,
+      kind        TEXT NOT NULL DEFAULT 'file',
+      created_at  TEXT NOT NULL,
+      UNIQUE(todo_id, sha256)
+    );
+
+    -- Unlike the todos indexes above, both of these are safe here: the table is new, so every
+    -- column they name is created by the statement immediately preceding them.
+    CREATE INDEX IF NOT EXISTS idx_todo_attachments_todo ON todo_attachments(todo_id);
+    CREATE INDEX IF NOT EXISTS idx_todo_attachments_sha ON todo_attachments(sha256);
   `);
 
   // Idempotent migration: add issue columns if they don't exist yet
@@ -1739,7 +1762,9 @@ export function reorderTodoStates(orderedIds: number[]): TodoState[] {
 // --- Todo Functions ---
 
 const MAX_TODO_TITLE_LENGTH = 500;
-const MAX_TODO_NOTES_LENGTH = 4000;
+// Shared with the renderer's markdown editor so the pipe/MCP writer, which never passes
+// through the dialog, is held to the same cap as a person typing into it.
+const MAX_TODO_NOTES_LENGTH = NOTES_MAX_LENGTH;
 const MAX_TODO_SOURCE_LABEL_LENGTH = 64;
 const MAX_TODO_TEXT_FIELD_LENGTH = 120;
 const VALID_TODO_SOURCES = new Set<TodoSource>(["user", "ai"]);
@@ -2074,24 +2099,62 @@ export function updateTodo(input: UpdateTodoInput): Todo {
  * with it. Both statements run in one transaction: with `foreign_keys = ON` the delete would
  * otherwise be rejected while a child still points at the row.
  */
-export function deleteTodo(id: number): void {
+export function deleteTodo(id: number): string[] {
   const database = getDb();
+  let shas: string[] = [];
   const remove = database.transaction(() => {
+    // Read before the delete rather than trusting ON DELETE CASCADE to have fired: the
+    // caller needs these to garbage-collect blobs, and a cascade leaves nothing to read.
+    shas = database
+      .prepare("SELECT sha256 FROM todo_attachments WHERE todo_id = ?")
+      .all(id)
+      .map((r) => (r as { sha256: string }).sha256);
+    database.prepare("DELETE FROM todo_attachments WHERE todo_id = ?").run(id);
     database.prepare("UPDATE todos SET parent_id = NULL WHERE parent_id = ?").run(id);
     database.prepare("DELETE FROM todos WHERE id = ?").run(id);
   });
   remove();
+  return shas;
 }
 
-/** Removes every todo sitting in a completed state. Returns how many rows were deleted. */
-export function clearCompletedTodos(): number {
+/** What `clearCompletedTodos` swept: the row count, and the blobs those rows referenced. */
+export interface ClearCompletedTodosResult {
+  count: number;
+  /**
+   * Every sha256 whose attachment row was deleted. Duplicates are collapsed, and a sha listed
+   * here may still be referenced by a surviving todo — `countAttachmentsBySha` decides that.
+   */
+  deletedShas: string[];
+}
+
+/** Removes every todo sitting in a completed state. Returns the count and the swept shas. */
+export function clearCompletedTodos(): ClearCompletedTodosResult {
   const database = getDb();
   // Counted before the delete rather than read from result.changes: the sql.js
   // test shim does not populate that field, and the app is a single writer.
   const { count } = database
     .prepare("SELECT COUNT(*) AS count FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1")
     .get() as { count: number };
+  let deletedShas: string[] = [];
   const clear = database.transaction(() => {
+    // Same reasoning as deleteTodo: read the shas before the rows go, not after a cascade.
+    deletedShas = database
+      .prepare(
+        `SELECT DISTINCT a.sha256 AS sha256
+         FROM todo_attachments a
+         INNER JOIN todos t ON t.id = a.todo_id
+         INNER JOIN todo_states s ON s.id = t.state_id
+         WHERE s.is_completed = 1`,
+      )
+      .all()
+      .map((r) => (r as { sha256: string }).sha256);
+    database.exec(`
+      DELETE FROM todo_attachments
+      WHERE todo_id IN (
+        SELECT t.id FROM todos t
+        INNER JOIN todo_states s ON s.id = t.state_id
+        WHERE s.is_completed = 1
+      )`);
     // Children of a cleared todo survive at the top level, the same as a single delete.
     database.exec(`
       UPDATE todos SET parent_id = NULL
@@ -2105,7 +2168,147 @@ export function clearCompletedTodos(): number {
     );
   });
   clear();
+  return { count, deletedShas };
+}
+
+// --- Todo attachments -------------------------------------------------------
+
+interface TodoAttachmentRow {
+  id: number;
+  todo_id: number;
+  sha256: string;
+  file_name: string;
+  mime_type: string;
+  size_bytes: number;
+  kind: string;
+  created_at: string;
+}
+
+const ATTACHMENT_SELECT = `
+  SELECT id, todo_id, sha256, file_name, mime_type, size_bytes, kind, created_at
+  FROM todo_attachments
+`;
+
+/**
+ * The on-disk extension is derived from `file_name` rather than stored in its own column,
+ * because `attachment-store.ts` derives the blob's name the same way. One helper, one answer.
+ */
+function rowToTodoAttachment(row: TodoAttachmentRow): TodoAttachment {
+  const ext = extFromFileName(row.file_name);
+  return {
+    id: row.id,
+    todoId: row.todo_id,
+    sha256: row.sha256,
+    fileName: row.file_name,
+    mimeType: row.mime_type,
+    sizeBytes: row.size_bytes,
+    kind: row.kind === "image" ? "image" : "file",
+    url: attachmentUrl(row.sha256, ext),
+    createdAt: row.created_at,
+  };
+}
+
+export interface CreateTodoAttachmentInput {
+  todoId: number;
+  /** Lower-case hex sha256 of the file contents, as returned by `storeBuffer`. */
+  sha256: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** Defaults to the classification of the file name's extension. */
+  kind?: TodoAttachmentKind;
+}
+
+/**
+ * Attaches a stored blob to a todo.
+ *
+ * Attaching the same sha to the same todo again is a no-op that returns the existing row —
+ * the caller pastes the same screenshot twice and gets one entry, not a duplicate or an error.
+ */
+export function createTodoAttachment(input: CreateTodoAttachmentInput): TodoAttachment {
+  const database = getDb();
+
+  const todoExists = database.prepare("SELECT id FROM todos WHERE id = ?").get(input.todoId) as
+    | { id: number }
+    | undefined;
+  if (!todoExists) {
+    throw new Error(`Todo ${input.todoId} not found`);
+  }
+
+  const existing = database
+    .prepare(`${ATTACHMENT_SELECT} WHERE todo_id = ? AND sha256 = ?`)
+    .get(input.todoId, input.sha256) as TodoAttachmentRow | undefined;
+  if (existing) return rowToTodoAttachment(existing);
+
+  const kind = input.kind ?? attachmentKindForExt(extFromFileName(input.fileName));
+  database
+    .prepare(
+      `INSERT INTO todo_attachments (todo_id, sha256, file_name, mime_type, size_bytes, kind, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.todoId,
+      input.sha256,
+      input.fileName,
+      input.mimeType,
+      input.sizeBytes,
+      kind,
+      new Date().toISOString(),
+    );
+
+  // last_insert_rowid() rather than result.lastInsertRowid: the sql.js test shim does
+  // not populate that field. Same reasoning as createTodo.
+  const row = database
+    .prepare(`${ATTACHMENT_SELECT} WHERE id = last_insert_rowid()`)
+    .get() as TodoAttachmentRow;
+  return rowToTodoAttachment(row);
+}
+
+/** Every attachment on one todo, oldest first. */
+export function listTodoAttachments(todoId: number): TodoAttachment[] {
+  const database = getDb();
+  const rows = database
+    .prepare(`${ATTACHMENT_SELECT} WHERE todo_id = ? ORDER BY id ASC`)
+    .all(todoId) as TodoAttachmentRow[];
+  return rows.map(rowToTodoAttachment);
+}
+
+export function getTodoAttachment(id: number): TodoAttachment | null {
+  const database = getDb();
+  const row = database.prepare(`${ATTACHMENT_SELECT} WHERE id = ?`).get(id) as
+    | TodoAttachmentRow
+    | undefined;
+  return row ? rowToTodoAttachment(row) : null;
+}
+
+/** Deletes one attachment row and hands back what it deleted, so the caller can collect the blob. */
+export function deleteTodoAttachment(id: number): TodoAttachment | null {
+  const database = getDb();
+  const existing = getTodoAttachment(id);
+  if (!existing) return null;
+  database.prepare("DELETE FROM todo_attachments WHERE id = ?").run(id);
+  return existing;
+}
+
+/**
+ * How many rows still reference a blob. This is the refcount that keeps a shared image
+ * alive when one of the two todos embedding it is deleted.
+ */
+export function countAttachmentsBySha(sha256: string): number {
+  const database = getDb();
+  const { count } = database
+    .prepare("SELECT COUNT(*) AS count FROM todo_attachments WHERE sha256 = ?")
+    .get(sha256) as { count: number };
   return count;
+}
+
+/** Every distinct sha still referenced. `sweepOrphanBlobs` diffs the attachments folder against this. */
+export function listAllAttachmentShas(): string[] {
+  const database = getDb();
+  const rows = database
+    .prepare("SELECT DISTINCT sha256 FROM todo_attachments")
+    .all() as Array<{ sha256: string }>;
+  return rows.map((r) => r.sha256);
 }
 
 /** Distinct project names already in use, for the autocomplete datalist. */

@@ -122,6 +122,17 @@ export const TODO_PRIORITY_LABELS = ["No priority", "Urgent", "High", "Medium", 
 
 export const MAX_TODO_PRIORITY = TODO_PRIORITY_LABELS.length - 1;
 
+/**
+ * Character cap on a todo's `notes`, shared by the renderer editor and the main-process writers.
+ *
+ * Raised from 4 000 because notes are markdown now and an embedded image costs roughly 90
+ * characters of URL, so the old limit had become an embed limit rather than a prose limit.
+ * It stays bounded because `listTodos` returns full `notes` for every row on the Todos page,
+ * which makes this a list-payload decision as much as a storage one. 32 000 characters is
+ * ~32 KB, trivial for a local SQLite TEXT column.
+ */
+export const NOTES_MAX_LENGTH = 32_000;
+
 /** Falls back to "No priority" so an out-of-range value read from an old row still renders. */
 export function todoPriorityLabel(priority: number): string {
   return TODO_PRIORITY_LABELS[priority] ?? TODO_PRIORITY_LABELS[0];
@@ -224,6 +235,49 @@ export interface ListTodosInput {
   /** Only the direct children of this todo. Ignores `filter`-style narrowing of the parent itself. */
   parentId?: number;
 }
+
+// --- Todo Attachment Types ---
+
+/** Whether an attachment renders as an inline image or as a document row. */
+export type TodoAttachmentKind = "image" | "file";
+
+/**
+ * One file attached to a todo. The blob on disk is content-addressed, so two todos that
+ * attach the same bytes share a single file and the row is the only per-todo record.
+ */
+export interface TodoAttachment {
+  id: number;
+  todoId: number;
+  /** sha256 of the file contents, hex. Also the on-disk basename. */
+  sha256: string;
+  /** The name the user's file had. Display only -- never used to build a path. */
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  kind: TodoAttachmentKind;
+  /** app-media://attachments/<sha256>.<ext> -- ready to drop into an <img src> or a markdown embed. */
+  url: string;
+  createdAt: string;
+}
+
+/** Opens the OS file picker in the main process, then attaches whatever was chosen. */
+export interface AddTodoAttachmentInput {
+  todoId: number;
+}
+
+/** Paste or drop: the renderer already holds the bytes, so no picker is involved. */
+export interface AddTodoAttachmentBufferInput {
+  todoId: number;
+  fileName: string;
+  mimeType: string;
+  data: ArrayBuffer;
+}
+
+/** Per-file ceiling. Anything larger is rejected before it reaches the disk. */
+export const ATTACHMENT_MAX_BYTES = 25 * 1024 * 1024;
+
+/** Extensions that render as an inline image. Everything else is a document. */
+export const ATTACHMENT_IMAGE_EXTENSIONS = ["png", "jpg", "jpeg", "gif", "webp", "avif"] as const;
 
 // --- Issue Tracker Types ---
 
@@ -636,6 +690,18 @@ export interface ElectronAPI {
     listMilestones: () => Promise<string[]>;
     /** Fires when a todo is written from outside the renderer (e.g. the MCP server). Returns an unsubscribe. */
     onChanged: (callback: () => void) => () => void;
+  };
+  attachment: {
+    /** Opens the OS picker. Resolves with `null` when the user cancels. */
+    add: (input: AddTodoAttachmentInput) => Promise<TodoAttachment | null>;
+    /** Paste or drop path: the renderer supplies the bytes. */
+    addBuffer: (input: AddTodoAttachmentBufferInput) => Promise<TodoAttachment>;
+    list: (todoId: number) => Promise<TodoAttachment[]>;
+    delete: (id: number) => Promise<void>;
+    /** Hands the file to the OS default application. Resolves with an error string, or `null` on success. */
+    open: (id: number) => Promise<string | null>;
+    /** Shows the file in the OS file manager. */
+    reveal: (id: number) => Promise<void>;
   };
   todoState: {
     list: () => Promise<TodoState[]>;

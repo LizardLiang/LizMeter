@@ -19,6 +19,17 @@ export default defineConfig(({ command }) => {
       alias: {
         "@": path.join(__dirname, "src"),
       },
+      // CodeMirror throws "Unrecognized extension value in extension set" if two copies of
+      // @codemirror/state end up in the bundle. Vite can pull a second copy in through the
+      // transitive deps of @uiw/react-codemirror, and the failure often only shows up in the
+      // packaged build. Keep this list in sync with the one in vitest.config.ts.
+      dedupe: [
+        "@codemirror/state",
+        "@codemirror/view",
+        "@codemirror/language",
+        "@lezer/common",
+        "@lezer/highlight",
+      ],
     },
     plugins: [
       react(),

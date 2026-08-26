@@ -17,6 +17,7 @@ import { createPortal } from "react-dom";
 import type { Todo, TodoFilter, TodoState } from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS, todoPriorityLabel } from "../../../shared/types.ts";
 import { useTodos } from "../hooks/useTodos.ts";
+import { toPlainSummary } from "../utils/markdownPlain.ts";
 import { droppedStateId, stateDropId, todosToMove } from "../utils/todoDrag.ts";
 import { Select } from "./Select.tsx";
 import { TodoEditDialog } from "./TodoEditDialog.tsx";
@@ -245,7 +246,7 @@ function TodoRow(props: RowProps) {
           if (wasJustDragged()) return;
           onEdit(todo);
         }}
-        title={todo.notes ?? undefined}
+        title={todo.notes ? toPlainSummary(todo.notes) : undefined}
         aria-label={`Edit ${todo.title}`}
       >
         <PriorityIcon priority={todo.priority} />

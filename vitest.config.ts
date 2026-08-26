@@ -6,6 +6,15 @@ export default defineConfig({
     alias: {
       "better-sqlite3": path.resolve("./src/test/better-sqlite3-shim.ts"),
     },
+    // Vitest resolves independently of vite.config.ts, so the CodeMirror dedupe has to be
+    // repeated here or the live-preview tests hit the same duplicate-instance error.
+    dedupe: [
+      "@codemirror/state",
+      "@codemirror/view",
+      "@codemirror/language",
+      "@lezer/common",
+      "@lezer/highlight",
+    ],
   },
   test: {
     environment: "jsdom",

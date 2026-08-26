@@ -3,7 +3,9 @@ import type { CreateTodoInput, Todo, TodoState, UpdateTodoInput } from "../../..
 import { TODO_PRIORITY_LABELS } from "../../../shared/types.ts";
 import { Combobox } from "./Combobox.tsx";
 import { DatePicker } from "./DatePicker.tsx";
+import { MarkdownEditor } from "./MarkdownEditor.tsx";
 import { Select } from "./Select.tsx";
+import { TodoAttachments } from "./TodoAttachments.tsx";
 import styles from "./TodoEditDialog.module.scss";
 import { TodoPicker } from "./TodoPicker.tsx";
 
@@ -62,6 +64,8 @@ export function TodoEditDialog(
   const [newChildTitle, setNewChildTitle] = useState("");
   const [childBusy, setChildBusy] = useState(false);
   const [picking, setPicking] = useState<"parent" | "child" | null>(null);
+  // Mirrors the notes editor's expanded surface. Only the Escape guard below reads it.
+  const [notesExpanded, setNotesExpanded] = useState(false);
 
   const datesInvalid = startDate.length > 0 && dueDate.length > 0 && startDate > dueDate;
   const canSubmit = title.trim().length > 0 && !datesInvalid && !busy;
@@ -80,17 +84,33 @@ export function TodoEditDialog(
     void loadChildren();
   }, [loadChildren]);
 
+  /**
+   * Appends an image embed to the notes. Appending, rather than inserting at the caret, is
+   * deliberate for now: the caret lives inside CodeMirror and reaching into it belongs to the
+   * paste-and-drop work, which owns editor-side insertion.
+   */
+  const insertNotesEmbed = useCallback((markdown: string) => {
+    setNotes((prev) => {
+      const body = prev.replace(/\s+$/, "");
+      return body.length === 0 ? markdown : body + "\n\n" + markdown;
+    });
+  }, []);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.stopPropagation();
-        // The picker handles its own Escape. Without this guard one press closes both.
-        if (picking === null) onClose();
+        // The picker and the expanded notes editor each handle their own Escape. Without
+        // these guards one press closes both them and the dialog, binning the user's edits.
+        // The expanded editor stops the event in the capture phase, so in practice this
+        // listener never sees that press at all; `notesExpanded` is the second layer, so the
+        // dialog survives even if the editor's listener ever loses the race.
+        if (picking === null && !notesExpanded) onClose();
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onClose, picking]);
+  }, [onClose, picking, notesExpanded]);
 
   async function submit() {
     if (!canSubmit) return;
@@ -163,7 +183,8 @@ export function TodoEditDialog(
       <div
         className={styles.dialog}
         onClick={(e) => e.stopPropagation()}
-        // Ctrl/Cmd+Enter submits from anywhere in the form, including the notes textarea.
+        // Ctrl/Cmd+Enter submits from anywhere in the form, including the notes editor, which
+        // swallows the CodeMirror binding but lets the DOM event bubble up to here.
         onKeyDown={(e) => {
           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
             e.preventDefault();
@@ -222,16 +243,28 @@ export function TodoEditDialog(
             />
           </label>
 
-          <label className={styles.field}>
-            <span className={styles.label}>Notes</span>
-            <textarea
-              className={styles.textarea}
+          {
+            /*
+            A <label> wrapping a contenteditable does not focus it on click and screen readers
+            mis-announce it, so the notes field uses a plain <div> and an explicit
+            aria-labelledby instead.
+          */
+          }
+          <div className={styles.notesField}>
+            <span className={styles.label} id="todo-notes-label">Notes</span>
+            <MarkdownEditor
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              maxLength={4000}
+              onChange={setNotes}
+              ariaLabelledBy="todo-notes-label"
+              placeholder="Markdown supported"
+              expandable
+              modalTitle="Edit Notes"
+              onModalOpenChange={setNotesExpanded}
+              todoId={todo === null ? null : todo.id}
             />
-          </label>
+          </div>
+
+          <TodoAttachments todoId={todo === null ? null : todo.id} onInsertEmbed={insertNotesEmbed} />
 
           <div className={styles.grid}>
             <div className={styles.field}>

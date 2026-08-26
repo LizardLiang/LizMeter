@@ -375,6 +375,45 @@ describe("TodosPage nesting", () => {
   });
 });
 
+describe("TodosPage notes editor", () => {
+  async function openNotesEditor() {
+    await renderPage();
+    fireEvent.click(screen.getByLabelText("Edit Old prod to new prod migration"));
+    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Open full editor" }));
+    return await screen.findByRole("dialog", { name: "Edit Notes" });
+  }
+
+  it("expands the notes field into a surface of its own", async () => {
+    const modal = await openNotesEditor();
+
+    expect(within(modal).getByRole("button", { name: "Done" })).toBeInTheDocument();
+    expect(within(modal).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
+  it("closes only the expanded editor on Escape, leaving the todo dialog open", async () => {
+    const modal = await openNotesEditor();
+
+    fireEvent.keyDown(modal, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit Notes" })).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: "Edit todo" })).toBeInTheDocument();
+  });
+
+  it("holds that layering even when the Escape targets document itself", async () => {
+    // The other case: nothing focused, so the key event's target is `document` rather than an
+    // element inside the modal. Both Escape layers are exercised here -- drop either the
+    // modal's capture-phase listener or the dialog's `notesExpanded` guard and this still
+    // passes; drop both and the todo dialog closes with the editor.
+    await openNotesEditor();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit Notes" })).not.toBeInTheDocument());
+    expect(screen.getByRole("dialog", { name: "Edit todo" })).toBeInTheDocument();
+  });
+});
+
 // Rendered order is Todo (position 0) then Backlog, so the cursor walks 152 -> 100 -> 162.
 describe("TodosPage keyboard navigation", () => {
   /** Moves the cursor down `steps` rows from nothing, leaving it on the intended todo. */
