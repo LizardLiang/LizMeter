@@ -1,5 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from "electron";
 import type {
+  AddTodoAttachmentBufferInput,
+  AddTodoAttachmentInput,
   AssignTagInput,
   AvatarPaths,
   BinaryDownloadProgress,
@@ -73,6 +75,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
       ipcRenderer.on("todo:changed", handler);
       return () => ipcRenderer.removeListener("todo:changed", handler);
     },
+  },
+  attachment: {
+    add: (input: AddTodoAttachmentInput) => ipcRenderer.invoke("attachment:add", input),
+    addBuffer: (input: AddTodoAttachmentBufferInput) => ipcRenderer.invoke("attachment:add-buffer", input),
+    list: (todoId: number) => ipcRenderer.invoke("attachment:list", todoId),
+    delete: (id: number) => ipcRenderer.invoke("attachment:delete", id),
+    open: (id: number) => ipcRenderer.invoke("attachment:open", id),
+    reveal: (id: number) => ipcRenderer.invoke("attachment:reveal", id),
   },
   todoState: {
     list: () => ipcRenderer.invoke("todo-state:list"),

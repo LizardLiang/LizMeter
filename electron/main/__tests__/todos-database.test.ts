@@ -13,6 +13,7 @@ import {
   listTodoMilestones,
   updateTodo,
 } from "../database.ts";
+import { NOTES_MAX_LENGTH } from "../../../src/shared/types.ts";
 
 const doneState = () => findTodoStateByLabel("Done")!;
 const complete = (id: number) => updateTodo({ id, stateId: doneState().id });
@@ -75,7 +76,13 @@ describe("createTodo", () => {
   });
 
   it("rejects over-long notes", () => {
-    expect(() => createTodo({ title: "ok", notes: "x".repeat(4001) })).toThrow(/4000 characters or fewer/);
+    expect(() => createTodo({ title: "ok", notes: "x".repeat(NOTES_MAX_LENGTH + 1) }))
+      .toThrow(new RegExp(`${NOTES_MAX_LENGTH} characters or fewer`));
+  });
+
+  it("accepts notes exactly at the cap", () => {
+    const notes = "x".repeat(NOTES_MAX_LENGTH);
+    expect(createTodo({ title: "ok", notes }).notes).toHaveLength(NOTES_MAX_LENGTH);
   });
 
   it("truncates an over-long source label rather than failing the write", () => {
@@ -180,6 +187,23 @@ describe("updateTodo", () => {
     const todo = createTodo({ title: "valid" });
     expect(() => updateTodo({ id: todo.id, title: "  " })).toThrow();
   });
+
+  // The MCP/pipe writer reaches updateTodo without passing through the dialog, so the cap
+  // has to hold here and not only in the editor's change filter.
+  it("rejects over-long notes and leaves the stored row alone", () => {
+    const todo = createTodo({ title: "capped", notes: "short" });
+
+    expect(() => updateTodo({ id: todo.id, notes: "x".repeat(NOTES_MAX_LENGTH + 1) }))
+      .toThrow(new RegExp(`${NOTES_MAX_LENGTH} characters or fewer`));
+    expect(listTodos().find((t) => t.id === todo.id)?.notes).toBe("short");
+  });
+
+  it("accepts notes exactly at the cap", () => {
+    const todo = createTodo({ title: "capped" });
+    const updated = updateTodo({ id: todo.id, notes: "x".repeat(NOTES_MAX_LENGTH) });
+
+    expect(updated.notes).toHaveLength(NOTES_MAX_LENGTH);
+  });
 });
 
 // --- deleteTodo -------------------------------------------------------------
@@ -208,13 +232,13 @@ describe("clearCompletedTodos", () => {
     updateTodo({ id: a.id, stateId: doneState().id });
     updateTodo({ id: b.id, stateId: doneState().id });
 
-    expect(clearCompletedTodos()).toBe(2);
+    expect(clearCompletedTodos().count).toBe(2);
     expect(listTodos().map((t) => t.title)).toEqual(["c"]);
   });
 
   it("returns 0 when nothing is completed", () => {
     createTodo({ title: "open" });
-    expect(clearCompletedTodos()).toBe(0);
+    expect(clearCompletedTodos()).toEqual({ count: 0, deletedShas: [] });
   });
 });
 
@@ -457,7 +481,7 @@ describe("todo nesting", () => {
     createTodo({ title: "child", parentId: parent.id });
     complete(parent.id);
 
-    expect(clearCompletedTodos()).toBe(1);
+    expect(clearCompletedTodos().count).toBe(1);
 
     const survivors = listTodos();
     expect(survivors.map((t) => t.title)).toEqual(["child"]);

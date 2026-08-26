@@ -1,0 +1,219 @@
+@use "../styles/mixins" as *;
+
+// The strip sits inside TodoEditDialog's glass surface, so it borrows that dialog's divider
+// and label treatment rather than starting a second visual language.
+.section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(86, 95, 137, 0.22);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #a3abc9;
+  text-transform: uppercase;
+  margin-bottom: 0;
+}
+
+.addBtn {
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px dashed rgba(86, 95, 137, 0.5);
+  background: transparent;
+  color: #a3abc9;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: #7aa2f7;
+    border-color: rgba(122, 162, 247, 0.5);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: #8b93b8;
+}
+
+.errorMsg {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: #f7768e;
+}
+
+.list {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  max-height: 30vh;
+  overflow-y: auto;
+}
+
+// One tile per attachment. Glass at a lower blur than the dialog itself, so the tiles read as
+// contents of the panel and not as a second floating layer.
+.tile {
+  display: flex;
+  flex-direction: column;
+  width: 8.5rem;
+  border-radius: 10px;
+  border: 1px solid rgba(86, 95, 137, 0.28);
+  background: rgba(12, 13, 24, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  overflow: hidden;
+  transition: border-color 0.15s;
+
+  &:hover {
+    border-color: rgba(122, 162, 247, 0.45);
+  }
+}
+
+// The preview doubles as the "open in the OS default app" control, for images and documents
+// alike, so it is a button rather than a plain box.
+.preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 4.5rem;
+  padding: 0;
+  border: none;
+  border-bottom: 1px solid rgba(86, 95, 137, 0.22);
+  background: rgba(20, 23, 42, 0.55);
+  color: #a3abc9;
+  font-family: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.12);
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.thumb {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+// Documents show their extension; a blob that no longer exists on disk shows a warning glyph.
+// Either way the box is never left empty, which would read as a loading state that never ends.
+.glyph {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #a3abc9;
+}
+
+.brokenGlyph {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: #f7768e;
+}
+
+.brokenMark {
+  font-size: 15px;
+  line-height: 1;
+}
+
+.meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 6px 8px 4px;
+  min-width: 0;
+}
+
+.name {
+  font-size: 12px;
+  color: #c0caf5;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Tokyo Night's #565f89 is too dim to read at this size against the frosted tile.
+.size {
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  color: #a3abc9;
+}
+
+.tileActions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 0 4px 5px 8px;
+}
+
+.insertBtn {
+  padding: 2px 6px;
+  border: none;
+  background: transparent;
+  color: #a3abc9;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+
+  &:hover:not(:disabled) {
+    color: #7aa2f7;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.removeBtn {
+  margin-left: auto;
+  padding: 3px 7px;
+  border: none;
+  background: transparent;
+  color: #a3abc9;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+
+  &:hover:not(:disabled) {
+    color: #f7768e;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}

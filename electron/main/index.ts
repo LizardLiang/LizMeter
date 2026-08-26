@@ -1,7 +1,9 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { closeDatabase, getSettingValue, initDatabase } from "./database.ts";
+import { getAttachmentsDir, sweepOrphanBlobs } from "./attachment-store.ts";
+import { ATTACHMENT_SCHEME_NAME, resolveAttachmentPath } from "./attachment-url.ts";
 import { destroyTracker } from "./claude-code-tracker.ts";
 import { registerIpcHandlers } from "./ipc-handlers.ts";
 import { destroyPipeServer, startPipeServer } from "./pipe-server.ts";
@@ -20,6 +22,18 @@ const VITE_DEV_SERVER_URL = process.env["VITE_DEV_SERVER_URL"];
 if (VITE_DEV_SERVER_URL) {
   app.commandLine.appendSwitch("remote-debugging-port", "9222");
 }
+
+// Attachments are served over a custom scheme rather than file:// or a data URI.
+//
+// This call must run at module top level, before the app is ready — after `whenReady()` it
+// silently does nothing and every attachment image fails with no useful error. `bypassCSP` is
+// deliberately absent: the renderer's CSP names `app-media:` in `img-src` explicitly.
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: ATTACHMENT_SCHEME_NAME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true },
+  },
+]);
 
 // Prevent music subsystem errors from crashing the app
 process.on("uncaughtException", (err) => {
@@ -74,6 +88,15 @@ function createWindow(): BrowserWindow {
 
   mainWindow = win;
 
+  // A file dropped anywhere in an Electron window navigates the renderer to that file and
+  // wipes app state. Nothing in this app navigates the main frame, so refusing every
+  // navigation away from the current URL is safe and closes that hole for good.
+  win.webContents.on("will-navigate", (event, url) => {
+    if (url !== win.webContents.getURL()) {
+      event.preventDefault();
+    }
+  });
+
   win.webContents.on("render-process-gone", () => {
     destroyTracker();
   });
@@ -108,6 +131,18 @@ app.whenReady().then(() => {
     app.quit();
     return;
   }
+
+  // Serves userData/attachments over app-media://. resolveAttachmentPath is the whole
+  // security boundary: it returns null for anything but a <64 hex>.<ext> basename that
+  // still resolves inside the attachments folder.
+  protocol.handle(ATTACHMENT_SCHEME_NAME, (request) => {
+    const file = resolveAttachmentPath(request.url, getAttachmentsDir());
+    if (file === null) return new Response("not found", { status: 404 });
+    return net.fetch(pathToFileURL(file).toString());
+  });
+
+  // Collects blobs left behind by a crash between the file write and the row insert.
+  sweepOrphanBlobs();
 
   registerIpcHandlers();
   registerWindowControlHandlers();

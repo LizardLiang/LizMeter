@@ -67,6 +67,13 @@
   margin-bottom: 12px;
 }
 
+// The notes row is a <div>, not a <label>: a <label> wrapping a contenteditable does not focus
+// it on click. Sizing only -- MarkdownEditor owns the look of the surface itself.
+.notesField {
+  display: block;
+  margin-bottom: 12px;
+}
+
 // Sizing only -- the Select component owns the look.
 .selectTrigger {
   width: 100%;
@@ -82,8 +89,7 @@
   margin-bottom: 5px;
 }
 
-.input,
-.textarea {
+.input {
   width: 100%;
   padding: 9px 12px;
   border-radius: 8px;
@@ -101,11 +107,6 @@
     border-color: rgba(122, 162, 247, 0.5);
     box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.08);
   }
-}
-
-.textarea {
-  resize: vertical;
-  line-height: 1.5;
 }
 
 .grid {
