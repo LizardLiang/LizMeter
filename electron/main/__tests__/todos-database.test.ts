@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   clearCompletedTodos,
   createTodo,
+  createTodoLabel,
+  createTodoProject,
   deleteTodo,
   findTodoStateByLabel,
   initDatabase,
@@ -245,23 +247,24 @@ describe("clearCompletedTodos", () => {
 // --- New fields --------------------------------------------------------------
 
 describe("project, milestone, and dates", () => {
-  it("stores and trims them", () => {
+  it("stores them", () => {
+    const project = createTodoProject({ name: "  LizMeter  " });
     const todo = createTodo({
       title: "x",
-      project: "  LizMeter  ",
+      projectId: project.id,
       milestone: " v1.14 ",
       startDate: "2026-08-25",
       dueDate: "2026-08-30",
     });
 
-    expect(todo.project).toBe("LizMeter");
+    expect(todo.project?.name).toBe("LizMeter");
     expect(todo.milestone).toBe("v1.14");
     expect(todo.startDate).toBe("2026-08-25");
     expect(todo.dueDate).toBe("2026-08-30");
   });
 
-  it("normalises blank text fields to null", () => {
-    const todo = createTodo({ title: "x", project: "   ", milestone: "" });
+  it("normalises a blank milestone to null", () => {
+    const todo = createTodo({ title: "x", milestone: "" });
     expect(todo.project).toBeNull();
     expect(todo.milestone).toBeNull();
   });
@@ -280,12 +283,23 @@ describe("project, milestone, and dates", () => {
   });
 
   it("rejects an over-long project name", () => {
-    expect(() => createTodo({ title: "x", project: "p".repeat(121) })).toThrow(/120 characters/);
+    expect(() => createTodoProject({ name: "p".repeat(61) })).toThrow(/60 characters/);
   });
 
-  it("clears a field when null is passed to update", () => {
-    const todo = createTodo({ title: "x", project: "LizMeter" });
-    expect(updateTodo({ id: todo.id, project: null }).project).toBeNull();
+  it("rejects a project id that does not exist", () => {
+    expect(() => createTodo({ title: "x", projectId: 9999 })).toThrow(/not found/);
+  });
+
+  it("clears the project when null is passed to update", () => {
+    const project = createTodoProject({ name: "LizMeter" });
+    const todo = createTodo({ title: "x", projectId: project.id });
+    expect(updateTodo({ id: todo.id, projectId: null }).project).toBeNull();
+  });
+
+  it("leaves the project alone when the field is absent from an update", () => {
+    const project = createTodoProject({ name: "LizMeter" });
+    const todo = createTodo({ title: "x", projectId: project.id });
+    expect(updateTodo({ id: todo.id, title: "y" }).project?.id).toBe(project.id);
   });
 });
 
@@ -312,11 +326,13 @@ describe("listTodos ordering", () => {
 // --- Filtering ---------------------------------------------------------------
 
 describe("listTodos filtering", () => {
-  it("filters by project, case-insensitively", () => {
-    createTodo({ title: "a", project: "LizMeter" });
-    createTodo({ title: "b", project: "Other" });
+  it("filters by project id", () => {
+    const liz = createTodoProject({ name: "LizMeter" });
+    const other = createTodoProject({ name: "Other" });
+    createTodo({ title: "a", projectId: liz.id });
+    createTodo({ title: "b", projectId: other.id });
 
-    expect(listTodos({ project: "lizmeter" }).map((t) => t.title)).toEqual(["a"]);
+    expect(listTodos({ projectId: liz.id }).map((t) => t.title)).toEqual(["a"]);
   });
 
   it("filters by state id", () => {
@@ -328,23 +344,42 @@ describe("listTodos filtering", () => {
   });
 
   it("combines a filter with a project", () => {
-    const done = createTodo({ title: "a", project: "LizMeter" });
-    createTodo({ title: "b", project: "LizMeter" });
+    const liz = createTodoProject({ name: "LizMeter" });
+    const done = createTodo({ title: "a", projectId: liz.id });
+    createTodo({ title: "b", projectId: liz.id });
     complete(done.id);
 
-    expect(listTodos({ filter: "active", project: "LizMeter" }).map((t) => t.title)).toEqual(["b"]);
+    expect(listTodos({ filter: "active", projectId: liz.id }).map((t) => t.title)).toEqual(["b"]);
+  });
+
+  it("filters by label", () => {
+    const bug = createTodoLabel({ name: "bug" });
+    createTodo({ title: "a", labelIds: [bug.id] });
+    createTodo({ title: "b" });
+
+    expect(listTodos({ labelId: bug.id }).map((t) => t.title)).toEqual(["a"]);
+  });
+
+  it("returns a todo once even though labels are one-to-many", () => {
+    const bug = createTodoLabel({ name: "bug" });
+    const ui = createTodoLabel({ name: "ui" });
+    createTodo({ title: "a", labelIds: [bug.id, ui.id] });
+
+    expect(listTodos().map((t) => t.title)).toEqual(["a"]);
+    expect(listTodos({ labelId: bug.id })).toHaveLength(1);
   });
 });
 
 // --- Autocomplete sources ----------------------------------------------------
 
 describe("listTodoProjects / listTodoMilestones", () => {
-  it("returns distinct non-null values", () => {
-    createTodo({ title: "a", project: "LizMeter", milestone: "v1.14" });
-    createTodo({ title: "b", project: "LizMeter", milestone: "v1.15" });
+  it("returns the project rows and the distinct milestone strings", () => {
+    createTodoProject({ name: "LizMeter" });
+    createTodo({ title: "a", milestone: "v1.14" });
+    createTodo({ title: "b", milestone: "v1.15" });
     createTodo({ title: "c" });
 
-    expect(listTodoProjects()).toEqual(["LizMeter"]);
+    expect(listTodoProjects().map((p) => p.name)).toEqual(["LizMeter"]);
     expect(listTodoMilestones()).toEqual(["v1.14", "v1.15"]);
   });
 

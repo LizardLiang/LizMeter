@@ -21,12 +21,12 @@ import { toPlainSummary } from "../utils/markdownPlain.ts";
 import { droppedStateId, stateDropId, todosToMove } from "../utils/todoDrag.ts";
 import { Select } from "./Select.tsx";
 import { TodoEditDialog } from "./TodoEditDialog.tsx";
+import { TodoManageDialog } from "./TodoManageDialog.tsx";
 import { TodoPicker } from "./TodoPicker.tsx";
 import { type QuickMenuItem, TodoQuickMenu } from "./TodoQuickMenu.tsx";
 import { type MenuAnchor, type QuickMenuKind, TodoActionMenu } from "./TodoRowMenu.tsx";
 import { TodoShortcutsOverlay } from "./TodoShortcutsOverlay.tsx";
 import styles from "./TodosPage.module.scss";
-import { TodoStateManager } from "./TodoStateManager.tsx";
 
 const FILTERS: Array<{ id: TodoFilter; label: string; }> = [
   { id: "all", label: "All" },
@@ -84,6 +84,8 @@ interface QuickMenuConfig {
   placeholder: string;
   items: QuickMenuItem[];
   acceptQuery?: (query: string) => QuickMenuItem | null;
+  /** Only the label menu sets this: several labels can be toggled without reopening. */
+  multi?: boolean;
   onPick: (value: string) => void;
 }
 
@@ -271,10 +273,19 @@ function TodoRow(props: RowProps) {
 
         <span className={styles.spacer} />
 
+        {todo.labels.map((label) => (
+          <span
+            key={label.id}
+            className={styles.label}
+            style={{ borderColor: `${label.color}55`, color: label.color, background: `${label.color}1a` }}
+          >
+            {label.name}
+          </span>
+        ))}
         {todo.project && (
-          <span className={styles.project}>
+          <span className={styles.project} style={{ color: todo.project.color }}>
             <ProjectIcon />
-            {todo.project}
+            {todo.project.name}
           </span>
         )}
         {todo.source === "ai" && (
@@ -394,11 +405,14 @@ export function TodosPage() {
     todos,
     states,
     projects,
+    labels,
     milestones,
     filter,
     setFilter,
     projectFilter,
     setProjectFilter,
+    labelFilter,
+    setLabelFilter,
     loading,
     error,
     createTodo,
@@ -412,6 +426,14 @@ export function TodosPage() {
     updateState,
     deleteState,
     reorderStates,
+    createProject,
+    updateProject,
+    deleteProject,
+    reorderProjects,
+    createLabel,
+    updateLabel,
+    deleteLabel,
+    toggleTodoLabel,
   } = useTodos();
 
   const [editing, setEditing] = useState<Todo | null>(null);
@@ -422,7 +444,8 @@ export function TodosPage() {
   const [creating, setCreating] = useState<
     { stateId: number | null; parent?: { id: number; title: string; }; } | null
   >(null);
-  const [managingStates, setManagingStates] = useState(false);
+  /** The States / Projects / Labels dialog. */
+  const [managing, setManaging] = useState(false);
   /** The todo whose parent is being chosen from the row menu or by `L`. */
   const [reparenting, setReparenting] = useState<Todo | null>(null);
   /** The todo an existing sub-issue is being filed under, from `l`. */
@@ -455,7 +478,7 @@ export function TodosPage() {
 
   // Anything that owns the keyboard. While one of these is up the page's own bindings stand down,
   // or `d` typed into a search box would fall through and open the due-date menu behind it.
-  const dialogOpen = editing !== null || creating !== null || managingStates
+  const dialogOpen = editing !== null || creating !== null || managing
     || reparenting !== null || linkingChild !== null || quickMenu !== null || showingShortcuts
     || actionMenu !== null;
   const doneCount = todos.filter((todo) => todo.state.isCompleted).length;
@@ -463,6 +486,25 @@ export function TodosPage() {
   const countsByState = useMemo(() => {
     const counts: Record<number, number> = {};
     for (const todo of todos) counts[todo.state.id] = (counts[todo.state.id] ?? 0) + 1;
+    return counts;
+  }, [todos]);
+
+  // Both counts are of the todos currently loaded, so a narrowing filter narrows them too.
+  // The manage dialog says so, and the delete confirm reads the authoritative count from
+  // the main process anyway.
+  const countsByProject = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const todo of todos) {
+      if (todo.project) counts[todo.project.id] = (counts[todo.project.id] ?? 0) + 1;
+    }
+    return counts;
+  }, [todos]);
+
+  const countsByLabel = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const todo of todos) {
+      for (const label of todo.labels) counts[label.id] = (counts[label.id] ?? 0) + 1;
+    }
     return counts;
   }, [todos]);
 
@@ -697,6 +739,10 @@ export function TodosPage() {
           event.preventDefault();
           setQuickMenu({ kind: "project", todo: focusedTodo, anchor: rowAnchor(focusedTodo.id) });
           break;
+        case "t":
+          event.preventDefault();
+          setQuickMenu({ kind: "label", todo: focusedTodo, anchor: rowAnchor(focusedTodo.id) });
+          break;
         case "l":
           event.preventDefault();
           setLinkingChild(focusedTodo);
@@ -748,7 +794,11 @@ export function TodosPage() {
   /** The rows, and the write behind them, for whichever single-key menu is open. */
   const quickMenuConfig = useMemo<QuickMenuConfig | null>(() => {
     if (quickMenu === null) return null;
-    const { kind, todo } = quickMenu;
+    const { kind } = quickMenu;
+    // Re-read from the live list rather than using the todo captured when the menu opened.
+    // The label menu stays open across picks, so a second toggle computed from the stale
+    // copy would drop the label the first one just added.
+    const todo = todos.find((t) => t.id === quickMenu.todo.id) ?? quickMenu.todo;
 
     if (kind === "state") {
       return {
@@ -801,18 +851,69 @@ export function TodosPage() {
       };
     }
 
-    const items: QuickMenuItem[] = projects.map((p) => ({ value: p, label: p, current: todo.project === p }));
+    if (kind === "label") {
+      const items: QuickMenuItem[] = labels.map((l) => ({
+        value: String(l.id),
+        label: l.name,
+        color: l.color,
+        current: todo.labels.some((attached) => attached.id === l.id),
+      }));
+
+      return {
+        heading: "Toggle labels",
+        placeholder: "Filter, or name a new one",
+        items,
+        multi: true,
+        // Typing an unlisted name creates the label and attaches it in one step, which is
+        // what makes the pool grow from ordinary use rather than from a setup screen.
+        acceptQuery: (query) => ({ value: `new:${query}`, label: `Create "${query}"`, hint: "New" }),
+        onPick: (value) => {
+          if (value.startsWith("new:")) {
+            const name = value.slice(4);
+            void createLabel({ name }).then((created) => toggleTodoLabel(todo, created.id));
+            return;
+          }
+          void toggleTodoLabel(todo, Number(value));
+        },
+      };
+    }
+
+    const items: QuickMenuItem[] = projects.map((p) => ({
+      value: String(p.id),
+      label: p.name,
+      color: p.color,
+      current: todo.project?.id === p.id,
+    }));
     items.push({ value: "", label: "No project", current: todo.project === null });
 
     return {
       heading: "Set project",
       placeholder: "Filter, or name a new one",
       items,
-      // Projects are free text with no table of their own, so typing one is how a new one starts.
-      acceptQuery: (query) => ({ value: query, label: `Create "${query}"`, hint: "New" }),
-      onPick: (value) => void updateTodo({ id: todo.id, project: value.length > 0 ? value : null }),
+      // Typing an unlisted name creates the project, then moves the todo onto it. Projects are
+      // rows now, so this is a real insert rather than the free text it used to write.
+      acceptQuery: (query) => ({ value: `new:${query}`, label: `Create "${query}"`, hint: "New" }),
+      onPick: (value) => {
+        if (value.startsWith("new:")) {
+          const name = value.slice(4);
+          void createProject({ name }).then((created) => updateTodo({ id: todo.id, projectId: created.id }));
+          return;
+        }
+        void updateTodo({ id: todo.id, projectId: value.length > 0 ? Number(value) : null });
+      },
     };
-  }, [quickMenu, states, projects, setTodoState, updateTodo]);
+  }, [
+    quickMenu,
+    todos,
+    states,
+    projects,
+    labels,
+    setTodoState,
+    updateTodo,
+    createProject,
+    createLabel,
+    toggleTodoLabel,
+  ]);
 
   return (
     <div className={styles.page}>
@@ -834,12 +935,23 @@ export function TodosPage() {
           <Select
             ariaLabel="Filter by project"
             className={styles.filterSelect}
-            value={projectFilter ?? ""}
+            value={projectFilter === null ? "" : String(projectFilter)}
             options={[
               { value: "", label: "Any project" },
-              ...projects.map((p) => ({ value: p, label: p })),
+              ...projects.map((p) => ({ value: String(p.id), label: p.name, color: p.color })),
             ]}
-            onChange={(next) => setProjectFilter(next === "" ? null : next)}
+            onChange={(next) => setProjectFilter(next === "" ? null : Number(next))}
+          />
+
+          <Select
+            ariaLabel="Filter by label"
+            className={styles.filterSelect}
+            value={labelFilter === null ? "" : String(labelFilter)}
+            options={[
+              { value: "", label: "Any label" },
+              ...labels.map((l) => ({ value: String(l.id), label: l.name, color: l.color })),
+            ]}
+            onChange={(next) => setLabelFilter(next === "" ? null : Number(next))}
           />
 
           <button
@@ -850,7 +962,7 @@ export function TodosPage() {
           >
             ?
           </button>
-          <button className={styles.ghostBtn} onClick={() => setManagingStates(true)}>States</button>
+          <button className={styles.ghostBtn} onClick={() => setManaging(true)}>Manage</button>
           {doneCount > 0 && (
             <button className={styles.ghostBtn} onClick={() => void clearCompleted()}>
               Clear {doneCount} done
@@ -950,7 +1062,10 @@ export function TodosPage() {
           defaultParent={creating?.parent}
           states={states}
           projects={projects}
+          labels={labels}
           milestones={milestones}
+          onCreateProject={createProject}
+          onCreateLabel={createLabel}
           onSave={updateTodo}
           onCreate={createTodo}
           onDelete={deleteTodo}
@@ -1008,20 +1123,32 @@ export function TodosPage() {
           items={quickMenuConfig.items}
           anchor={quickMenu.anchor}
           acceptQuery={quickMenuConfig.acceptQuery}
+          multi={quickMenuConfig.multi}
           onPick={quickMenuConfig.onPick}
           onClose={() => setQuickMenu(null)}
         />
       )}
 
-      {managingStates && (
-        <TodoStateManager
+      {managing && (
+        <TodoManageDialog
           states={states}
+          projects={projects}
+          labels={labels}
           countsByState={countsByState}
-          onCreate={createState}
-          onUpdate={updateState}
-          onDelete={deleteState}
-          onReorder={reorderStates}
-          onClose={() => setManagingStates(false)}
+          countsByProject={countsByProject}
+          countsByLabel={countsByLabel}
+          onCreateState={createState}
+          onUpdateState={updateState}
+          onDeleteState={deleteState}
+          onReorderStates={reorderStates}
+          onCreateProject={createProject}
+          onUpdateProject={updateProject}
+          onDeleteProject={deleteProject}
+          onReorderProjects={reorderProjects}
+          onCreateLabel={createLabel}
+          onUpdateLabel={updateLabel}
+          onDeleteLabel={deleteLabel}
+          onClose={() => setManaging(false)}
         />
       )}
     </div>

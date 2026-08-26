@@ -9,6 +9,8 @@ import type {
   ClaudeCodeSessionPreview,
   CreateTagInput,
   CreateTodoInput,
+  CreateTodoLabelInput,
+  CreateTodoProjectInput,
   CreateTodoStateInput,
   ImportProgress,
   IntegrityCheckResult,
@@ -29,6 +31,8 @@ import type {
   TimerSettings,
   UpdateTagInput,
   UpdateTodoInput,
+  UpdateTodoLabelInput,
+  UpdateTodoProjectInput,
   UpdateTodoStateInput,
   WidgetControlAction,
   WidgetSettings,
@@ -68,7 +72,6 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (input: UpdateTodoInput) => ipcRenderer.invoke("todo:update", input),
     delete: (id: number) => ipcRenderer.invoke("todo:delete", id),
     clearCompleted: () => ipcRenderer.invoke("todo:clear-completed"),
-    listProjects: () => ipcRenderer.invoke("todo:list-projects"),
     listMilestones: () => ipcRenderer.invoke("todo:list-milestones"),
     onChanged: (callback: () => void): (() => void) => {
       const handler = () => callback();
@@ -90,6 +93,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     update: (input: UpdateTodoStateInput) => ipcRenderer.invoke("todo-state:update", input),
     delete: (id: number, reassignToId: number) => ipcRenderer.invoke("todo-state:delete", { id, reassignToId }),
     reorder: (orderedIds: number[]) => ipcRenderer.invoke("todo-state:reorder", orderedIds),
+  },
+  todoProject: {
+    list: () => ipcRenderer.invoke("todo-project:list"),
+    create: (input: CreateTodoProjectInput) => ipcRenderer.invoke("todo-project:create", input),
+    update: (input: UpdateTodoProjectInput) => ipcRenderer.invoke("todo-project:update", input),
+    delete: (id: number) => ipcRenderer.invoke("todo-project:delete", id),
+    reorder: (orderedIds: number[]) => ipcRenderer.invoke("todo-project:reorder", orderedIds),
+  },
+  todoLabel: {
+    list: () => ipcRenderer.invoke("todo-label:list"),
+    create: (input: CreateTodoLabelInput) => ipcRenderer.invoke("todo-label:create", input),
+    update: (input: UpdateTodoLabelInput) => ipcRenderer.invoke("todo-label:update", input),
+    delete: (id: number) => ipcRenderer.invoke("todo-label:delete", id),
   },
   window: {
     minimize: () => ipcRenderer.send("window:minimize"),

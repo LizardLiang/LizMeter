@@ -15,9 +15,13 @@ import fs from "node:fs";
 import {
   clearCompletedTodos,
   createTodo,
+  findTodoLabelByName,
+  findTodoProjectByName,
   findTodoStateByLabel,
   insertNvimActivity,
   isDuplicateNvimActivity,
+  listTodoLabels,
+  listTodoProjects,
   listTodos,
   listTodoStates,
   updateTodo,
@@ -103,6 +107,57 @@ function resolveStateLabel(label: unknown): number | undefined {
   throw new Error(`Unknown state '${label.trim()}'. Valid states: ${valid}`);
 }
 
+/**
+ * Resolves a project name to its id, the same contract as {@link resolveStateLabel}.
+ *
+ * Returns `undefined` for an absent field and `null` for an explicit null, so an update can
+ * distinguish "leave the project alone" from "clear it".
+ *
+ * Unknown names are rejected rather than created. The picker in the app creates a project by
+ * typing one, but that is a person confirming a new grouping on screen; an agent typo would
+ * quietly fragment the user's projects instead.
+ */
+function resolveProjectName(name: unknown): number | null | undefined {
+  if (name === undefined) return undefined;
+  if (name === null) return null;
+  if (typeof name !== "string" || name.trim().length === 0) {
+    throw new Error("'project' must be a non-empty string or null");
+  }
+  const project = findTodoProjectByName(name);
+  if (project) return project.id;
+
+  const valid = listTodoProjects().map((p) => p.name).join(", ");
+  throw new Error(
+    valid.length > 0
+      ? `Unknown project '${name.trim()}'. Valid projects: ${valid}`
+      : `Unknown project '${name.trim()}'. No projects exist yet -- create one in the app first.`,
+  );
+}
+
+/** Resolves label names to ids. Unknown names are rejected, for the same reason as projects. */
+function resolveLabelNames(value: unknown, field: string): number[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) throw new Error(`'${field}' must be an array of label names`);
+
+  const ids: number[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string" || entry.trim().length === 0) {
+      throw new Error(`'${field}' must contain non-empty strings`);
+    }
+    const label = findTodoLabelByName(entry);
+    if (!label) {
+      const valid = listTodoLabels().map((l) => l.name).join(", ");
+      throw new Error(
+        valid.length > 0
+          ? `Unknown label '${entry.trim()}'. Valid labels: ${valid}`
+          : `Unknown label '${entry.trim()}'. No labels exist yet -- create one in the app first.`,
+      );
+    }
+    ids.push(label.id);
+  }
+  return ids;
+}
+
 function optionalString(value: unknown, field: string): string | null | undefined {
   if (value === undefined) return undefined;
   if (value === null) return null;
@@ -141,12 +196,19 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
     case "todo.states":
       return { states: listTodoStates() };
 
+    case "todo.projects":
+      return { projects: listTodoProjects() };
+
+    case "todo.labels":
+      return { labels: listTodoLabels() };
+
     case "todo.add": {
       const todo = createTodo({
         title: data.title as string,
         notes: optionalString(data.notes, "notes") ?? null,
         stateId: resolveStateLabel(data.state),
-        project: optionalString(data.project, "project") ?? null,
+        projectId: resolveProjectName(data.project) ?? null,
+        labelIds: resolveLabelNames(data.labels, "labels"),
         milestone: optionalString(data.milestone, "milestone") ?? null,
         priority: optionalNumber(data.priority, "priority") ?? undefined,
         startDate: optionalString(data.startDate, "startDate") ?? null,
@@ -167,7 +229,8 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
         title: data.title === undefined ? undefined : (data.title as string),
         notes: optionalString(data.notes, "notes"),
         stateId: resolveStateLabel(data.state),
-        project: optionalString(data.project, "project"),
+        projectId: resolveProjectName(data.project),
+        labelIds: resolveLabelNames(data.labels, "labels"),
         milestone: optionalString(data.milestone, "milestone"),
         priority: optionalNumber(data.priority, "priority") ?? undefined,
         startDate: optionalString(data.startDate, "startDate"),
@@ -183,10 +246,11 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
       const filter = typeof raw === "string" && VALID_TODO_FILTERS.has(raw as TodoFilter)
         ? (raw as TodoFilter)
         : "all";
-      const project = optionalString(data.project, "project") ?? undefined;
+      const projectId = resolveProjectName(data.project) ?? undefined;
+      const labelIds = resolveLabelNames(data.label === undefined ? undefined : [data.label], "label");
       const stateId = resolveStateLabel(data.state);
       const parentId = optionalNumber(data.parentId, "parentId") ?? undefined;
-      return { todos: listTodos({ filter, project, stateId, parentId }) };
+      return { todos: listTodos({ filter, projectId, labelId: labelIds?.[0], stateId, parentId }) };
     }
 
     case "todo.complete": {

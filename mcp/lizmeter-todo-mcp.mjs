@@ -90,7 +90,19 @@ function sendCommand(type, payload = {}) {
 const FIELD_PROPERTIES = {
   project: {
     type: "string",
-    description: "Optional project name, e.g. 'LizMeter'. Free text; reuse an existing name to group todos.",
+    description:
+      "Optional project name, e.g. 'LizMeter' (case-insensitive). Projects are user-defined rows, not "
+      + "free text: an unknown name is rejected and the error lists every valid one. Call todo_projects "
+      + "to see them. Pass null to clear the project.",
+  },
+  labels: {
+    type: "array",
+    items: { type: "string" },
+    description:
+      "Optional label names, e.g. ['bug', 'ui'] (case-insensitive). Like projects these must already "
+      + "exist -- an unknown name is rejected and the error lists the valid ones. Call todo_labels to "
+      + "see them. On todo_update this REPLACES the whole set, so pass every label the todo should end "
+      + "up with, and [] to remove them all.",
   },
   milestone: {
     type: "string",
@@ -173,7 +185,11 @@ const TOOLS = [
         },
         project: {
           type: "string",
-          description: "Optional: only todos in this project.",
+          description: "Optional: only todos in this project, by name. An unknown name lists the valid ones.",
+        },
+        label: {
+          type: "string",
+          description: "Optional: only todos carrying this label, by name. An unknown name lists the valid ones.",
         },
         state: {
           type: "string",
@@ -204,6 +220,20 @@ const TOOLS = [
     },
   },
   {
+    name: "todo_projects",
+    description:
+      "List the projects defined in LizMeter. Call this before assigning a project with todo_add or "
+      + "todo_update: project names must already exist, and this is how you learn which do.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
+    name: "todo_labels",
+    description:
+      "List the labels defined in LizMeter. Call this before attaching labels with todo_add or "
+      + "todo_update: label names must already exist, and this is how you learn which do.",
+    inputSchema: { type: "object", properties: {} },
+  },
+  {
     name: "todo_complete",
     description:
       "Mark one LizMeter todo as done, by its numeric id. This moves it to whichever state the user has "
@@ -223,7 +253,7 @@ const TOOLS = [
 /** Collects the optional shared fields, leaving absent ones absent so updates stay partial. */
 function fieldArgs(args) {
   const out = {};
-  for (const key of ["project", "milestone", "priority", "startDate", "dueDate", "state", "parentId"]) {
+  for (const key of ["project", "labels", "milestone", "priority", "startDate", "dueDate", "state", "parentId"]) {
     if (args[key] !== undefined) out[key] = args[key];
   }
   return out;
@@ -238,6 +268,10 @@ function formatDateRange(todo) {
 
 const PRIORITY_LABELS = ["No priority", "Urgent", "High", "Medium", "Low"];
 
+function formatNames(list) {
+  return (list ?? []).map((entry) => entry.name).join(", ");
+}
+
 function formatTodo(todo) {
   const box = todo.state && todo.state.isCompleted ? "[x]" : "[ ]";
 
@@ -245,7 +279,8 @@ function formatTodo(todo) {
   if (todo.state) meta.push(todo.state.label);
   // 0 is "unset", so it carries no information worth a line in the listing.
   if (todo.priority) meta.push(PRIORITY_LABELS[todo.priority] ?? "priority " + todo.priority);
-  if (todo.project) meta.push(todo.project);
+  if (todo.project) meta.push(todo.project.name);
+  if (todo.labels && todo.labels.length > 0) meta.push(formatNames(todo.labels));
   if (todo.milestone) meta.push(todo.milestone);
   const dates = formatDateRange(todo);
   if (dates) meta.push(dates);
@@ -277,6 +312,7 @@ async function callTool(name, args = {}) {
     case "todo_list": {
       const payload = { filter: args.filter ?? "all" };
       if (args.project !== undefined) payload.project = args.project;
+      if (args.label !== undefined) payload.label = args.label;
       if (args.state !== undefined) payload.state = args.state;
       if (args.parentId !== undefined) payload.parentId = args.parentId;
       const result = await sendCommand("todo.list", payload);
@@ -299,6 +335,20 @@ async function callTool(name, args = {}) {
       const result = await sendCommand("todo.update", payload);
       return "Updated todo #" + result.todo.id + ": " + result.todo.title
         + " [" + result.todo.state.label + "]";
+    }
+
+    case "todo_projects": {
+      const result = await sendCommand("todo.projects", {});
+      const projects = result.projects ?? [];
+      if (projects.length === 0) return "No projects defined yet.";
+      return projects.map((project) => "- " + project.name).join("\n");
+    }
+
+    case "todo_labels": {
+      const result = await sendCommand("todo.labels", {});
+      const labels = result.labels ?? [];
+      if (labels.length === 0) return "No labels defined yet.";
+      return labels.map((label) => "- " + label.name).join("\n");
     }
 
     case "todo_complete": {

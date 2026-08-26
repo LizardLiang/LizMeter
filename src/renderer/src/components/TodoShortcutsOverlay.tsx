@@ -35,6 +35,7 @@ const SECTIONS: Array<{ title: string; shortcuts: Shortcut[]; }> = [
       { keys: ["P"], label: "Set priority" },
       { keys: ["D"], label: "Set due date" },
       { keys: ["Shift", "P"], label: "Set project" },
+      { keys: ["T"], label: "Toggle labels" },
       { keys: ["L"], label: "Link an existing todo as a sub-issue" },
       { keys: ["Shift", "L"], label: "Link a parent" },
     ],

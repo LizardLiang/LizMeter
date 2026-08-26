@@ -23,6 +23,8 @@ import type {
   SaveSessionWithTrackingInput,
   Session,
   CreateTodoInput,
+  CreateTodoLabelInput,
+  CreateTodoProjectInput,
   CreateTodoStateInput,
   ListTodosInput,
   Tag,
@@ -31,14 +33,24 @@ import type {
   Todo,
   TodoAttachment,
   TodoAttachmentKind,
+  TodoLabel,
+  TodoProject,
   TodoSource,
   TodoState,
   UpdateTagInput,
   UpdateTodoInput,
+  UpdateTodoLabelInput,
+  UpdateTodoProjectInput,
   UpdateTodoStateInput,
   WorklogStatus,
 } from "../../src/shared/types.ts";
-import { MAX_TODO_PRIORITY, NOTES_MAX_LENGTH, TODO_PRIORITY_LABELS } from "../../src/shared/types.ts";
+import {
+  DEFAULT_TODO_COLOR,
+  MAX_TODO_PRIORITY,
+  NOTES_MAX_LENGTH,
+  TODO_COLORS,
+  TODO_PRIORITY_LABELS,
+} from "../../src/shared/types.ts";
 import { attachmentKindForExt, attachmentUrl, extFromFileName } from "./attachment-url.ts";
 import type { InternalTrackRecord } from "./music/internal-types.ts";
 import { toRendererTrack } from "./music/internal-types.ts";
@@ -196,12 +208,45 @@ export function initDatabase(dbPath?: string): void {
 
     CREATE INDEX IF NOT EXISTS idx_todo_states_position ON todo_states(position);
 
+    -- Declared before todos for the same reason as todo_states: todos.project_id points at it.
+    -- No default and no completed flag -- a project groups work, it does not sequence it.
+    CREATE TABLE IF NOT EXISTS todo_projects (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      color      TEXT NOT NULL DEFAULT '#7aa2f7',
+      position   INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(name COLLATE NOCASE)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_todo_projects_position ON todo_projects(position);
+
+    -- Labels are many-to-many with todos, the same shape as tags/session_tags above.
+    CREATE TABLE IF NOT EXISTS todo_labels (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      color      TEXT NOT NULL DEFAULT '#7aa2f7',
+      created_at TEXT NOT NULL,
+      UNIQUE(name COLLATE NOCASE)
+    );
+
+    CREATE TABLE IF NOT EXISTS todo_label_links (
+      todo_id  INTEGER NOT NULL REFERENCES todos(id)       ON DELETE CASCADE,
+      label_id INTEGER NOT NULL REFERENCES todo_labels(id) ON DELETE CASCADE,
+      PRIMARY KEY (todo_id, label_id)
+    );
+
+    -- The composite primary key already indexes (todo_id, label_id); this covers the other
+    -- direction, which is what "list todos carrying label X" and label deletion both scan.
+    CREATE INDEX IF NOT EXISTS idx_todo_label_links_label ON todo_label_links(label_id);
+
     CREATE TABLE IF NOT EXISTS todos (
       id           INTEGER PRIMARY KEY AUTOINCREMENT,
       title        TEXT NOT NULL,
       notes        TEXT,
       state_id     INTEGER REFERENCES todo_states(id),
-      project      TEXT,
+      -- Deleting a project clears it from its todos rather than deleting the work items.
+      project_id   INTEGER REFERENCES todo_projects(id) ON DELETE SET NULL,
       milestone    TEXT,
       -- 0-4 on the Linear scale, where 0 is "not set". See TODO_PRIORITY_LABELS.
       priority     INTEGER NOT NULL DEFAULT 0,
@@ -218,7 +263,7 @@ export function initDatabase(dbPath?: string): void {
 
     CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_todos_source ON todos(source);
-    -- Indexes on state_id / project / due_date / parent_id are created by migrateTodosToStates.
+    -- Indexes on state_id / project_id / due_date / parent_id are created by migrateTodosToStates.
     -- On an existing database those columns do not exist yet at this point.
 
     -- Files attached to a todo. The blob on disk is content-addressed (<sha256>.<ext>), so
@@ -354,8 +399,8 @@ function migrateTodosToStates(database: DbHandle): void {
   if (!columns.includes("state_id")) {
     database.exec("ALTER TABLE todos ADD COLUMN state_id INTEGER REFERENCES todo_states(id)");
   }
-  if (!columns.includes("project")) {
-    database.exec("ALTER TABLE todos ADD COLUMN project TEXT");
+  if (!columns.includes("project_id")) {
+    database.exec("ALTER TABLE todos ADD COLUMN project_id INTEGER REFERENCES todo_projects(id) ON DELETE SET NULL");
   }
   if (!columns.includes("milestone")) database.exec("ALTER TABLE todos ADD COLUMN milestone TEXT");
   if (!columns.includes("priority")) {
@@ -375,9 +420,11 @@ function migrateTodosToStates(database: DbHandle): void {
 
   // Safe now that every column above exists, on both a fresh and an upgraded database.
   database.exec("CREATE INDEX IF NOT EXISTS idx_todos_state_id ON todos(state_id)");
-  database.exec("CREATE INDEX IF NOT EXISTS idx_todos_project ON todos(project)");
+  database.exec("CREATE INDEX IF NOT EXISTS idx_todos_project_id ON todos(project_id)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_todos_due_date ON todos(due_date)");
   database.exec("CREATE INDEX IF NOT EXISTS idx_todos_parent_id ON todos(parent_id)");
+
+  migrateProjectTextToRows(database, columns);
 
   const completedId = getCompletedStateId(database);
   const defaultId = getDefaultStateId(database);
@@ -404,6 +451,55 @@ function migrateTodosToStates(database: DbHandle): void {
 }
 
 /**
+ * Promotes the old free-text `todos.project` column to rows in `todo_projects`.
+ *
+ * Each distinct spelling becomes one project, matched case-insensitively so "lizmeter" and
+ * "LizMeter" collapse into a single row rather than two. The text column is dropped once every
+ * row has been repointed, the same way the old `done` boolean was retired.
+ *
+ * `columns` is the pre-migration column list, so this is a no-op on a database that never had
+ * the text column -- which is every database created after this change.
+ */
+function migrateProjectTextToRows(database: DbHandle, columns: string[]): void {
+  if (!columns.includes("project")) return;
+
+  const names = database
+    .prepare("SELECT DISTINCT TRIM(project) AS name FROM todos WHERE project IS NOT NULL AND TRIM(project) != ''")
+    .all() as Array<{ name: string }>;
+
+  const move = database.transaction(() => {
+    const { next } = database
+      .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_projects")
+      .get() as { next: number };
+    let position = next;
+
+    const findProject = database.prepare("SELECT id FROM todo_projects WHERE name = ? COLLATE NOCASE");
+    const insertProject = database.prepare(
+      "INSERT INTO todo_projects (name, color, position, created_at) VALUES (?, ?, ?, ?)",
+    );
+    const repoint = database.prepare(
+      "UPDATE todos SET project_id = ? WHERE project_id IS NULL AND project = ? COLLATE NOCASE",
+    );
+
+    for (const { name } of names) {
+      let row = findProject.get(name) as { id: number } | undefined;
+      if (!row) {
+        insertProject.run(name, DEFAULT_TODO_COLOR, position, new Date().toISOString());
+        position += 1;
+        row = findProject.get(name) as { id: number };
+      }
+      repoint.run(row.id, name);
+    }
+
+    // Same ordering rule as the `done` column below: SQLite refuses DROP COLUMN while an
+    // index still names the column, so the index goes first.
+    database.exec("DROP INDEX IF EXISTS idx_todos_project");
+    database.exec("ALTER TABLE todos DROP COLUMN project");
+  });
+  move();
+}
+
+/**
  * Re-runs the todos-to-states migration against the open database.
  *
  * Exported so tests can build a pre-states `todos` table and prove real rows land on
@@ -425,7 +521,12 @@ export function closeDatabase(): void {
   }
 }
 
-function getDb(): Database.Database {
+/**
+ * Exported so migration tests can rebuild an older table shape and prove real rows survive
+ * the upgrade. The same reasoning as {@link migrateTodosToStatesNow}: a wrong backfill loses
+ * the user's work items, and that is only provable against the actual schema.
+ */
+export function getDb(): Database.Database {
   if (!db) {
     throw new Error("Database is not initialized. Call initDatabase() first.");
   }
@@ -1526,17 +1627,7 @@ export function reorderPlaylistTrack(playlistId: number, trackEntryId: number, t
 const MAX_TODO_STATE_LABEL_LENGTH = 32;
 
 /** Tag colors plus the muted grey used for de-emphasised UI, which suits a Backlog state. */
-const VALID_TODO_STATE_COLORS = new Set([
-  "#7aa2f7",
-  "#bb9af7",
-  "#7dcfff",
-  "#9ece6a",
-  "#f7768e",
-  "#ff9e64",
-  "#e0af68",
-  "#c678dd",
-  "#565f89",
-]);
+const VALID_TODO_STATE_COLORS = new Set<string>(TODO_COLORS);
 
 interface TodoStateRow {
   id: number;
@@ -1759,6 +1850,348 @@ export function reorderTodoStates(orderedIds: number[]): TodoState[] {
   return listTodoStates();
 }
 
+// --- Todo Project Functions ---
+
+const MAX_TODO_PROJECT_NAME_LENGTH = 60;
+
+interface TodoProjectRow {
+  id: number;
+  name: string;
+  color: string;
+  position: number;
+  created_at: string;
+}
+
+const TODO_PROJECT_COLUMNS = "id, name, color, position, created_at";
+
+function rowToTodoProject(row: TodoProjectRow): TodoProject {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    position: row.position,
+    createdAt: row.created_at,
+  };
+}
+
+function validateProjectName(name: unknown): string {
+  if (typeof name !== "string" || name.trim().length === 0) {
+    throw new Error("Project name must be a non-empty string");
+  }
+  const trimmed = name.trim();
+  if (trimmed.length > MAX_TODO_PROJECT_NAME_LENGTH) {
+    throw new Error(`Project name must be ${MAX_TODO_PROJECT_NAME_LENGTH} characters or fewer`);
+  }
+  return trimmed;
+}
+
+/** Projects, labels and states all draw from one palette, so one check serves all three. */
+function validatePaletteColor(color: unknown, kind: string): string {
+  if (typeof color !== "string" || !VALID_TODO_STATE_COLORS.has(color)) {
+    throw new Error(`Invalid ${kind} color. Must be one of: ${[...VALID_TODO_STATE_COLORS].join(", ")}`);
+  }
+  return color;
+}
+
+export function listTodoProjects(): TodoProject[] {
+  const database = getDb();
+  const rows = database
+    .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects ORDER BY position ASC`)
+    .all() as TodoProjectRow[];
+  return rows.map(rowToTodoProject);
+}
+
+/** Resolves a project by name, case-insensitively. Returns null when there is no match. */
+export function findTodoProjectByName(name: string): TodoProject | null {
+  const database = getDb();
+  const row = database
+    .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE name = ? COLLATE NOCASE`)
+    .get(name.trim()) as TodoProjectRow | undefined;
+  return row ? rowToTodoProject(row) : null;
+}
+
+export function createTodoProject(input: CreateTodoProjectInput): TodoProject {
+  const database = getDb();
+  const name = validateProjectName(input.name);
+  const color = input.color === undefined ? DEFAULT_TODO_COLOR : validatePaletteColor(input.color, "project");
+
+  const existing = database
+    .prepare("SELECT id FROM todo_projects WHERE name = ? COLLATE NOCASE")
+    .get(name) as { id: number } | undefined;
+  if (existing) throw new Error(`A project named "${name}" already exists`);
+
+  const { next } = database
+    .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_projects")
+    .get() as { next: number };
+
+  database
+    .prepare("INSERT INTO todo_projects (name, color, position, created_at) VALUES (?, ?, ?, ?)")
+    .run(name, color, next, new Date().toISOString());
+
+  const row = database
+    .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = last_insert_rowid()`)
+    .get() as TodoProjectRow;
+  return rowToTodoProject(row);
+}
+
+export function updateTodoProject(input: UpdateTodoProjectInput): TodoProject {
+  const database = getDb();
+
+  const existing = database
+    .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = ?`)
+    .get(input.id) as TodoProjectRow | undefined;
+  if (!existing) throw new Error(`Project with id ${input.id} not found`);
+
+  const name = input.name === undefined ? existing.name : validateProjectName(input.name);
+  const color = input.color === undefined ? existing.color : validatePaletteColor(input.color, "project");
+
+  if (name.toLowerCase() !== existing.name.toLowerCase()) {
+    const clash = database
+      .prepare("SELECT id FROM todo_projects WHERE name = ? COLLATE NOCASE AND id != ?")
+      .get(name, input.id) as { id: number } | undefined;
+    if (clash) throw new Error(`A project named "${name}" already exists`);
+  }
+
+  database.prepare("UPDATE todo_projects SET name = ?, color = ? WHERE id = ?").run(name, color, input.id);
+
+  const row = database
+    .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = ?`)
+    .get(input.id) as TodoProjectRow;
+  return rowToTodoProject(row);
+}
+
+/**
+ * Deletes a project and clears it from every todo that held it. Returns how many todos changed.
+ *
+ * There is no reassignment target the way there is for states: "no project" is a valid resting
+ * place for a todo, so the work items simply lose the grouping rather than being moved or deleted.
+ */
+export function deleteTodoProject(id: number): number {
+  const database = getDb();
+
+  const target = database.prepare("SELECT id FROM todo_projects WHERE id = ?").get(id) as { id: number } | undefined;
+  if (!target) throw new Error(`Project with id ${id} not found`);
+
+  const { count } = database
+    .prepare("SELECT COUNT(*) AS count FROM todos WHERE project_id = ?")
+    .get(id) as { count: number };
+
+  const apply = database.transaction(() => {
+    // Explicit rather than relying on ON DELETE SET NULL: an upgraded database added the column
+    // by ALTER TABLE, and the pragma is not guaranteed to have been on when those rows were written.
+    database.prepare("UPDATE todos SET project_id = NULL WHERE project_id = ?").run(id);
+    database.prepare("DELETE FROM todo_projects WHERE id = ?").run(id);
+
+    // Keep positions contiguous so reordering stays predictable.
+    const remaining = database
+      .prepare("SELECT id FROM todo_projects ORDER BY position ASC")
+      .all() as Array<{ id: number }>;
+    const setPosition = database.prepare("UPDATE todo_projects SET position = ? WHERE id = ?");
+    remaining.forEach((row, index) => setPosition.run(index, row.id));
+  });
+  apply();
+
+  return count;
+}
+
+/** Rewrites positions to match the given order. Ids not listed keep their relative order at the end. */
+export function reorderTodoProjects(orderedIds: number[]): TodoProject[] {
+  const database = getDb();
+  const all = database.prepare("SELECT id FROM todo_projects ORDER BY position ASC").all() as Array<{ id: number }>;
+  const known = new Set(all.map((r) => r.id));
+
+  for (const id of orderedIds) {
+    if (!known.has(id)) throw new Error(`Project with id ${id} not found`);
+  }
+
+  const seen = new Set(orderedIds);
+  const finalOrder = [...orderedIds, ...all.map((r) => r.id).filter((id) => !seen.has(id))];
+
+  const apply = database.transaction(() => {
+    const setPosition = database.prepare("UPDATE todo_projects SET position = ? WHERE id = ?");
+    finalOrder.forEach((id, index) => setPosition.run(index, id));
+  });
+  apply();
+
+  return listTodoProjects();
+}
+
+// --- Todo Label Functions ---
+
+const MAX_TODO_LABEL_NAME_LENGTH = 40;
+
+interface TodoLabelRow {
+  id: number;
+  name: string;
+  color: string;
+  created_at: string;
+}
+
+const TODO_LABEL_COLUMNS = "id, name, color, created_at";
+
+function rowToTodoLabel(row: TodoLabelRow): TodoLabel {
+  return {
+    id: row.id,
+    name: row.name,
+    color: row.color,
+    createdAt: row.created_at,
+  };
+}
+
+function validateLabelName(name: unknown): string {
+  if (typeof name !== "string" || name.trim().length === 0) {
+    throw new Error("Label name must be a non-empty string");
+  }
+  const trimmed = name.trim();
+  if (trimmed.length > MAX_TODO_LABEL_NAME_LENGTH) {
+    throw new Error(`Label name must be ${MAX_TODO_LABEL_NAME_LENGTH} characters or fewer`);
+  }
+  return trimmed;
+}
+
+/** Name-ordered rather than position-ordered: labels are a set, not a sequence. */
+export function listTodoLabels(): TodoLabel[] {
+  const database = getDb();
+  const rows = database
+    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels ORDER BY name COLLATE NOCASE ASC`)
+    .all() as TodoLabelRow[];
+  return rows.map(rowToTodoLabel);
+}
+
+export function findTodoLabelByName(name: string): TodoLabel | null {
+  const database = getDb();
+  const row = database
+    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE name = ? COLLATE NOCASE`)
+    .get(name.trim()) as TodoLabelRow | undefined;
+  return row ? rowToTodoLabel(row) : null;
+}
+
+/**
+ * Get-or-create, unlike `createTodoProject` which rejects a duplicate.
+ *
+ * The label picker creates by typing a name, and typing one that already exists means
+ * "use that one" -- an error there would be a dead end rather than a correction.
+ */
+export function createTodoLabel(input: CreateTodoLabelInput): TodoLabel {
+  const database = getDb();
+  const name = validateLabelName(input.name);
+  const color = input.color === undefined ? DEFAULT_TODO_COLOR : validatePaletteColor(input.color, "label");
+
+  const existing = database
+    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE name = ? COLLATE NOCASE`)
+    .get(name) as TodoLabelRow | undefined;
+  if (existing) return rowToTodoLabel(existing);
+
+  database
+    .prepare("INSERT INTO todo_labels (name, color, created_at) VALUES (?, ?, ?)")
+    .run(name, color, new Date().toISOString());
+
+  const row = database
+    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = last_insert_rowid()`)
+    .get() as TodoLabelRow;
+  return rowToTodoLabel(row);
+}
+
+export function updateTodoLabel(input: UpdateTodoLabelInput): TodoLabel {
+  const database = getDb();
+
+  const existing = database
+    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = ?`)
+    .get(input.id) as TodoLabelRow | undefined;
+  if (!existing) throw new Error(`Label with id ${input.id} not found`);
+
+  const name = input.name === undefined ? existing.name : validateLabelName(input.name);
+  const color = input.color === undefined ? existing.color : validatePaletteColor(input.color, "label");
+
+  if (name.toLowerCase() !== existing.name.toLowerCase()) {
+    const clash = database
+      .prepare("SELECT id FROM todo_labels WHERE name = ? COLLATE NOCASE AND id != ?")
+      .get(name, input.id) as { id: number } | undefined;
+    if (clash) throw new Error(`A label named "${name}" already exists`);
+  }
+
+  database.prepare("UPDATE todo_labels SET name = ?, color = ? WHERE id = ?").run(name, color, input.id);
+
+  const row = database
+    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = ?`)
+    .get(input.id) as TodoLabelRow;
+  return rowToTodoLabel(row);
+}
+
+/** Detaches the label from every todo, then deletes it. Returns how many todos lost it. */
+export function deleteTodoLabel(id: number): number {
+  const database = getDb();
+
+  const target = database.prepare("SELECT id FROM todo_labels WHERE id = ?").get(id) as { id: number } | undefined;
+  if (!target) throw new Error(`Label with id ${id} not found`);
+
+  const { count } = database
+    .prepare("SELECT COUNT(*) AS count FROM todo_label_links WHERE label_id = ?")
+    .get(id) as { count: number };
+
+  const apply = database.transaction(() => {
+    database.prepare("DELETE FROM todo_label_links WHERE label_id = ?").run(id);
+    database.prepare("DELETE FROM todo_labels WHERE id = ?").run(id);
+  });
+  apply();
+
+  return count;
+}
+
+/**
+ * Reads every label for the given todos in one query, keyed by todo id.
+ *
+ * Labels are one-to-many, so they cannot ride along in TODO_SELECT without multiplying the
+ * todo rows. One extra query per list call beats one query per todo.
+ */
+function labelsByTodoId(database: DbHandle, todoIds: number[]): Map<number, TodoLabel[]> {
+  const byTodo = new Map<number, TodoLabel[]>();
+  if (todoIds.length === 0) return byTodo;
+
+  const placeholders = todoIds.map(() => "?").join(", ");
+  const rows = database
+    .prepare(
+      `SELECT k.todo_id, l.id, l.name, l.color, l.created_at
+       FROM todo_label_links k
+       INNER JOIN todo_labels l ON l.id = k.label_id
+       WHERE k.todo_id IN (${placeholders})
+       ORDER BY l.name COLLATE NOCASE ASC`,
+    )
+    .all(...todoIds) as Array<TodoLabelRow & { todo_id: number; }>;
+
+  for (const row of rows) {
+    const list = byTodo.get(row.todo_id);
+    if (list) list.push(rowToTodoLabel(row));
+    else byTodo.set(row.todo_id, [rowToTodoLabel(row)]);
+  }
+  return byTodo;
+}
+
+/** Replaces a todo's whole label set. Unknown ids are rejected before anything is written. */
+function replaceTodoLabels(database: DbHandle, todoId: number, labelIds: number[]): void {
+  const unique = [...new Set(labelIds)];
+  for (const id of unique) {
+    if (!Number.isInteger(id)) throw new Error("labelIds must be integers");
+    const found = database.prepare("SELECT id FROM todo_labels WHERE id = ?").get(id) as { id: number } | undefined;
+    if (!found) throw new Error(`Label with id ${id} not found`);
+  }
+
+  database.prepare("DELETE FROM todo_label_links WHERE todo_id = ?").run(todoId);
+  const link = database.prepare("INSERT INTO todo_label_links (todo_id, label_id) VALUES (?, ?)");
+  for (const id of unique) link.run(todoId, id);
+}
+
+/** Rejects an unknown project id up front, so a bad write never reaches the todos table. */
+function resolveProjectId(database: DbHandle, projectId: number | null | undefined): number | null {
+  if (projectId === undefined || projectId === null) return null;
+  if (!Number.isInteger(projectId)) throw new Error("projectId must be an integer");
+  const found = database.prepare("SELECT id FROM todo_projects WHERE id = ?").get(projectId) as
+    | { id: number }
+    | undefined;
+  if (!found) throw new Error(`Project with id ${projectId} not found`);
+  return projectId;
+}
+
 // --- Todo Functions ---
 
 const MAX_TODO_TITLE_LENGTH = 500;
@@ -1773,7 +2206,12 @@ interface TodoRow {
   id: number;
   title: string;
   notes: string | null;
-  project: string | null;
+  project_id: number | null;
+  /** Null on every column when the todo has no project, since the join is a LEFT JOIN. */
+  project_name: string | null;
+  project_color: string | null;
+  project_position: number | null;
+  project_created_at: string | null;
   milestone: string | null;
   priority: number;
   start_date: string | null;
@@ -1795,17 +2233,24 @@ interface TodoRow {
 }
 
 const TODO_SELECT = `
-  SELECT t.id, t.title, t.notes, t.project, t.milestone, t.priority, t.start_date, t.due_date,
+  SELECT t.id, t.title, t.notes, t.project_id, t.milestone, t.priority, t.start_date, t.due_date,
          t.source, t.source_label, t.created_at, t.completed_at, t.parent_id,
          p.title AS parent_title,
          (SELECT COUNT(*) FROM todos c WHERE c.parent_id = t.id) AS child_count,
          s.id AS state_id, s.label AS state_label, s.color AS state_color,
          s.position AS state_position, s.is_completed AS state_is_completed,
-         s.is_default AS state_is_default, s.created_at AS state_created_at
+         s.is_default AS state_is_default, s.created_at AS state_created_at,
+         j.name AS project_name, j.color AS project_color,
+         j.position AS project_position, j.created_at AS project_created_at
   FROM todos t
   INNER JOIN todo_states s ON s.id = t.state_id
-  LEFT JOIN todos p ON p.id = t.parent_id`;
+  LEFT JOIN todos p ON p.id = t.parent_id
+  LEFT JOIN todo_projects j ON j.id = t.project_id`;
 
+/**
+ * `labels` defaults to empty. Every caller that returns a todo to the renderer fills it in
+ * afterwards via {@link labelsByTodoId} -- see `withLabels` and `withLabelsForOne`.
+ */
 function rowToTodo(row: TodoRow): Todo {
   return {
     id: row.id,
@@ -1820,7 +2265,18 @@ function rowToTodo(row: TodoRow): Todo {
       isDefault: row.state_is_default === 1,
       createdAt: row.state_created_at,
     },
-    project: row.project,
+    // project_name is the discriminator rather than project_id: a row whose project was
+    // deleted out from under it reads back as no project rather than a half-built object.
+    project: row.project_id !== null && row.project_name !== null
+      ? {
+        id: row.project_id,
+        name: row.project_name,
+        color: row.project_color ?? DEFAULT_TODO_COLOR,
+        position: row.project_position ?? 0,
+        createdAt: row.project_created_at ?? "",
+      }
+      : null,
+    labels: [],
     milestone: row.milestone,
     // Coalesced because a row written before the column existed reads back as null under the shim.
     priority: row.priority ?? 0,
@@ -1834,6 +2290,18 @@ function rowToTodo(row: TodoRow): Todo {
     createdAt: row.created_at,
     completedAt: row.completed_at,
   };
+}
+
+/** Maps rows to todos and fills every `labels` array from a single follow-up query. */
+function withLabels(database: DbHandle, rows: TodoRow[]): Todo[] {
+  const todos = rows.map(rowToTodo);
+  const byTodo = labelsByTodoId(database, todos.map((t) => t.id));
+  for (const todo of todos) todo.labels = byTodo.get(todo.id) ?? [];
+  return todos;
+}
+
+function withLabelsForOne(database: DbHandle, row: TodoRow): Todo {
+  return withLabels(database, [row])[0]!;
 }
 
 function validateTodoTitle(title: unknown): string {
@@ -1965,7 +2433,7 @@ export function createTodo(input: CreateTodoInput): Todo {
   const database = getDb();
   const title = validateTodoTitle(input.title);
   const notes = validateTodoNotes(input.notes);
-  const project = validateTodoTextField(input.project, "project");
+  const projectId = resolveProjectId(database, input.projectId);
   const milestone = validateTodoTextField(input.milestone, "milestone");
   const priority = validateTodoPriority(input.priority);
   const startDate = validateTodoDate(input.startDate, "startDate");
@@ -1984,31 +2452,40 @@ export function createTodo(input: CreateTodoInput): Todo {
     ? null
     : resolveParentId(database, null, input.parentId);
 
-  database
-    .prepare(
-      `INSERT INTO todos (title, notes, state_id, project, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at)
+  // The insert and the label links go in together: a todo that briefly exists without the
+  // labels it was created with would be visible to a concurrent read on the same connection.
+  const write = database.transaction(() => {
+    database
+      .prepare(
+        `INSERT INTO todos (title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      title,
-      notes,
-      stateId,
-      project,
-      milestone,
-      priority,
-      startDate,
-      dueDate,
-      source,
-      sourceLabel,
-      parentId,
-      new Date().toISOString(),
-      completedAt,
-    );
+      )
+      .run(
+        title,
+        notes,
+        stateId,
+        projectId,
+        milestone,
+        priority,
+        startDate,
+        dueDate,
+        source,
+        sourceLabel,
+        parentId,
+        new Date().toISOString(),
+        completedAt,
+      );
 
-  // last_insert_rowid() rather than result.lastInsertRowid: the same statement works
-  // under better-sqlite3 and the sql.js test shim, which does not return that field.
-  const row = database.prepare(`${TODO_SELECT} WHERE t.id = last_insert_rowid()`).get() as TodoRow;
-  return rowToTodo(row);
+    // last_insert_rowid() rather than result.lastInsertRowid: the same statement works
+    // under better-sqlite3 and the sql.js test shim, which does not return that field.
+    const { id } = database.prepare("SELECT last_insert_rowid() AS id").get() as { id: number };
+    if (input.labelIds !== undefined) replaceTodoLabels(database, id, input.labelIds);
+    return id;
+  });
+  const id = write();
+
+  const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(id) as TodoRow;
+  return withLabelsForOne(database, row);
 }
 
 export function listTodos(input: ListTodosInput = {}): Todo[] {
@@ -2026,9 +2503,14 @@ export function listTodos(input: ListTodosInput = {}): Todo[] {
     clauses.push("t.state_id = ?");
     params.push(input.stateId);
   }
-  if (input.project !== undefined && input.project !== null && input.project.trim().length > 0) {
-    clauses.push("t.project = ? COLLATE NOCASE");
-    params.push(input.project.trim());
+  if (input.projectId !== undefined) {
+    clauses.push("t.project_id = ?");
+    params.push(input.projectId);
+  }
+  if (input.labelId !== undefined) {
+    // EXISTS rather than a join, so a todo carrying the label once is returned once.
+    clauses.push("EXISTS (SELECT 1 FROM todo_label_links k WHERE k.todo_id = t.id AND k.label_id = ?)");
+    params.push(input.labelId);
   }
   if (input.parentId !== undefined) {
     clauses.push("t.parent_id = ?");
@@ -2042,7 +2524,7 @@ export function listTodos(input: ListTodosInput = {}): Todo[] {
   const order = ` ORDER BY s.is_completed ASC, (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC`;
 
   const rows = database.prepare(`${TODO_SELECT}${where}${order}`).all(...params) as TodoRow[];
-  return rows.map(rowToTodo);
+  return withLabels(database, rows);
 }
 
 export function updateTodo(input: UpdateTodoInput): Todo {
@@ -2053,7 +2535,8 @@ export function updateTodo(input: UpdateTodoInput): Todo {
 
   const title = input.title === undefined ? existing.title : validateTodoTitle(input.title);
   const notes = input.notes === undefined ? existing.notes : validateTodoNotes(input.notes);
-  const project = input.project === undefined ? existing.project : validateTodoTextField(input.project, "project");
+  // Three-way: absent keeps the current project, null clears it, an id moves the todo.
+  const projectId = input.projectId === undefined ? existing.project_id : resolveProjectId(database, input.projectId);
   const milestone = input.milestone === undefined
     ? existing.milestone
     : validateTodoTextField(input.milestone, "milestone");
@@ -2080,16 +2563,22 @@ export function updateTodo(input: UpdateTodoInput): Todo {
   else if (!nowCompleted) completedAt = null;
   // Editing a todo that is already completed keeps its original completion time.
 
-  database
-    .prepare(
-      `UPDATE todos SET title = ?, notes = ?, state_id = ?, project = ?, milestone = ?, priority = ?,
+  const write = database.transaction(() => {
+    database
+      .prepare(
+        `UPDATE todos SET title = ?, notes = ?, state_id = ?, project_id = ?, milestone = ?, priority = ?,
                         start_date = ?, due_date = ?, parent_id = ?, completed_at = ?
        WHERE id = ?`,
-    )
-    .run(title, notes, stateId, project, milestone, priority, startDate, dueDate, parentId, completedAt, input.id);
+      )
+      .run(title, notes, stateId, projectId, milestone, priority, startDate, dueDate, parentId, completedAt, input.id);
+
+    // Absent leaves the label set alone; an empty array is a deliberate "remove them all".
+    if (input.labelIds !== undefined) replaceTodoLabels(database, input.id, input.labelIds);
+  });
+  write();
 
   const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow;
-  return rowToTodo(row);
+  return withLabelsForOne(database, row);
 }
 
 /**
@@ -2312,14 +2801,6 @@ export function listAllAttachmentShas(): string[] {
 }
 
 /** Distinct project names already in use, for the autocomplete datalist. */
-export function listTodoProjects(): string[] {
-  const database = getDb();
-  const rows = database
-    .prepare("SELECT DISTINCT project FROM todos WHERE project IS NOT NULL ORDER BY project COLLATE NOCASE ASC")
-    .all() as Array<{ project: string }>;
-  return rows.map((r) => r.project);
-}
-
 /** Distinct milestone names already in use, for the autocomplete datalist. */
 export function listTodoMilestones(): string[] {
   const database = getDb();

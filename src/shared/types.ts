@@ -167,13 +167,89 @@ export interface UpdateTodoStateInput {
   isDefault?: boolean;
 }
 
+/**
+ * A user-managed project. Todos point at one by id, so a rename reaches every todo at once
+ * rather than leaving older rows holding the previous spelling.
+ *
+ * Unlike {@link TodoState} there is no default and no completed flag: a project is a grouping,
+ * not a workflow position, and a todo is allowed to have none.
+ */
+export interface TodoProject {
+  id: number;
+  name: string;
+  color: string;
+  position: number;
+  createdAt: string;
+}
+
+export interface CreateTodoProjectInput {
+  name: string;
+  color?: string;
+}
+
+export interface UpdateTodoProjectInput {
+  id: number;
+  name?: string;
+  color?: string;
+}
+
+/**
+ * A user-managed label. Many-to-many with todos, mirroring the tags/session_tags pair the
+ * session history already uses.
+ *
+ * Labels are created on demand -- typing an unknown name into the label picker makes one --
+ * so the pool grows from ordinary use rather than from a setup step.
+ */
+export interface TodoLabel {
+  id: number;
+  name: string;
+  color: string;
+  createdAt: string;
+}
+
+export interface CreateTodoLabelInput {
+  name: string;
+  color?: string;
+}
+
+export interface UpdateTodoLabelInput {
+  id: number;
+  name?: string;
+  color?: string;
+}
+
+/**
+ * The palette every state, project and label draws from -- the tag colours plus the muted grey.
+ *
+ * Shared rather than duplicated because both sides need it: the main process validates writes
+ * against it, and the manage dialog renders it as swatches. Two copies drifted apart would mean
+ * a swatch you can click but not save.
+ */
+export const TODO_COLORS = [
+  "#7aa2f7",
+  "#bb9af7",
+  "#7dcfff",
+  "#9ece6a",
+  "#f7768e",
+  "#ff9e64",
+  "#e0af68",
+  "#c678dd",
+  "#565f89",
+] as const;
+
+/** Default swatch for a new state, project or label. */
+export const DEFAULT_TODO_COLOR = TODO_COLORS[0];
+
 export interface Todo {
   id: number;
   title: string;
   notes: string | null;
   /** Joined in full rather than a bare id, so the UI can render the pill without a second lookup. */
   state: TodoState;
-  project: string | null;
+  /** Joined in full for the same reason as `state`. Null when the todo belongs to no project. */
+  project: TodoProject | null;
+  /** Every label attached to this todo, name-ordered. Empty when none are. */
+  labels: TodoLabel[];
   milestone: string | null;
   /** 0-4, see {@link TODO_PRIORITY_LABELS}. 0 means the user has not set one. */
   priority: number;
@@ -199,7 +275,10 @@ export interface CreateTodoInput {
   notes?: string | null;
   /** Omitted means the default state. */
   stateId?: number;
-  project?: string | null;
+  /** Rejected if no project carries this id. `null` or omitted means no project. */
+  projectId?: number | null;
+  /** Labels to attach. Unknown ids are rejected. Omitted means none. */
+  labelIds?: number[];
   milestone?: string | null;
   /** 0-4. Omitted means no priority. */
   priority?: number;
@@ -216,7 +295,10 @@ export interface UpdateTodoInput {
   title?: string;
   notes?: string | null;
   stateId?: number;
-  project?: string | null;
+  /** Three-way: absent keeps the project, `null` clears it, an id moves the todo. */
+  projectId?: number | null;
+  /** Replaces the whole label set. Absent leaves it alone, `[]` removes every label. */
+  labelIds?: number[];
   milestone?: string | null;
   /** 0-4. Absent leaves the current priority alone. */
   priority?: number;
@@ -231,7 +313,9 @@ export type TodoFilter = "all" | "active" | "done" | "ai";
 export interface ListTodosInput {
   filter?: TodoFilter;
   stateId?: number;
-  project?: string;
+  projectId?: number;
+  /** Only todos carrying this label. */
+  labelId?: number;
   /** Only the direct children of this todo. Ignores `filter`-style narrowing of the parent itself. */
   parentId?: number;
 }
@@ -686,7 +770,6 @@ export interface ElectronAPI {
     update: (input: UpdateTodoInput) => Promise<Todo>;
     delete: (id: number) => Promise<void>;
     clearCompleted: () => Promise<number>;
-    listProjects: () => Promise<string[]>;
     listMilestones: () => Promise<string[]>;
     /** Fires when a todo is written from outside the renderer (e.g. the MCP server). Returns an unsubscribe. */
     onChanged: (callback: () => void) => () => void;
@@ -710,6 +793,25 @@ export interface ElectronAPI {
     /** Moves todos onto `reassignToId`, then deletes. Resolves with how many todos moved. */
     delete: (id: number, reassignToId: number) => Promise<number>;
     reorder: (orderedIds: number[]) => Promise<TodoState[]>;
+  };
+  todoProject: {
+    list: () => Promise<TodoProject[]>;
+    create: (input: CreateTodoProjectInput) => Promise<TodoProject>;
+    update: (input: UpdateTodoProjectInput) => Promise<TodoProject>;
+    /**
+     * Clears the project from every todo holding it, then deletes it. Resolves with how many
+     * todos were cleared. Unlike a state, there is nothing to reassign to -- no project is valid.
+     */
+    delete: (id: number) => Promise<number>;
+    reorder: (orderedIds: number[]) => Promise<TodoProject[]>;
+  };
+  todoLabel: {
+    list: () => Promise<TodoLabel[]>;
+    /** Resolves an existing label by name, case-insensitively, or creates one. Never duplicates. */
+    create: (input: CreateTodoLabelInput) => Promise<TodoLabel>;
+    update: (input: UpdateTodoLabelInput) => Promise<TodoLabel>;
+    /** Detaches the label from every todo, then deletes it. Resolves with how many todos lost it. */
+    delete: (id: number) => Promise<number>;
   };
   window: {
     minimize: () => void;
