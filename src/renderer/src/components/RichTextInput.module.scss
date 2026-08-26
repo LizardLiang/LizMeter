@@ -259,8 +259,8 @@
 .modalBackdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(4px);
+  background: rgba(192, 202, 245, 0.06);
+  backdrop-filter: blur(16px) saturate(1.25);
   z-index: 1000;
   display: flex;
   align-items: center;
@@ -274,18 +274,17 @@
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.01) 32%, transparent 55%),
     linear-gradient(315deg, rgba(0, 0, 0, 0.08) 0%, transparent 40%),
-    rgba(14, 16, 30, 0.9);
+    rgba(20, 23, 42, 0.55);
   backdrop-filter: blur(36px) saturate(1.7);
   -webkit-backdrop-filter: blur(36px) saturate(1.7);
-  border: 1px solid rgba(41, 46, 66, 0.9);
+  border: 1px solid rgba(122, 162, 247, 0.4);
   border-radius: 18px;
   display: flex;
   flex-direction: column;
   box-shadow:
-    0 0 0 1px rgba(122, 162, 247, 0.07),
-    0 8px 40px rgba(0, 0, 0, 0.6),
-    0 24px 80px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 0 1px rgba(0, 0, 0, 0.3),
+    0 16px 40px rgba(0, 0, 0, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
     inset 1px 0 0 rgba(255, 255, 255, 0.05),
     inset 0 -1px 0 rgba(0, 0, 0, 0.14),
     inset -1px 0 0 rgba(0, 0, 0, 0.05);
