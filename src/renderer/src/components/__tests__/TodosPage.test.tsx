@@ -31,6 +31,7 @@ function makeTodo(id: number, title: string, state: TodoState, extra: Partial<To
     state,
     project: null,
     milestone: null,
+    priority: 0,
     startDate: null,
     dueDate: null,
     source: "user",
@@ -92,6 +93,11 @@ afterEach(() => {
 async function renderPage() {
   render(<TodosPage />);
   await screen.findByText("Old prod to new prod migration");
+}
+
+/** Right-click is the only opener: the rows carry no trigger of their own. */
+function openRowMenu(title: string) {
+  fireEvent.contextMenu(screen.getByLabelText(`Edit ${title}`));
 }
 
 describe("TodosPage grouping", () => {
@@ -266,13 +272,13 @@ describe("TodosPage nesting", () => {
   it("offers 'Remove from parent' only on a row that has one", async () => {
     await renderNested();
 
-    fireEvent.click(screen.getByLabelText("Actions for Write the migration"));
+    openRowMenu("Write the migration");
     expect(screen.getByRole("menuitem", { name: "Remove from parent" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Change parent..." })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: "Escape" });
 
-    fireEvent.click(screen.getByLabelText("Actions for Ship v1.14"));
+    openRowMenu("Ship v1.14");
     expect(screen.queryByRole("menuitem", { name: "Remove from parent" })).not.toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Make sub-issue of..." })).toBeInTheDocument();
   });
@@ -280,7 +286,7 @@ describe("TodosPage nesting", () => {
   it("'Remove from parent' lifts the todo to the top level", async () => {
     await renderNested();
 
-    fireEvent.click(screen.getByLabelText("Actions for Write the migration"));
+    openRowMenu("Write the migration");
     fireEvent.click(screen.getByRole("menuitem", { name: "Remove from parent" }));
 
     await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 201, parentId: null }));
@@ -289,7 +295,7 @@ describe("TodosPage nesting", () => {
   it("picking a parent from the row menu writes the new link", async () => {
     await renderNested();
 
-    fireEvent.click(screen.getByLabelText("Actions for Ship v1.14"));
+    openRowMenu("Ship v1.14");
     fireEvent.click(screen.getByRole("menuitem", { name: "Make sub-issue of..." }));
 
     const picker = await screen.findByRole("dialog", { name: /Nest #200/ });
@@ -301,7 +307,7 @@ describe("TodosPage nesting", () => {
   it("keeps a todo's own subtree out of the parent picker", async () => {
     await renderNested();
 
-    fireEvent.click(screen.getByLabelText("Actions for Ship v1.14"));
+    openRowMenu("Ship v1.14");
     fireEvent.click(screen.getByRole("menuitem", { name: "Make sub-issue of..." }));
 
     const picker = await screen.findByRole("dialog", { name: /Nest #200/ });
@@ -366,5 +372,345 @@ describe("TodosPage nesting", () => {
     await waitFor(() =>
       expect(mockTodoAPI.update).toHaveBeenCalledWith(expect.objectContaining({ id: 201, parentId: 200 }))
     );
+  });
+});
+
+// Rendered order is Todo (position 0) then Backlog, so the cursor walks 152 -> 100 -> 162.
+describe("TodosPage keyboard navigation", () => {
+  /** Moves the cursor down `steps` rows from nothing, leaving it on the intended todo. */
+  function cursorTo(steps: number) {
+    for (let i = 0; i < steps; i++) fireEvent.keyDown(document.body, { key: "ArrowDown" });
+  }
+
+  it("`s` opens the state menu for the row under the cursor and writes the pick", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "s" });
+
+    const menu = await screen.findByRole("dialog", { name: "Move to state" });
+    fireEvent.click(within(menu).getByRole("button", { name: /Backlog/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, stateId: 2 }));
+  });
+
+  it("`p` sets the priority of the second row, not the first", async () => {
+    await renderPage();
+    cursorTo(2);
+
+    fireEvent.keyDown(document.body, { key: "p" });
+
+    const menu = await screen.findByRole("dialog", { name: "Set priority" });
+    fireEvent.click(within(menu).getByRole("button", { name: /Urgent/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, priority: 1 }));
+  });
+
+  it("`d` writes today's date from the relative shortcut", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "d" });
+    const menu = await screen.findByRole("dialog", { name: "Set due date" });
+    fireEvent.click(within(menu).getByRole("button", { name: /^Today/ }));
+
+    const today = new Date();
+    const iso = [
+      today.getFullYear(),
+      String(today.getMonth() + 1).padStart(2, "0"),
+      String(today.getDate()).padStart(2, "0"),
+    ].join("-");
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, dueDate: iso }));
+  });
+
+  it("`d` takes a typed date, picked with Enter", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "d" });
+    const menu = await screen.findByRole("dialog", { name: "Set due date" });
+
+    // Typing resets the highlight to the top, which is the typed date itself.
+    fireEvent.change(within(menu).getByLabelText("Set due date"), { target: { value: "2026-09-01" } });
+    fireEvent.keyDown(within(menu).getByLabelText("Set due date"), { key: "Enter" });
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, dueDate: "2026-09-01" }));
+  });
+
+  it("`d` rejects a date that only looks well-formed", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "d" });
+    const menu = await screen.findByRole("dialog", { name: "Set due date" });
+    fireEvent.change(within(menu).getByLabelText("Set due date"), { target: { value: "2026-02-30" } });
+
+    // February 30th matches the shape but rolls into March, so it is never offered.
+    expect(within(menu).queryByRole("button", { name: "2026-02-30" })).not.toBeInTheDocument();
+  });
+
+  it("`P` offers the existing projects and writes the pick", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "P", shiftKey: true });
+
+    const menu = await screen.findByRole("dialog", { name: "Set project" });
+    fireEvent.click(within(menu).getByRole("button", { name: /^Infra/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, project: "Infra" }));
+  });
+
+  it("`P` accepts a typed name that is not an existing project yet", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "P", shiftKey: true });
+    const menu = await screen.findByRole("dialog", { name: "Set project" });
+    fireEvent.change(within(menu).getByLabelText("Set project"), { target: { value: "Billing" } });
+
+    fireEvent.click(within(menu).getByRole("button", { name: /Create "Billing"/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, project: "Billing" }));
+  });
+
+  it("`l` opens the sub-issue picker on the cursor's row", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "l" });
+
+    const picker = await screen.findByRole("dialog", { name: /File an existing todo under #152/ });
+    fireEvent.click(await within(picker).findByRole("button", { name: /Fix misc code quality issues/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, parentId: 152 }));
+  });
+
+  it("`L` opens the parent picker on the cursor's row", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "L", shiftKey: true });
+
+    const picker = await screen.findByRole("dialog", { name: /Nest #152/ });
+    fireEvent.click(await within(picker).findByRole("button", { name: /Server-side PDF optimization/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, parentId: 162 }));
+  });
+
+  it("Ctrl+Shift+O opens the create dialog already filed under the cursor's row", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "O", ctrlKey: true, shiftKey: true });
+
+    const dialog = await screen.findByRole("dialog", { name: "New todo" });
+    expect(within(dialog).getByTitle("Change parent")).toHaveTextContent("Old prod to new prod migration");
+  });
+
+  it("does nothing on `s` until the cursor has been placed", async () => {
+    await renderPage();
+
+    fireEvent.keyDown(document.body, { key: "s" });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("ArrowUp stops at the top rather than wrapping to the end", async () => {
+    await renderPage();
+    cursorTo(1);
+    fireEvent.keyDown(document.body, { key: "ArrowUp" });
+    fireEvent.keyDown(document.body, { key: "ArrowUp" });
+
+    fireEvent.keyDown(document.body, { key: "s" });
+    const menu = await screen.findByRole("dialog", { name: "Move to state" });
+    fireEvent.click(within(menu).getByRole("button", { name: /Backlog/ }));
+
+    // Still the first row, not the last one it would have wrapped onto.
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, stateId: 2 }));
+  });
+
+  it("keeps the page bindings quiet while a quick menu is open", async () => {
+    await renderPage();
+    cursorTo(1);
+    fireEvent.keyDown(document.body, { key: "s" });
+    await screen.findByRole("dialog", { name: "Move to state" });
+
+    // `c` would otherwise stack the create dialog on top of the open menu.
+    fireEvent.keyDown(document.body, { key: "c" });
+
+    expect(screen.queryByRole("dialog", { name: "New todo" })).not.toBeInTheDocument();
+  });
+
+  it("Escape clears the selection first, then the cursor", async () => {
+    await renderPage();
+    cursorTo(1);
+    fireEvent.click(screen.getByLabelText("Select Old prod to new prod migration"));
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    // Awaited rather than asserted outright: the keydown listener is rebuilt in an effect, and
+    // under full-suite load React has not always flushed it before the next key is fired.
+    await waitFor(() => expect(screen.queryByText("1 selected")).not.toBeInTheDocument());
+
+    // The cursor survived that press, so `s` still has a row to act on.
+    fireEvent.keyDown(document.body, { key: "s" });
+    await screen.findByRole("dialog", { name: "Move to state" });
+  });
+
+  it("a second Escape drops the cursor as well", async () => {
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByText("1 selected")).not.toBeInTheDocument());
+
+    fireEvent.keyDown(document.body, { key: "s" });
+    expect(screen.queryByRole("dialog", { name: "Move to state" })).not.toBeInTheDocument();
+  });
+});
+
+describe("TodosPage priority", () => {
+  it("labels the priority glyph on every row, set or not", async () => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState, { priority: 1 }),
+      makeTodo(100, "Fix misc code quality issues", todoState),
+    ]);
+    await renderPage();
+
+    expect(screen.getByLabelText("Urgent")).toBeInTheDocument();
+    expect(screen.getByLabelText("No priority")).toBeInTheDocument();
+  });
+});
+
+describe("TodosPage row context menu", () => {
+  it("leaves no trigger on the row -- right-click is the only way in", async () => {
+    await renderPage();
+
+    expect(screen.queryByRole("button", { name: /^Actions for/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("right-clicking a row opens a menu carrying every row action", async () => {
+    await renderPage();
+
+    openRowMenu("Old prod to new prod migration");
+
+    const menu = await screen.findByRole("menu", { name: "Actions for Old prod to new prod migration" });
+    for (const name of ["Edit", "Priority...", "Due date...", "Project...", "Add sub-issue", "Delete"]) {
+      expect(within(menu).getByRole("menuitem", { name })).toBeInTheDocument();
+    }
+    // The row's own state is listed but not offered, so "move to" never means "stay put".
+    expect(within(menu).getByRole("menuitem", { name: "Todo" })).toBeDisabled();
+  });
+
+  it("picking a state from the menu moves the row", async () => {
+    await renderPage();
+
+    openRowMenu("Old prod to new prod migration");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Backlog" }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, stateId: 2 }));
+  });
+
+  it("hands the value-shaped actions off to the same quick menu the shortcut opens", async () => {
+    await renderPage();
+
+    openRowMenu("Fix misc code quality issues");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Priority..." }));
+
+    const quick = await screen.findByRole("dialog", { name: "Set priority" });
+    fireEvent.click(within(quick).getByRole("button", { name: /Urgent/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, priority: 1 }));
+  });
+
+  it("deletes from the menu", async () => {
+    await renderPage();
+
+    openRowMenu("Server-side PDF optimization");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => expect(mockTodoAPI.delete).toHaveBeenCalledWith(162));
+  });
+
+  it("closes on Escape without touching the todo", async () => {
+    await renderPage();
+
+    openRowMenu("Old prod to new prod migration");
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    expect(mockTodoAPI.update).not.toHaveBeenCalled();
+  });
+
+  it("moves the keyboard cursor to the row it opened on", async () => {
+    await renderPage();
+
+    // Aiming at the third row and dismissing the menu leaves the cursor there, so `s` acts on it.
+    openRowMenu("Server-side PDF optimization");
+    fireEvent.keyDown(document, { key: "Escape" });
+    fireEvent.keyDown(document.body, { key: "s" });
+
+    const quick = await screen.findByRole("dialog", { name: "Move to state" });
+    fireEvent.click(within(quick).getByRole("button", { name: /Todo/ }));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 162, stateId: 1 }));
+  });
+});
+
+describe("TodosPage shortcut hints", () => {
+  it("opens the cheat sheet on `?` and lists the row shortcuts", async () => {
+    await renderPage();
+
+    fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
+
+    const sheet = await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
+    expect(within(sheet).getByText("Set priority")).toBeInTheDocument();
+    expect(within(sheet).getByText("Link a parent")).toBeInTheDocument();
+    expect(within(sheet).getByText("New sub-issue of the todo under the cursor")).toBeInTheDocument();
+  });
+
+  it("opens from the toolbar too, for anyone who never presses `?`", async () => {
+    await renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "Keyboard shortcuts" }));
+
+    expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+  });
+
+  it("closes on Escape without disturbing the cursor", async () => {
+    await renderPage();
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+
+    fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
+    await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keyboard shortcuts" })).not.toBeInTheDocument());
+
+    // Escape was swallowed by the sheet, so the cursor it was explaining is still there.
+    fireEvent.keyDown(document.body, { key: "s" });
+    await screen.findByRole("dialog", { name: "Move to state" });
+  });
+
+  it("needs no cursor, unlike the shortcuts it documents", async () => {
+    await renderPage();
+
+    fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
+
+    expect(await screen.findByRole("dialog", { name: "Keyboard shortcuts" })).toBeInTheDocument();
+  });
+
+  it("keeps the page bindings quiet while it is open", async () => {
+    await renderPage();
+    fireEvent.keyDown(document.body, { key: "?", shiftKey: true });
+    await screen.findByRole("dialog", { name: "Keyboard shortcuts" });
+
+    fireEvent.keyDown(document.body, { key: "c" });
+
+    expect(screen.queryByRole("dialog", { name: "New todo" })).not.toBeInTheDocument();
   });
 });

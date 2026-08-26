@@ -303,3 +303,24 @@ describe("startup resilience", () => {
     expect(states.filter((s) => s.isDefault).map((s) => s.label)).toEqual(["Todo"]);
   });
 });
+
+// --- Priority column migration -----------------------------------------------
+
+describe("priority column migration", () => {
+  it("adds the column without disturbing rows that predate it", () => {
+    const todo = createTodo({ title: "written before priority existed" });
+    migrateTodosToStatesNow();
+    migrateTodosToStatesNow();
+
+    const after = listTodos().find((t) => t.id === todo.id);
+    expect(after?.priority).toBe(0);
+    expect(after?.title).toBe("written before priority existed");
+  });
+
+  it("does not reset a priority that is already set", () => {
+    const todo = createTodo({ title: "urgent", priority: 1 });
+    migrateTodosToStatesNow();
+
+    expect(listTodos().find((t) => t.id === todo.id)?.priority).toBe(1);
+  });
+});

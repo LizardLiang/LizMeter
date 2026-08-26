@@ -1,39 +1,5 @@
-// Per-row "..." menu for the Todos list. Portalled, so it sits above the glass panel.
-
-.btn {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  padding: 0;
-  border: none;
-  border-radius: 4px;
-  background: none;
-  color: #8b93b8;
-  cursor: pointer;
-  // The row controls reveal-on-hover via its menuSlot wrapper.
-  transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
-
-  &:hover {
-    color: #c0caf5;
-    background: rgba(122, 162, 247, 0.12);
-  }
-
-  &:focus-visible {
-    opacity: 1;
-    outline: 2px solid #7aa2f7;
-    outline-offset: 1px;
-  }
-}
-
-.btnOpen {
-  composes: btn;
-  opacity: 1;
-  color: #c0caf5;
-  background: rgba(122, 162, 247, 0.12);
-}
+// The row action menu for the Todos list, opened by right-clicking a row.
+// Portalled, so it sits above the glass panel.
 
 .menu {
   position: fixed;
@@ -92,6 +58,9 @@
 }
 
 .sectionLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   margin: 0;
   padding: 4px 10px 2px;
   font-size: 10px;
@@ -113,4 +82,29 @@
   height: 8px;
   border-radius: 50%;
   border: 1px solid;
+}
+
+// The matching keyboard shortcut, pushed to the trailing edge of its row.
+.hint {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.kbd {
+  min-width: 15px;
+  padding: 1px 4px;
+  border: 1px solid rgba(86, 95, 137, 0.5);
+  border-radius: 4px;
+  background: rgba(12, 13, 24, 0.5);
+  color: #8b93b8;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+  letter-spacing: 0;
+  text-transform: none;
 }

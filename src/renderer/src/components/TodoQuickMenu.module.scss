@@ -1,0 +1,121 @@
+// A transparent catcher so a click anywhere outside dismisses the menu. It carries no scrim:
+// the menu is anchored to a row, and dimming the page would hide the row it acts on.
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+}
+
+.menu {
+  position: fixed;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 10px 8px;
+  border-radius: 14px;
+  border: 1px solid rgba(122, 162, 247, 0.4);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.07) 0%, rgba(255, 255, 255, 0.02) 32%, transparent 58%),
+    rgba(20, 23, 42, 0.72);
+  backdrop-filter: blur(36px) saturate(1.7);
+  -webkit-backdrop-filter: blur(36px) saturate(1.7);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.3),
+    0 16px 40px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.heading {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #a3abc9;
+  margin: 0 0 8px;
+}
+
+.search {
+  width: 100%;
+  padding: 6px 9px;
+  border-radius: 8px;
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  background: rgba(12, 13, 24, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #c0caf5;
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+
+  &::placeholder {
+    color: #7a8194;
+  }
+
+  &:focus {
+    border-color: rgba(122, 162, 247, 0.7);
+    box-shadow: 0 0 0 2px rgba(122, 162, 247, 0.18);
+  }
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0 0;
+  overflow-y: auto;
+}
+
+.item {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 7px;
+  background: none;
+  color: #c0caf5;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.itemActive {
+  composes: item;
+  background: rgba(122, 162, 247, 0.18);
+}
+
+.dot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid;
+}
+
+.label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hint {
+  flex-shrink: 0;
+  color: #8b93b8;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.check {
+  flex-shrink: 0;
+  color: #7aa2f7;
+  font-size: 11px;
+}
+
+.empty {
+  margin: 10px 4px 4px;
+  color: #8b93b8;
+  font-size: 11.5px;
+}

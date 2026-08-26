@@ -474,3 +474,39 @@ describe("todo nesting", () => {
     expect(stillOpen).toContain(child.id);
   });
 });
+
+// --- Priority ----------------------------------------------------------------
+
+describe("todo priority", () => {
+  it("defaults to 0 when the caller does not set one", () => {
+    expect(createTodo({ title: "x" }).priority).toBe(0);
+  });
+
+  it("round-trips every level on the scale", () => {
+    for (const level of [0, 1, 2, 3, 4]) {
+      expect(createTodo({ title: `p${level}`, priority: level }).priority).toBe(level);
+    }
+  });
+
+  it("changes on update and survives an unrelated edit", () => {
+    const todo = createTodo({ title: "x", priority: 3 });
+
+    expect(updateTodo({ id: todo.id, priority: 1 }).priority).toBe(1);
+    // Absent means "leave it alone", not "reset to 0".
+    expect(updateTodo({ id: todo.id, title: "renamed" }).priority).toBe(1);
+  });
+
+  it("rejects a level off the end of the scale", () => {
+    expect(() => createTodo({ title: "x", priority: 5 })).toThrow(/between 0 and 4/);
+    expect(() => createTodo({ title: "x", priority: -1 })).toThrow(/between 0 and 4/);
+  });
+
+  it("rejects a non-integer level", () => {
+    expect(() => createTodo({ title: "x", priority: 2.5 })).toThrow(/integer/);
+  });
+
+  it("is carried by listTodos, not just by the write that set it", () => {
+    createTodo({ title: "urgent one", priority: 1 });
+    expect(listTodos().find((t) => t.title === "urgent one")?.priority).toBe(1);
+  });
+});

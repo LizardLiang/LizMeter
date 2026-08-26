@@ -36,6 +36,7 @@ import type {
   UpdateTodoStateInput,
   WorklogStatus,
 } from "../../src/shared/types.ts";
+import { MAX_TODO_PRIORITY, TODO_PRIORITY_LABELS } from "../../src/shared/types.ts";
 import type { InternalTrackRecord } from "./music/internal-types.ts";
 import { toRendererTrack } from "./music/internal-types.ts";
 
@@ -199,6 +200,8 @@ export function initDatabase(dbPath?: string): void {
       state_id     INTEGER REFERENCES todo_states(id),
       project      TEXT,
       milestone    TEXT,
+      -- 0-4 on the Linear scale, where 0 is "not set". See TODO_PRIORITY_LABELS.
+      priority     INTEGER NOT NULL DEFAULT 0,
       start_date   TEXT,
       due_date     TEXT,
       source       TEXT NOT NULL DEFAULT 'user',
@@ -332,6 +335,11 @@ function migrateTodosToStates(database: DbHandle): void {
     database.exec("ALTER TABLE todos ADD COLUMN project TEXT");
   }
   if (!columns.includes("milestone")) database.exec("ALTER TABLE todos ADD COLUMN milestone TEXT");
+  if (!columns.includes("priority")) {
+    // NOT NULL DEFAULT 0 is legal on ADD COLUMN because the default is a constant, so every
+    // existing row backfills to "no priority" without a second UPDATE pass.
+    database.exec("ALTER TABLE todos ADD COLUMN priority INTEGER NOT NULL DEFAULT 0");
+  }
   if (!columns.includes("start_date")) database.exec("ALTER TABLE todos ADD COLUMN start_date TEXT");
   if (!columns.includes("due_date")) {
     database.exec("ALTER TABLE todos ADD COLUMN due_date TEXT");
@@ -1742,6 +1750,7 @@ interface TodoRow {
   notes: string | null;
   project: string | null;
   milestone: string | null;
+  priority: number;
   start_date: string | null;
   due_date: string | null;
   source: string;
@@ -1761,7 +1770,7 @@ interface TodoRow {
 }
 
 const TODO_SELECT = `
-  SELECT t.id, t.title, t.notes, t.project, t.milestone, t.start_date, t.due_date,
+  SELECT t.id, t.title, t.notes, t.project, t.milestone, t.priority, t.start_date, t.due_date,
          t.source, t.source_label, t.created_at, t.completed_at, t.parent_id,
          p.title AS parent_title,
          (SELECT COUNT(*) FROM todos c WHERE c.parent_id = t.id) AS child_count,
@@ -1788,6 +1797,8 @@ function rowToTodo(row: TodoRow): Todo {
     },
     project: row.project,
     milestone: row.milestone,
+    // Coalesced because a row written before the column existed reads back as null under the shim.
+    priority: row.priority ?? 0,
     startDate: row.start_date,
     dueDate: row.due_date,
     source: VALID_TODO_SOURCES.has(row.source as TodoSource) ? (row.source as TodoSource) : "user",
@@ -1845,6 +1856,20 @@ function validateTodoDate(value: unknown, field: string): string | null {
   const parsed = new Date(`${trimmed}T00:00:00Z`);
   if (Number.isNaN(parsed.getTime())) throw new Error(`Todo ${field} is not a real date`);
   return trimmed;
+}
+
+/** Rejects anything outside 0-4 rather than clamping, so a typo from an agent is visible. */
+function validateTodoPriority(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error("Todo priority must be an integer");
+  }
+  if (value < 0 || value > MAX_TODO_PRIORITY) {
+    throw new Error(
+      `Todo priority must be between 0 and ${MAX_TODO_PRIORITY} (${TODO_PRIORITY_LABELS.join(", ")})`,
+    );
+  }
+  return value;
 }
 
 function assertDateOrder(startDate: string | null, dueDate: string | null): void {
@@ -1917,6 +1942,7 @@ export function createTodo(input: CreateTodoInput): Todo {
   const notes = validateTodoNotes(input.notes);
   const project = validateTodoTextField(input.project, "project");
   const milestone = validateTodoTextField(input.milestone, "milestone");
+  const priority = validateTodoPriority(input.priority);
   const startDate = validateTodoDate(input.startDate, "startDate");
   const dueDate = validateTodoDate(input.dueDate, "dueDate");
   assertDateOrder(startDate, dueDate);
@@ -1935,8 +1961,8 @@ export function createTodo(input: CreateTodoInput): Todo {
 
   database
     .prepare(
-      `INSERT INTO todos (title, notes, state_id, project, milestone, start_date, due_date, source, source_label, parent_id, created_at, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO todos (title, notes, state_id, project, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       title,
@@ -1944,6 +1970,7 @@ export function createTodo(input: CreateTodoInput): Todo {
       stateId,
       project,
       milestone,
+      priority,
       startDate,
       dueDate,
       source,
@@ -2005,6 +2032,7 @@ export function updateTodo(input: UpdateTodoInput): Todo {
   const milestone = input.milestone === undefined
     ? existing.milestone
     : validateTodoTextField(input.milestone, "milestone");
+  const priority = input.priority === undefined ? (existing.priority ?? 0) : validateTodoPriority(input.priority);
   const startDate = input.startDate === undefined
     ? existing.start_date
     : validateTodoDate(input.startDate, "startDate");
@@ -2029,11 +2057,11 @@ export function updateTodo(input: UpdateTodoInput): Todo {
 
   database
     .prepare(
-      `UPDATE todos SET title = ?, notes = ?, state_id = ?, project = ?, milestone = ?,
+      `UPDATE todos SET title = ?, notes = ?, state_id = ?, project = ?, milestone = ?, priority = ?,
                         start_date = ?, due_date = ?, parent_id = ?, completed_at = ?
        WHERE id = ?`,
     )
-    .run(title, notes, stateId, project, milestone, startDate, dueDate, parentId, completedAt, input.id);
+    .run(title, notes, stateId, project, milestone, priority, startDate, dueDate, parentId, completedAt, input.id);
 
   const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow;
   return rowToTodo(row);

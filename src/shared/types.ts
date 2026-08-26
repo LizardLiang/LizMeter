@@ -115,6 +115,19 @@ export interface AssignTagInput {
 export type TodoSource = "user" | "ai";
 
 /**
+ * Priority labels indexed by their stored value, on the same 0-4 scale the Linear issue list
+ * already uses. 0 means "not set" rather than "lowest", which is why Low sits at the end.
+ */
+export const TODO_PRIORITY_LABELS = ["No priority", "Urgent", "High", "Medium", "Low"] as const;
+
+export const MAX_TODO_PRIORITY = TODO_PRIORITY_LABELS.length - 1;
+
+/** Falls back to "No priority" so an out-of-range value read from an old row still renders. */
+export function todoPriorityLabel(priority: number): string {
+  return TODO_PRIORITY_LABELS[priority] ?? TODO_PRIORITY_LABELS[0];
+}
+
+/**
  * A user-editable workflow state. Labels can be renamed freely, so nothing may key off
  * the literal text -- `isCompleted` is the stable anchor for "this todo is finished".
  */
@@ -151,6 +164,8 @@ export interface Todo {
   state: TodoState;
   project: string | null;
   milestone: string | null;
+  /** 0-4, see {@link TODO_PRIORITY_LABELS}. 0 means the user has not set one. */
+  priority: number;
   /** YYYY-MM-DD */
   startDate: string | null;
   /** YYYY-MM-DD */
@@ -175,6 +190,8 @@ export interface CreateTodoInput {
   stateId?: number;
   project?: string | null;
   milestone?: string | null;
+  /** 0-4. Omitted means no priority. */
+  priority?: number;
   startDate?: string | null;
   dueDate?: string | null;
   source?: TodoSource;
@@ -190,6 +207,8 @@ export interface UpdateTodoInput {
   stateId?: number;
   project?: string | null;
   milestone?: string | null;
+  /** 0-4. Absent leaves the current priority alone. */
+  priority?: number;
   startDate?: string | null;
   dueDate?: string | null;
   /** Re-parent the todo. `null` lifts it back to the top level. Rejected if it would form a cycle. */
