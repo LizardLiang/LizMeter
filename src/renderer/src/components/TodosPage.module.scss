@@ -38,13 +38,13 @@
   cursor: pointer;
   border: 1px solid transparent;
   background: transparent;
-  color: #565f89;
+  color: #8b93b8;
   white-space: nowrap;
   font-family: inherit;
   transition: color 0.15s, background 0.15s;
 
   &:hover {
-    color: #a9b1d6;
+    color: #c0caf5;
     background: rgba(122, 162, 247, 0.07);
   }
 }
@@ -159,7 +159,7 @@
   padding: 0;
   border: none;
   background: none;
-  color: #565f89;
+  color: #8b93b8;
   cursor: pointer;
   transition: color 0.15s;
 
@@ -186,7 +186,7 @@
 }
 
 .groupCount {
-  color: #565f89;
+  color: #8b93b8;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -199,7 +199,7 @@
   border: none;
   border-radius: 4px;
   background: none;
-  color: #565f89;
+  color: #8b93b8;
   font-size: 15px;
   line-height: 1;
   font-family: inherit;
@@ -333,7 +333,7 @@
 .id {
   flex-shrink: 0;
   min-width: 3.25rem;
-  color: #565f89;
+  color: #8b93b8;
   font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
@@ -358,14 +358,14 @@
 
 .titleDone {
   composes: title;
-  color: #7a8194;
+  color: #8b93b8;
   text-decoration: line-through;
 }
 
 .crumb {
   flex-shrink: 1;
   min-width: 0;
-  color: #565f89;
+  color: #8b93b8;
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -378,7 +378,7 @@
   flex-shrink: 2;
   min-width: 0;
   max-width: 12rem;
-  color: #565f89;
+  color: #8b93b8;
   font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
@@ -392,8 +392,8 @@
   gap: 3px;
   padding: 1px 7px 1px 5px;
   border-radius: 9999px;
-  border: 1px solid rgba(86, 95, 137, 0.35);
-  color: #7a8194;
+  border: 1px solid rgba(122, 134, 180, 0.55);
+  color: #a3abc9;
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
@@ -418,7 +418,7 @@
   gap: 5px;
   padding: 2px 9px 2px 7px;
   border-radius: 6px;
-  border: 1px solid rgba(86, 95, 137, 0.35);
+  border: 1px solid rgba(122, 134, 180, 0.55);
   color: #a9b1d6;
   font-size: 11px;
   white-space: nowrap;
@@ -516,7 +516,7 @@
   padding: 4px 8px;
   border: none;
   background: none;
-  color: #565f89;
+  color: #8b93b8;
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
