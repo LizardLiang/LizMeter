@@ -15,12 +15,15 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Todo, TodoFilter, TodoState } from "../../../shared/types.ts";
+import { TODO_PRIORITY_LABELS, todoPriorityLabel } from "../../../shared/types.ts";
 import { useTodos } from "../hooks/useTodos.ts";
 import { droppedStateId, stateDropId, todosToMove } from "../utils/todoDrag.ts";
 import { Select } from "./Select.tsx";
 import { TodoEditDialog } from "./TodoEditDialog.tsx";
 import { TodoPicker } from "./TodoPicker.tsx";
-import { TodoRowMenu } from "./TodoRowMenu.tsx";
+import { type QuickMenuItem, TodoQuickMenu } from "./TodoQuickMenu.tsx";
+import { type MenuAnchor, type QuickMenuKind, TodoActionMenu } from "./TodoRowMenu.tsx";
+import { TodoShortcutsOverlay } from "./TodoShortcutsOverlay.tsx";
 import styles from "./TodosPage.module.scss";
 import { TodoStateManager } from "./TodoStateManager.tsx";
 
@@ -56,6 +59,31 @@ function saveCollapsed(ids: Set<number>): void {
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
+}
+
+/** Local calendar arithmetic: going through `toISOString()` would shift the day behind UTC. */
+function isoPlusDays(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}-${month}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/** Well-formed is not enough: 2026-02-30 matches the shape but rolls forward when parsed. */
+function isRealIsoDate(value: string): boolean {
+  if (!ISO_DATE.test(value)) return false;
+  const parsed = new Date(`${value}T12:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+interface QuickMenuConfig {
+  heading: string;
+  placeholder: string;
+  items: QuickMenuItem[];
+  acceptQuery?: (query: string) => QuickMenuItem | null;
+  onPick: (value: string) => void;
 }
 
 function formatDay(iso: string): string {
@@ -102,6 +130,44 @@ function SubIssueIcon() {
   );
 }
 
+/**
+ * Linear's priority glyph: three ascending bars, filled up to the level. Urgent breaks the
+ * pattern with a solid block, because "most urgent" should not read as merely "one bar taller".
+ *
+ * Drawn for priority 0 too, dimmed, so the icon holds a fixed column and the titles below it
+ * stay aligned whether or not a row has a priority.
+ */
+function PriorityIcon({ priority }: { priority: number; }) {
+  const filled = (level: number) => (priority > 0 && priority <= level ? 1 : 0.28);
+
+  return (
+    <span
+      className={styles.priorityIcon}
+      data-priority={priority}
+      title={todoPriorityLabel(priority)}
+      aria-label={todoPriorityLabel(priority)}
+    >
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        {priority === 1
+          ? (
+            <>
+              <rect x="6.4" y="1.5" width="3.2" height="8.4" rx="1.4" />
+              <rect x="6.4" y="11.6" width="3.2" height="3" rx="1.4" />
+            </>
+          )
+          : (
+            <>
+              {/* High fills all three, Medium the first two, Low only the first. */}
+              <rect x="1" y="9.5" width="3.6" height="5" rx="1" opacity={filled(4)} />
+              <rect x="6.2" y="6" width="3.6" height="8.5" rx="1" opacity={filled(3)} />
+              <rect x="11.4" y="2.5" width="3.6" height="12" rx="1" opacity={filled(2)} />
+            </>
+          )}
+      </svg>
+    </span>
+  );
+}
+
 function StateDot({ state }: { state: TodoState; }) {
   return (
     <span
@@ -116,23 +182,20 @@ function StateDot({ state }: { state: TodoState; }) {
 
 interface RowProps {
   todo: Todo;
-  states: TodoState[];
   selected: boolean;
+  /** The keyboard cursor sits here. Separate from `selected`, which is the checkbox. */
+  focused: boolean;
   /** Dimmed while this row is one of the rows in flight. */
   dragging: boolean;
   onToggleSelect: (id: number, shiftKey: boolean) => void;
   onEdit: (todo: Todo) => void;
-  onSetState: (id: number, stateId: number) => void;
-  onSetParent: (todo: Todo) => void;
-  onClearParent: (id: number) => void;
-  onDelete: (id: number) => void;
+  onOpenMenu: (todo: Todo, anchor: MenuAnchor) => void;
   /** True for the click a browser fires at the end of a drag -- that one must not open the editor. */
   wasJustDragged: () => boolean;
 }
 
 function TodoRow(props: RowProps) {
-  const { todo, states, selected, dragging, onToggleSelect, onEdit, wasJustDragged } = props;
-  const { onSetState, onSetParent, onClearParent, onDelete } = props;
+  const { todo, selected, focused, dragging, onToggleSelect, onEdit, onOpenMenu, wasJustDragged } = props;
   const { attributes, listeners, setNodeRef } = useDraggable({ id: todo.id });
 
   const overdue = todo.dueDate !== null && !todo.state.isCompleted && todo.dueDate < todayIso();
@@ -141,9 +204,23 @@ function TodoRow(props: RowProps) {
   let rowClass = styles.row;
   if (dragging) rowClass = styles.rowDragging;
   else if (selected) rowClass = styles.rowSelected;
+  // Appended rather than swapped in: a row can be both selected and under the cursor.
+  if (focused) rowClass = `${rowClass} ${styles.rowFocused}`;
 
   return (
-    <li ref={setNodeRef} className={rowClass}>
+    // The page reads this back to scroll the cursor into view and to anchor its quick menus,
+    // which keeps it from having to thread a ref through every group.
+    <li
+      ref={setNodeRef}
+      className={rowClass}
+      data-todo-row={todo.id}
+      onContextMenu={(e) => {
+        e.preventDefault();
+        // A pointer has no height of its own, so it brackets itself: the panel drops from the
+        // cursor, or flips up off the same point when there is no room below.
+        onOpenMenu(todo, { top: e.clientY, bottom: e.clientY, left: e.clientX });
+      }}
+    >
       <input
         type="checkbox"
         className={styles.check}
@@ -156,24 +233,9 @@ function TodoRow(props: RowProps) {
         aria-label={`Select ${todo.title}`}
       />
 
-      <span className={styles.menuSlot}>
-        <TodoRowMenu
-          todoId={todo.id}
-          todoTitle={todo.title}
-          currentStateId={todo.state.id}
-          hasParent={todo.parentId !== null}
-          states={states}
-          onEdit={() => onEdit(todo)}
-          onSetState={(stateId) => onSetState(todo.id, stateId)}
-          onSetParent={() => onSetParent(todo)}
-          onClearParent={() => onClearParent(todo.id)}
-          onDelete={() => onDelete(todo.id)}
-        />
-      </span>
-
       {
-        /* The row body doubles as the drag grip. The checkbox and the "..." menu keep working
-          because the drag listeners never reach them. */
+        /* The row body doubles as the drag grip. The checkbox keeps working because the drag
+          listeners never reach it. */
       }
       <button
         className={styles.rowBody}
@@ -186,6 +248,7 @@ function TodoRow(props: RowProps) {
         title={todo.notes ?? undefined}
         aria-label={`Edit ${todo.title}`}
       >
+        <PriorityIcon priority={todo.priority} />
         <span className={styles.id}>#{todo.id}</span>
         <StateDot state={todo.state} />
         {todo.parentTitle !== null && (
@@ -240,20 +303,18 @@ function DragGhost({ todo, count }: { todo: Todo; count: number; }) {
 interface GroupProps {
   state: TodoState;
   items: Todo[];
-  states: TodoState[];
   collapsed: boolean;
   /** A drag is in flight somewhere on the page. */
   dragActive: boolean;
   draggingIds: Set<number>;
   selected: Set<number>;
+  /** The one row carrying the keyboard cursor, if it falls inside this group. */
+  focusedId: number | null;
   onToggleCollapsed: (stateId: number) => void;
   onAdd: (stateId: number) => void;
   onToggleSelect: (id: number, shiftKey: boolean) => void;
   onEdit: (todo: Todo) => void;
-  onSetState: (id: number, stateId: number) => void;
-  onSetParent: (todo: Todo) => void;
-  onClearParent: (id: number) => void;
-  onDelete: (id: number) => void;
+  onOpenMenu: (todo: Todo, anchor: MenuAnchor) => void;
   wasJustDragged: () => boolean;
 }
 
@@ -261,19 +322,16 @@ function TodoGroup(props: GroupProps) {
   const {
     state,
     items,
-    states,
     collapsed,
     dragActive,
     draggingIds,
     selected,
+    focusedId,
     onToggleCollapsed,
     onAdd,
     onToggleSelect,
     onEdit,
-    onSetState,
-    onSetParent,
-    onClearParent,
-    onDelete,
+    onOpenMenu,
     wasJustDragged,
   } = props;
 
@@ -310,15 +368,12 @@ function TodoGroup(props: GroupProps) {
             <TodoRow
               key={todo.id}
               todo={todo}
-              states={states}
               selected={selected.has(todo.id)}
+              focused={focusedId === todo.id}
               dragging={draggingIds.has(todo.id)}
               onToggleSelect={onToggleSelect}
               onEdit={onEdit}
-              onSetState={onSetState}
-              onSetParent={onSetParent}
-              onClearParent={onClearParent}
-              onDelete={onDelete}
+              onOpenMenu={onOpenMenu}
               wasJustDragged={wasJustDragged}
             />
           ))}
@@ -359,11 +414,29 @@ export function TodosPage() {
   } = useTodos();
 
   const [editing, setEditing] = useState<Todo | null>(null);
-  /** Non-null while the create dialog is open. `stateId` is the group whose "+" was clicked. */
-  const [creating, setCreating] = useState<{ stateId: number | null; } | null>(null);
+  /**
+   * Non-null while the create dialog is open. `stateId` is the group whose "+" was clicked;
+   * `parent` is set by Ctrl+Shift+O, which creates the new todo as a sub-issue.
+   */
+  const [creating, setCreating] = useState<
+    { stateId: number | null; parent?: { id: number; title: string; }; } | null
+  >(null);
   const [managingStates, setManagingStates] = useState(false);
-  /** The todo whose parent is being chosen from the row menu. */
+  /** The todo whose parent is being chosen from the row menu or by `L`. */
   const [reparenting, setReparenting] = useState<Todo | null>(null);
+  /** The todo an existing sub-issue is being filed under, from `l`. */
+  const [linkingChild, setLinkingChild] = useState<Todo | null>(null);
+  /** The `?` cheat sheet. */
+  const [showingShortcuts, setShowingShortcuts] = useState(false);
+  /** The keyboard cursor. Independent of the checkbox selection, the way Linear splits them. */
+  const [focusedIdRaw, setFocusedIdRaw] = useState<number | null>(null);
+  /** Which single-key menu is open over the cursor, and the row rect it hangs off. */
+  const [quickMenu, setQuickMenu] = useState<
+    | { kind: QuickMenuKind; todo: Todo; anchor: MenuAnchor; }
+    | null
+  >(null);
+  /** The right-click action menu: which row it acts on, and the pointer it hangs off. */
+  const [actionMenu, setActionMenu] = useState<{ todo: Todo; anchor: MenuAnchor; } | null>(null);
   const [collapsed, setCollapsed] = useState<Set<number>>(loadCollapsed);
   const [selectedRaw, setSelectedRaw] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
@@ -379,7 +452,11 @@ export function TodosPage() {
     return next.size === selectedRaw.size ? selectedRaw : next;
   }, [selectedRaw, todos]);
 
-  const dialogOpen = editing !== null || creating !== null || managingStates || reparenting !== null;
+  // Anything that owns the keyboard. While one of these is up the page's own bindings stand down,
+  // or `d` typed into a search box would fall through and open the due-date menu behind it.
+  const dialogOpen = editing !== null || creating !== null || managingStates
+    || reparenting !== null || linkingChild !== null || quickMenu !== null || showingShortcuts
+    || actionMenu !== null;
   const doneCount = todos.filter((todo) => todo.state.isCompleted).length;
 
   const countsByState = useMemo(() => {
@@ -405,6 +482,59 @@ export function TodosPage() {
     () => groups.flatMap((g) => collapsed.has(g.state.id) ? [] : g.items.map((t) => t.id)),
     [groups, collapsed],
   );
+
+  // Collapsing a group, changing the filter, or a delete elsewhere can all take the cursor's row
+  // away. Deriving it against the rendered order means the cursor can never point at nothing.
+  const focusedId = useMemo(
+    () => (focusedIdRaw !== null && visibleIds.includes(focusedIdRaw) ? focusedIdRaw : null),
+    [focusedIdRaw, visibleIds],
+  );
+  const focusedTodo = useMemo(
+    () => (focusedId === null ? null : todos.find((t) => t.id === focusedId) ?? null),
+    [focusedId, todos],
+  );
+
+  useEffect(() => {
+    if (focusedId === null) return;
+    // Optional call, not just optional lookup: environments without layout (jsdom) leave
+    // scrollIntoView undefined, and keeping the cursor visible must never break moving it.
+    document.querySelector(`[data-todo-row="${focusedId}"]`)?.scrollIntoView?.({ block: "nearest" });
+  }, [focusedId]);
+
+  /** Where a quick menu hangs: under the cursor's row, indented past the checkbox and "..." . */
+  const rowAnchor = useCallback((id: number) => {
+    const rect = document.querySelector(`[data-todo-row="${id}"]`)?.getBoundingClientRect();
+    if (rect === undefined) return { top: 120, bottom: 148, left: 160 };
+    return { top: rect.top, bottom: rect.bottom, left: rect.left + 56 };
+  }, []);
+
+  /**
+   * Row order read back from the DOM rather than from `visibleIds`.
+   *
+   * They agree on what they describe, but not on when. The DOM is written at commit time, while
+   * a closure over `visibleIds` is only refreshed when an effect runs -- so a key pressed between
+   * the commit that painted the rows and the effect that re-read them would navigate an empty
+   * list. The rendered order is the thing being navigated, so read it from where it is rendered.
+   */
+  const renderedIds = useCallback(
+    () =>
+      [...document.querySelectorAll("[data-todo-row]")]
+        .map((el) => Number(el.getAttribute("data-todo-row")))
+        .filter((id) => !Number.isNaN(id)),
+    [],
+  );
+
+  const moveFocus = useCallback((delta: number) => {
+    const ids = renderedIds();
+    if (ids.length === 0) return;
+
+    setFocusedIdRaw((current) => {
+      const at = current === null ? -1 : ids.indexOf(current);
+      // No cursor yet: ArrowDown starts at the top of the list, ArrowUp at the bottom.
+      if (at === -1) return delta > 0 ? ids[0]! : ids[ids.length - 1]!;
+      return ids[Math.min(ids.length - 1, Math.max(0, at + delta))]!;
+    });
+  }, [renderedIds]);
 
   const toggleCollapsed = useCallback((stateId: number) => {
     setCollapsed((prev) => {
@@ -483,37 +613,205 @@ export function TodosPage() {
     setDragging(null);
   }, []);
 
-  // `c` opens the create dialog, Escape drops the selection -- both are Linear bindings.
+  /**
+   * The page keymap, following Linear: arrows move a cursor, and a single letter acts on the row
+   * under it. Every binding here is deliberately unmodified except Ctrl+Shift+O, so the guards
+   * below have to let that one through before rejecting the modifier keys.
+   */
+  // Attached once, reading through a ref, rather than re-subscribed whenever the cursor or the
+  // selection changes. Re-subscribing leaves a window where React has committed a render but not
+  // yet run the effect, and a key pressed in that window is handled by the previous closure --
+  // an ArrowDown landing while `visibleIds` was still empty would silently place no cursor.
+  const keymap = useRef({ dialogOpen, focusedTodo, selectedSize: selected.size, moveFocus, rowAnchor });
+
+  useEffect(() => {
+    keymap.current = { dialogOpen, focusedTodo, selectedSize: selected.size, moveFocus, rowAnchor };
+  });
+
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      const { dialogOpen, focusedTodo, selectedSize, moveFocus, rowAnchor } = keymap.current;
 
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      // A dialog or quick menu owns the keyboard while it is up.
+      if (dialogOpen) return;
 
-      if (event.key === "c" && !dialogOpen) {
+      // Ctrl/Cmd+Shift+O: a brand new todo, filed under the cursor's row.
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "o") {
+        event.preventDefault();
+        if (focusedTodo !== null) {
+          setCreating({ stateId: null, parent: { id: focusedTodo.id, title: focusedTodo.title } });
+        }
+        return;
+      }
+
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        // Otherwise the panel scrolls out from under the cursor it is meant to be following.
+        event.preventDefault();
+        moveFocus(event.key === "ArrowDown" ? 1 : -1);
+        return;
+      }
+
+      if (event.key === "c") {
         event.preventDefault();
         setCreating({ stateId: null });
-      } else if (event.key === "Escape" && !dialogOpen && selected.size > 0) {
-        setSelectedRaw(new Set());
+        return;
+      }
+
+      // Above the cursor check on purpose: the sheet is what tells you a cursor is needed.
+      if (event.key === "?") {
+        event.preventDefault();
+        setShowingShortcuts(true);
+        return;
+      }
+
+      if (event.key === "Escape") {
+        // The selection is the louder state, so it clears first; a second press drops the cursor.
+        if (selectedSize > 0) setSelectedRaw(new Set());
+        else setFocusedIdRaw(null);
+        return;
+      }
+
+      // Everything below acts on the cursor, so without one there is nothing to act on.
+      if (focusedTodo === null) return;
+
+      switch (event.key) {
+        case "s":
+          event.preventDefault();
+          setQuickMenu({ kind: "state", todo: focusedTodo, anchor: rowAnchor(focusedTodo.id) });
+          break;
+        case "p":
+          event.preventDefault();
+          setQuickMenu({ kind: "priority", todo: focusedTodo, anchor: rowAnchor(focusedTodo.id) });
+          break;
+        case "d":
+          event.preventDefault();
+          setQuickMenu({ kind: "due", todo: focusedTodo, anchor: rowAnchor(focusedTodo.id) });
+          break;
+        case "P":
+          event.preventDefault();
+          setQuickMenu({ kind: "project", todo: focusedTodo, anchor: rowAnchor(focusedTodo.id) });
+          break;
+        case "l":
+          event.preventDefault();
+          setLinkingChild(focusedTodo);
+          break;
+        case "L":
+          event.preventDefault();
+          setReparenting(focusedTodo);
+          break;
+        case "Enter":
+          event.preventDefault();
+          setEditing(focusedTodo);
+          break;
+        default:
+          break;
       }
     }
 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [dialogOpen, selected.size]);
+  }, []);
 
   const selectedIds = useMemo(() => [...selected], [selected]);
 
   const handleAdd = useCallback((stateId: number) => setCreating({ stateId }), []);
   const handleSetState = useCallback((id: number, stateId: number) => void setTodoState(id, stateId), [setTodoState]);
   const handleDelete = useCallback((id: number) => void deleteTodo(id), [deleteTodo]);
-  const handleSetParent = useCallback((todo: Todo) => setReparenting(todo), []);
   const handleClearParent = useCallback(
     (id: number) => void updateTodo({ id, parentId: null }),
     [updateTodo],
   );
+
+  const handleOpenMenu = useCallback((todo: Todo, anchor: MenuAnchor) => {
+    // Right-clicking a row is also a way of pointing at it, so the cursor follows the menu --
+    // the shortcuts the menu advertises then act on the row you just aimed at.
+    setFocusedIdRaw(todo.id);
+    setActionMenu({ todo, anchor });
+  }, []);
+
+  /**
+   * The menu holds a snapshot of the row it opened on, which a write from the MCP server or a
+   * bulk action can outdate underneath it. Re-reading the live todo keeps "Remove from parent"
+   * and the current-state tick honest, and closes the menu if the row is gone.
+   */
+  const actionMenuTodo = useMemo(
+    () => (actionMenu === null ? null : todos.find((t) => t.id === actionMenu.todo.id) ?? null),
+    [actionMenu, todos],
+  );
+
+  /** The rows, and the write behind them, for whichever single-key menu is open. */
+  const quickMenuConfig = useMemo<QuickMenuConfig | null>(() => {
+    if (quickMenu === null) return null;
+    const { kind, todo } = quickMenu;
+
+    if (kind === "state") {
+      return {
+        heading: "Move to state",
+        placeholder: "Change state to...",
+        items: states.map((s) => ({
+          value: String(s.id),
+          label: s.label,
+          color: s.color,
+          current: s.id === todo.state.id,
+        })),
+        onPick: (value) => void setTodoState(todo.id, Number(value)),
+      };
+    }
+
+    if (kind === "priority") {
+      return {
+        heading: "Set priority",
+        placeholder: "Set priority to...",
+        items: TODO_PRIORITY_LABELS.map((label, value) => ({
+          value: String(value),
+          label,
+          current: value === todo.priority,
+        })),
+        onPick: (value) => void updateTodo({ id: todo.id, priority: Number(value) }),
+      };
+    }
+
+    if (kind === "due") {
+      const relative = [
+        { label: "Today", iso: isoPlusDays(0) },
+        { label: "Tomorrow", iso: isoPlusDays(1) },
+        { label: "Next week", iso: isoPlusDays(7) },
+      ];
+      const items: QuickMenuItem[] = relative.map(({ label, iso }) => ({
+        value: iso,
+        label,
+        hint: formatDay(iso),
+        current: todo.dueDate === iso,
+      }));
+      items.push({ value: "", label: "No due date", current: todo.dueDate === null });
+
+      return {
+        heading: "Set due date",
+        placeholder: "Or type YYYY-MM-DD",
+        items,
+        // Any date the three shortcuts do not cover is typed in full.
+        acceptQuery: (query) => (isRealIsoDate(query) ? { value: query, label: query, hint: formatDay(query) } : null),
+        onPick: (value) => void updateTodo({ id: todo.id, dueDate: value.length > 0 ? value : null }),
+      };
+    }
+
+    const items: QuickMenuItem[] = projects.map((p) => ({ value: p, label: p, current: todo.project === p }));
+    items.push({ value: "", label: "No project", current: todo.project === null });
+
+    return {
+      heading: "Set project",
+      placeholder: "Filter, or name a new one",
+      items,
+      // Projects are free text with no table of their own, so typing one is how a new one starts.
+      acceptQuery: (query) => ({ value: query, label: `Create "${query}"`, hint: "New" }),
+      onPick: (value) => void updateTodo({ id: todo.id, project: value.length > 0 ? value : null }),
+    };
+  }, [quickMenu, states, projects, setTodoState, updateTodo]);
 
   return (
     <div className={styles.page}>
@@ -543,6 +841,14 @@ export function TodosPage() {
             onChange={(next) => setProjectFilter(next === "" ? null : next)}
           />
 
+          <button
+            className={styles.helpBtn}
+            onClick={() => setShowingShortcuts(true)}
+            aria-label="Keyboard shortcuts"
+            title="Keyboard shortcuts (?)"
+          >
+            ?
+          </button>
           <button className={styles.ghostBtn} onClick={() => setManagingStates(true)}>States</button>
           {doneCount > 0 && (
             <button className={styles.ghostBtn} onClick={() => void clearCompleted()}>
@@ -576,19 +882,16 @@ export function TodosPage() {
                   key={state.id}
                   state={state}
                   items={items}
-                  states={states}
                   collapsed={collapsed.has(state.id)}
                   dragActive={dragging !== null}
                   draggingIds={draggingIds}
                   selected={selected}
+                  focusedId={focusedId}
                   onToggleCollapsed={toggleCollapsed}
                   onAdd={handleAdd}
                   onToggleSelect={toggleSelect}
                   onEdit={setEditing}
-                  onSetState={handleSetState}
-                  onSetParent={handleSetParent}
-                  onClearParent={handleClearParent}
-                  onDelete={handleDelete}
+                  onOpenMenu={handleOpenMenu}
                   wasJustDragged={wasJustDragged}
                 />
               ))}
@@ -638,9 +941,12 @@ export function TodosPage() {
 
       {(editing !== null || creating !== null) && (
         <TodoEditDialog
-          key={editing ? `edit-${editing.id}` : `new-${creating?.stateId ?? "default"}`}
+          key={editing
+            ? `edit-${editing.id}`
+            : `new-${creating?.stateId ?? "default"}-${creating?.parent?.id ?? "top"}`}
           todo={editing}
           defaultStateId={creating?.stateId ?? undefined}
+          defaultParent={creating?.parent}
           states={states}
           projects={projects}
           milestones={milestones}
@@ -660,6 +966,49 @@ export function TodosPage() {
           mode={{ kind: "parent", todoId: reparenting.id, currentParentId: reparenting.parentId }}
           onPick={(picked) => void updateTodo({ id: reparenting.id, parentId: picked.id })}
           onClose={() => setReparenting(null)}
+        />
+      )}
+
+      {linkingChild !== null && (
+        <TodoPicker
+          heading={`File an existing todo under #${linkingChild.id} ${linkingChild.title}`}
+          mode={{ kind: "child", todoId: linkingChild.id }}
+          onPick={(picked) => void updateTodo({ id: picked.id, parentId: linkingChild.id })}
+          onClose={() => setLinkingChild(null)}
+        />
+      )}
+
+      {showingShortcuts && <TodoShortcutsOverlay onClose={() => setShowingShortcuts(false)} />}
+
+      {actionMenu !== null && actionMenuTodo !== null && (
+        <TodoActionMenu
+          key={actionMenuTodo.id}
+          todo={actionMenuTodo}
+          states={states}
+          anchor={actionMenu.anchor}
+          onEdit={() => setEditing(actionMenuTodo)}
+          onQuickMenu={(kind) => setQuickMenu({ kind, todo: actionMenuTodo, anchor: rowAnchor(actionMenuTodo.id) })}
+          onAddSubIssue={() =>
+            setCreating({ stateId: null, parent: { id: actionMenuTodo.id, title: actionMenuTodo.title } })}
+          onLinkChild={() => setLinkingChild(actionMenuTodo)}
+          onSetParent={() => setReparenting(actionMenuTodo)}
+          onClearParent={() => handleClearParent(actionMenuTodo.id)}
+          onSetState={(stateId) => handleSetState(actionMenuTodo.id, stateId)}
+          onDelete={() => handleDelete(actionMenuTodo.id)}
+          onClose={() => setActionMenu(null)}
+        />
+      )}
+
+      {quickMenu !== null && quickMenuConfig !== null && (
+        <TodoQuickMenu
+          key={`${quickMenu.kind}-${quickMenu.todo.id}`}
+          heading={quickMenuConfig.heading}
+          placeholder={quickMenuConfig.placeholder}
+          items={quickMenuConfig.items}
+          anchor={quickMenu.anchor}
+          acceptQuery={quickMenuConfig.acceptQuery}
+          onPick={quickMenuConfig.onPick}
+          onClose={() => setQuickMenu(null)}
         />
       )}
 

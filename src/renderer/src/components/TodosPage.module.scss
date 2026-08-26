@@ -85,6 +85,15 @@
   }
 }
 
+// Square rather than a labelled pill: it sits beside "States" and must not compete with it.
+.helpBtn {
+  composes: ghostBtn;
+  width: 27px;
+  padding: 5px 0;
+  text-align: center;
+  font-weight: 600;
+}
+
 .newBtn {
   display: flex;
   align-items: center;
@@ -237,11 +246,9 @@
     background: rgba(122, 162, 247, 0.06);
   }
 
-  // Checkbox and "..." stay out of the way until the row is engaged.
+  // The checkbox stays out of the way until the row is engaged.
   &:hover .check,
-  &:focus-within .check,
-  &:hover .menuSlot,
-  &:focus-within .menuSlot {
+  &:focus-within .check {
     opacity: 1;
   }
 }
@@ -252,6 +259,21 @@
 
   &:hover {
     background: rgba(122, 162, 247, 0.16);
+  }
+
+  .check {
+    opacity: 1;
+  }
+}
+
+// The keyboard cursor. A left bar rather than an outline: an outline on a 36px row inside a
+// bordered list reads as a second selection, and the cursor is not a selection.
+.rowFocused {
+  background: rgba(122, 162, 247, 0.14);
+  box-shadow: inset 2px 0 0 #7aa2f7;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.18);
   }
 
   .check {
@@ -303,14 +325,6 @@
     outline: 2px solid #7aa2f7;
     outline-offset: 1px;
   }
-}
-
-.menuSlot {
-  flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  opacity: 0;
-  transition: opacity 0.12s ease;
 }
 
 .rowBody {
@@ -411,6 +425,37 @@
 }
 
 // Project chip. Deliberately not a dot-pill -- that shape reads as a label/tag.
+// Leads the row, ahead of the id, so priority reads as a column down the list rather than as
+// one more trailing badge. Always rendered -- priority 0 just draws dim.
+.priorityIcon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  color: #8b93b8;
+
+  svg {
+    width: 13px;
+    height: 13px;
+    display: block;
+  }
+
+  &[data-priority="1"] {
+    color: #f7768e;
+  }
+
+  &[data-priority="2"] {
+    color: #ff9e64;
+  }
+
+  &[data-priority="3"] {
+    color: #e0af68;
+  }
+
+  &[data-priority="4"] {
+    color: #a3abc9;
+  }
+}
+
 .project {
   flex-shrink: 0;
   display: flex;

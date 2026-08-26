@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CreateTodoInput, Todo, TodoState, UpdateTodoInput } from "../../../shared/types.ts";
+import { TODO_PRIORITY_LABELS } from "../../../shared/types.ts";
 import { Combobox } from "./Combobox.tsx";
 import { DatePicker } from "./DatePicker.tsx";
 import { Select } from "./Select.tsx";
@@ -11,6 +12,8 @@ interface Props {
   todo: Todo | null;
   /** Create mode only: the state the new todo lands in. Falls back to the default state. */
   defaultStateId?: number;
+  /** Create mode only: pre-fills the parent chip, so "add sub-issue" opens ready to type a title. */
+  defaultParent?: { id: number; title: string; };
   states: TodoState[];
   projects: string[];
   milestones: string[];
@@ -28,13 +31,17 @@ function initialStateId(todo: Todo | null, defaultStateId: number | undefined, s
 }
 
 /** The parent chip's label, falling back to the bare id if the join did not carry a title. */
-function initialParent(todo: Todo | null): { id: number; title: string; } | null {
-  if (todo === null || todo.parentId === null) return null;
+function initialParent(
+  todo: Todo | null,
+  defaultParent: { id: number; title: string; } | undefined,
+): { id: number; title: string; } | null {
+  if (todo === null) return defaultParent ?? null;
+  if (todo.parentId === null) return null;
   return { id: todo.parentId, title: todo.parentTitle ?? "#" + todo.parentId };
 }
 
 export function TodoEditDialog(
-  { todo, defaultStateId, states, projects, milestones, onSave, onCreate, onDelete, onClose }: Props,
+  { todo, defaultStateId, defaultParent, states, projects, milestones, onSave, onCreate, onDelete, onClose }: Props,
 ) {
   const creating = todo === null;
 
@@ -43,13 +50,14 @@ export function TodoEditDialog(
   const [stateId, setStateId] = useState(() => initialStateId(todo, defaultStateId, states));
   const [project, setProject] = useState(todo?.project ?? "");
   const [milestone, setMilestone] = useState(todo?.milestone ?? "");
+  const [priority, setPriority] = useState(todo?.priority ?? 0);
   const [startDate, setStartDate] = useState(todo?.startDate ?? "");
   const [dueDate, setDueDate] = useState(todo?.dueDate ?? "");
   const [busy, setBusy] = useState(false);
 
   // The parent is a property of this todo, so it is staged locally and written on Save.
   // Sub-issues are rows of their own, so those are written the moment you change them.
-  const [parent, setParent] = useState(() => initialParent(todo));
+  const [parent, setParent] = useState(() => initialParent(todo, defaultParent));
   const [children, setChildren] = useState<Todo[]>([]);
   const [newChildTitle, setNewChildTitle] = useState("");
   const [childBusy, setChildBusy] = useState(false);
@@ -93,6 +101,7 @@ export function TodoEditDialog(
       stateId,
       project: project.trim().length > 0 ? project.trim() : null,
       milestone: milestone.trim().length > 0 ? milestone.trim() : null,
+      priority,
       startDate: startDate.length > 0 ? startDate : null,
       dueDate: dueDate.length > 0 ? dueDate : null,
       parentId: parent === null ? null : parent.id,
@@ -233,6 +242,17 @@ export function TodoEditDialog(
                 value={String(stateId)}
                 options={states.map((s) => ({ value: String(s.id), label: s.label, color: s.color }))}
                 onChange={(next) => setStateId(Number(next))}
+              />
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.label}>Priority</span>
+              <Select
+                ariaLabel="Priority"
+                className={styles.selectTrigger}
+                value={String(priority)}
+                options={TODO_PRIORITY_LABELS.map((label, value) => ({ value: String(value), label }))}
+                onChange={(next) => setPriority(Number(next))}
               />
             </div>
 

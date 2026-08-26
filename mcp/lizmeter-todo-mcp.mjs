@@ -96,6 +96,12 @@ const FIELD_PROPERTIES = {
     type: "string",
     description: "Optional milestone name, e.g. 'v1.14'. Free text.",
   },
+  priority: {
+    type: "number",
+    description:
+      "Optional priority: 0 = No priority, 1 = Urgent, 2 = High, 3 = Medium, 4 = Low. Note that 0 means "
+      + "unset rather than lowest, and 4 is the lowest. Omit it unless the user signalled urgency.",
+  },
   startDate: {
     type: "string",
     description: "Optional start date as YYYY-MM-DD.",
@@ -183,9 +189,9 @@ const TOOLS = [
   {
     name: "todo_update",
     description:
-      "Change an existing LizMeter todo: move it between states, set a due date, assign a project or "
-      + "milestone, re-file it under a different parent, or edit its text. Only the fields you pass "
-      + "are changed. Get ids from todo_list.",
+      "Change an existing LizMeter todo: move it between states, set a due date or priority, assign a "
+      + "project or milestone, re-file it under a different parent, or edit its text. Only the fields "
+      + "you pass are changed. Get ids from todo_list.",
     inputSchema: {
       type: "object",
       properties: {
@@ -217,7 +223,7 @@ const TOOLS = [
 /** Collects the optional shared fields, leaving absent ones absent so updates stay partial. */
 function fieldArgs(args) {
   const out = {};
-  for (const key of ["project", "milestone", "startDate", "dueDate", "state", "parentId"]) {
+  for (const key of ["project", "milestone", "priority", "startDate", "dueDate", "state", "parentId"]) {
     if (args[key] !== undefined) out[key] = args[key];
   }
   return out;
@@ -230,11 +236,15 @@ function formatDateRange(todo) {
   return null;
 }
 
+const PRIORITY_LABELS = ["No priority", "Urgent", "High", "Medium", "Low"];
+
 function formatTodo(todo) {
   const box = todo.state && todo.state.isCompleted ? "[x]" : "[ ]";
 
   const meta = [];
   if (todo.state) meta.push(todo.state.label);
+  // 0 is "unset", so it carries no information worth a line in the listing.
+  if (todo.priority) meta.push(PRIORITY_LABELS[todo.priority] ?? "priority " + todo.priority);
   if (todo.project) meta.push(todo.project);
   if (todo.milestone) meta.push(todo.milestone);
   const dates = formatDateRange(todo);
