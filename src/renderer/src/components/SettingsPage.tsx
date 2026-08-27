@@ -15,6 +15,22 @@ import type {
 } from "../../../shared/types.ts";
 import styles from "./SettingsPage.module.scss";
 
+/** Matches MAX_DURATION in electron/main/database.ts. */
+const MAX_DURATION_SECONDS = 7200;
+
+/**
+ * Combine a minutes field and a seconds field into total seconds.
+ * Returns null when either field is invalid, seconds are out of 0-59, or the total is not at least 1.
+ */
+function parseDuration(minutesInput: string, secondsInput: string): number | null {
+  const minutes = minutesInput.trim() === "" ? 0 : Number(minutesInput);
+  const seconds = secondsInput.trim() === "" ? 0 : Number(secondsInput);
+  if (!Number.isInteger(minutes) || !Number.isInteger(seconds)) return null;
+  if (minutes < 0 || seconds < 0 || seconds > 59) return null;
+  const total = minutes * 60 + seconds;
+  return total >= 1 ? total : null;
+}
+
 interface Props {
   settings: TimerSettings;
   onSave: (settings: TimerSettings) => Promise<void>;
@@ -32,9 +48,12 @@ export function SettingsPage({
   soundEnabled = true,
   onSoundEnabledChange,
 }: Props) {
-  const [work, setWork] = useState(String(settings.workDuration / 60));
-  const [shortBreak, setShortBreak] = useState(String(settings.shortBreakDuration / 60));
-  const [longBreak, setLongBreak] = useState(String(settings.longBreakDuration / 60));
+  const [work, setWork] = useState(String(Math.floor(settings.workDuration / 60)));
+  const [workSec, setWorkSec] = useState(String(settings.workDuration % 60));
+  const [shortBreak, setShortBreak] = useState(String(Math.floor(settings.shortBreakDuration / 60)));
+  const [shortBreakSec, setShortBreakSec] = useState(String(settings.shortBreakDuration % 60));
+  const [longBreak, setLongBreak] = useState(String(Math.floor(settings.longBreakDuration / 60)));
+  const [longBreakSec, setLongBreakSec] = useState(String(settings.longBreakDuration % 60));
   const [isSaving, setIsSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -390,11 +409,15 @@ export function SettingsPage({
   }, []);
 
   async function handleSave() {
-    const w = parseInt(work, 10);
-    const s = parseInt(shortBreak, 10);
-    const l = parseInt(longBreak, 10);
-    if (!w || !s || !l || w < 1 || s < 1 || l < 1) {
-      setError("All durations must be at least 1 minute.");
+    const w = parseDuration(work, workSec);
+    const s = parseDuration(shortBreak, shortBreakSec);
+    const l = parseDuration(longBreak, longBreakSec);
+    if (w === null || s === null || l === null) {
+      setError("All durations must be at least 1 second, and seconds must be between 0 and 59.");
+      return;
+    }
+    if (w > MAX_DURATION_SECONDS || s > MAX_DURATION_SECONDS || l > MAX_DURATION_SECONDS) {
+      setError("Durations cannot exceed 2 hours.");
       return;
     }
     setIsSaving(true);
@@ -402,9 +425,9 @@ export function SettingsPage({
     setSaved(false);
     try {
       await onSave({
-        workDuration: w * 60,
-        shortBreakDuration: s * 60,
-        longBreakDuration: l * 60,
+        workDuration: w,
+        shortBreakDuration: s,
+        longBreakDuration: l,
       });
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
@@ -421,46 +444,91 @@ export function SettingsPage({
 
       <div className={styles.field}>
         <label className={styles.label}>Work Duration</label>
-        <div className={styles.inputRow}>
-          <input
-            type="number"
-            min={1}
-            max={120}
-            className={styles.input}
-            value={work}
-            onChange={(e) => setWork(e.target.value)}
-          />
-          <span className={styles.unit}>min</span>
+        <div className={`${styles.inputRow} ${styles.durationRow}`}>
+          <div className={styles.durationPart}>
+            <input
+              type="number"
+              min={0}
+              max={120}
+              className={styles.input}
+              value={work}
+              onChange={(e) => setWork(e.target.value)}
+              aria-label="Work Duration minutes"
+            />
+            <span className={styles.unit}>min</span>
+          </div>
+          <div className={styles.durationPart}>
+            <input
+              type="number"
+              min={0}
+              max={59}
+              className={`${styles.input} ${styles.secInput}`}
+              value={workSec}
+              onChange={(e) => setWorkSec(e.target.value)}
+              aria-label="Work Duration seconds"
+            />
+            <span className={styles.unit}>sec</span>
+          </div>
         </div>
       </div>
 
       <div className={styles.field}>
         <label className={styles.label}>Short Break</label>
-        <div className={styles.inputRow}>
-          <input
-            type="number"
-            min={1}
-            max={60}
-            className={styles.input}
-            value={shortBreak}
-            onChange={(e) => setShortBreak(e.target.value)}
-          />
-          <span className={styles.unit}>min</span>
+        <div className={`${styles.inputRow} ${styles.durationRow}`}>
+          <div className={styles.durationPart}>
+            <input
+              type="number"
+              min={0}
+              max={120}
+              className={styles.input}
+              value={shortBreak}
+              onChange={(e) => setShortBreak(e.target.value)}
+              aria-label="Short Break minutes"
+            />
+            <span className={styles.unit}>min</span>
+          </div>
+          <div className={styles.durationPart}>
+            <input
+              type="number"
+              min={0}
+              max={59}
+              className={`${styles.input} ${styles.secInput}`}
+              value={shortBreakSec}
+              onChange={(e) => setShortBreakSec(e.target.value)}
+              aria-label="Short Break seconds"
+            />
+            <span className={styles.unit}>sec</span>
+          </div>
         </div>
       </div>
 
       <div className={styles.field}>
         <label className={styles.label}>Long Break</label>
-        <div className={styles.inputRow}>
-          <input
-            type="number"
-            min={1}
-            max={120}
-            className={styles.input}
-            value={longBreak}
-            onChange={(e) => setLongBreak(e.target.value)}
-          />
-          <span className={styles.unit}>min</span>
+        <div className={`${styles.inputRow} ${styles.durationRow}`}>
+          <div className={styles.durationPart}>
+            <input
+              type="number"
+              min={0}
+              max={120}
+              className={styles.input}
+              value={longBreak}
+              onChange={(e) => setLongBreak(e.target.value)}
+              aria-label="Long Break minutes"
+            />
+            <span className={styles.unit}>min</span>
+          </div>
+          <div className={styles.durationPart}>
+            <input
+              type="number"
+              min={0}
+              max={59}
+              className={`${styles.input} ${styles.secInput}`}
+              value={longBreakSec}
+              onChange={(e) => setLongBreakSec(e.target.value)}
+              aria-label="Long Break seconds"
+            />
+            <span className={styles.unit}>sec</span>
+          </div>
         </div>
       </div>
 

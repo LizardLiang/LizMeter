@@ -66,7 +66,7 @@ const DEFAULT_SETTINGS: TimerSettings = {
   longBreakDuration: 900,
 };
 
-const MIN_DURATION = 60;
+const MIN_DURATION = 1;
 const MAX_DURATION = 7200;
 const MAX_TITLE_LENGTH = 5000;
 const MAX_NVIM_FIELD_LENGTH = 1000;

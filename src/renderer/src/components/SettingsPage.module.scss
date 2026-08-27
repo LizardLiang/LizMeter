@@ -51,6 +51,20 @@
   }
 }
 
+.durationRow {
+  gap: 16px;
+}
+
+.durationPart {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.secInput {
+  width: 64px;
+}
+
 .unit {
   font-size: 13px;
   color: #a9b1d6;

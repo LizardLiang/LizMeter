@@ -215,8 +215,16 @@ describe("TC-312: Input validation — saveSession rejects invalid timerType", (
 });
 
 describe("TC-313: Input validation — saveSettings rejects out-of-range durations", () => {
-  it("throws for duration below minimum (60)", () => {
+  it("throws for duration below minimum (1)", () => {
     expect(() => saveSettings({ workDuration: 0, shortBreakDuration: 300, longBreakDuration: 900 })).toThrow();
+  });
+
+  it("accepts sub-minute durations", () => {
+    saveSettings({ workDuration: 30, shortBreakDuration: 5, longBreakDuration: 90 });
+    const settings = getSettings();
+    expect(settings.workDuration).toBe(30);
+    expect(settings.shortBreakDuration).toBe(5);
+    expect(settings.longBreakDuration).toBe(90);
   });
 
   it("throws for duration above maximum (7200)", () => {
