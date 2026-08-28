@@ -1,16 +1,17 @@
 // electron/main/attachment-store.ts
-// The filesystem half of todo attachments: writing content-addressed blobs into
-// userData/attachments, and collecting them once nothing references them any more.
+// The filesystem half of todo attachments: writing content-addressed blobs into the
+// `attachments` folder of the current data directory, and collecting them once nothing
+// references them any more.
 //
 // No `ipcMain` here — the IPC surface lives in ipc-handlers.ts. URL shaping and the
 // traversal guard live in attachment-url.ts, which stays free of Electron so it can be tested.
 
-import { app } from "electron";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { ATTACHMENT_MAX_BYTES } from "../../src/shared/types.ts";
 import { attachmentFileName, extFromFileName } from "./attachment-url.ts";
+import { ATTACHMENTS_DIR_NAME, getDataDir } from "./data-location.ts";
 import { countAttachmentsBySha, listAllAttachmentShas } from "./database.ts";
 
 /** Extensions refused outright. An SVG served from a privileged scheme is a needless surface. */
@@ -25,13 +26,14 @@ export interface StoredBlob {
 }
 
 /**
- * `userData/attachments`, created on first use.
+ * The `attachments` folder inside the current data directory, created on first use.
  *
- * Mirrors `getAvatarsDir()` in ipc-handlers.ts. Never write into the userData root —
- * Chromium reserves sibling folders there.
+ * Reads the data directory on every call rather than caching it, so the folder follows the user
+ * when they move their data. Never write into the data root itself — when the data still sits in
+ * userData, Chromium reserves sibling folders there.
  */
 export function getAttachmentsDir(): string {
-  const dir = path.join(app.getPath("userData"), "attachments");
+  const dir = path.join(getDataDir(), ATTACHMENTS_DIR_NAME);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }

@@ -12,6 +12,7 @@ import type {
   CreateTodoLabelInput,
   CreateTodoProjectInput,
   CreateTodoStateInput,
+  DataLocationMoveInput,
   ImportProgress,
   IntegrityCheckResult,
   IntegrityProgress,
@@ -149,6 +150,12 @@ contextBridge.exposeInMainWorld("electronAPI", {
     log: (input: WorklogLogInput) => ipcRenderer.invoke("worklog:log", input),
     markLogged: (input: { sessionIds: string[]; worklogId: string }) =>
       ipcRenderer.invoke("worklog:mark-logged", input),
+  },
+  dataLocation: {
+    get: () => ipcRenderer.invoke("data-location:get"),
+    choose: () => ipcRenderer.invoke("data-location:choose"),
+    move: (input: DataLocationMoveInput) => ipcRenderer.invoke("data-location:move", input),
+    reveal: () => ipcRenderer.invoke("data-location:reveal"),
   },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),

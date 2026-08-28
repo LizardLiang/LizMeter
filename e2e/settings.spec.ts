@@ -148,3 +148,18 @@ test("Settings nav button has aria-current=page when active", async () => {
   const settingsBtn = window.locator('nav[aria-label="Main navigation"] button[aria-label="Settings"]');
   await expect(settingsBtn).toHaveAttribute("aria-current", "page");
 });
+
+test("Settings page shows the Data Location section with the current folder", async () => {
+  const window = await getWindow(app);
+  await navigateTo(window, "Settings");
+
+  const heading = window.locator("h2", { hasText: "Data Location" });
+  await heading.scrollIntoViewIfNeeded();
+  await expect(heading).toBeVisible();
+
+  // The default install has never moved its data, so the folder reads as the default one.
+  await expect(window.locator("label", { hasText: "Current Folder" })).toContainText("(default)");
+  await expect(window.locator("button", { hasText: "Change Folder" })).toBeVisible();
+  // Nothing to reset when the data still sits in the default folder.
+  await expect(window.locator("button", { hasText: "Reset to Default" })).toHaveCount(0);
+});

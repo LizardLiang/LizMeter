@@ -14,6 +14,9 @@ import type {
   CreateTodoLabelInput,
   CreateTodoProjectInput,
   CreateTodoStateInput,
+  DataLocationInfo,
+  DataLocationMoveInput,
+  DataLocationMoveResult,
   IssueProviderStatus,
   IssuesListInput,
   IssuesSetTokenInput,
@@ -45,11 +48,13 @@ import {
   storeBuffer,
 } from "./attachment-store.ts";
 import { extFromFileName } from "./attachment-url.ts";
+import { getDataDirStatus, moveDataTo } from "./data-location.ts";
 import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widget-window.ts";
 import { getMainWindow } from "./index.ts";
 import {
   assignTag,
   clearCompletedTodos,
+  closeDatabase,
   createTag,
   createTodo,
   createTodoAttachment,
@@ -65,10 +70,12 @@ import {
   deleteTodoProject,
   deleteTodoState,
   getClaudeCodeDataForSession,
+  getDb,
   getTodoAttachment,
   getSessionById,
   getSettingValue,
   getSettings,
+  initDatabase,
   listNvimActivityByDate,
   listSessions,
   listTags,
@@ -633,6 +640,63 @@ export function registerIpcHandlers(): void {
 
   ipcMain.handle("claude-tracker:get-for-session", (_event, input: { sessionId: string }) => {
     return getClaudeCodeDataForSession(input.sessionId);
+  });
+
+  // --- Data location handlers ---
+
+  ipcMain.handle("data-location:get", (): DataLocationInfo => {
+    return getDataDirStatus();
+  });
+
+  ipcMain.handle("data-location:choose", async (): Promise<string | null> => {
+    const result = await dialog.showOpenDialog({
+      title: "Choose where LizMeter keeps its data",
+      defaultPath: getDataDirStatus().dataDir,
+      properties: ["openDirectory", "createDirectory"],
+      buttonLabel: "Use This Folder",
+    });
+    if (result.canceled || result.filePaths.length === 0) return null;
+    return result.filePaths[0]!;
+  });
+
+  ipcMain.handle(
+    "data-location:move",
+    (_event, input: DataLocationMoveInput): DataLocationMoveResult => {
+      // Copying an open SQLite file can capture a half-written page, so fold the WAL back into
+      // the main file and drop the connection before anything is read.
+      try {
+        getDb().pragma("wal_checkpoint(TRUNCATE)");
+      } catch (err) {
+        console.warn("[data-location] checkpoint before move failed:", err);
+      }
+      closeDatabase();
+
+      const result = moveDataTo(input.targetDir, { useExisting: input.useExisting === true });
+
+      if (!result.ok) {
+        // Nothing moved, so reopen at the unchanged location -- a refused move must leave the app
+        // working, not wedged with a closed database.
+        initDatabase();
+        return result;
+      }
+
+      // Relaunch rather than reopen: the protocol handler, the widget window and the renderer all
+      // hold paths resolved at startup. Deferred so this reply reaches the renderer first.
+      // `app.quit()` rather than `app.exit()` so `will-quit` still tears down the named pipe --
+      // the relaunched instance cannot claim it otherwise.
+      setTimeout(() => {
+        app.relaunch();
+        app.quit();
+      }, 250);
+
+      return result;
+    },
+  );
+
+  ipcMain.handle("data-location:reveal", async (): Promise<void> => {
+    const { dataDir } = getDataDirStatus();
+    if (!fs.existsSync(dataDir)) return;
+    await shell.openPath(dataDir);
   });
 
   ipcMain.handle("shell:open-external", (_event, url: string) => {

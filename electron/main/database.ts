@@ -2,7 +2,6 @@
 // SQLite database module for the main process
 // All operations are synchronous (better-sqlite3 API)
 
-import { app } from "electron";
 import path from "node:path";
 import Database from "better-sqlite3";
 import type {
@@ -52,6 +51,7 @@ import {
   TODO_PRIORITY_LABELS,
 } from "../../src/shared/types.ts";
 import { attachmentKindForExt, attachmentUrl, extFromFileName } from "./attachment-url.ts";
+import { DB_FILE_NAME, getDataDir } from "./data-location.ts";
 import type { InternalTrackRecord } from "./music/internal-types.ts";
 import { toRendererTrack } from "./music/internal-types.ts";
 
@@ -511,7 +511,7 @@ export function migrateTodosToStatesNow(): void {
 }
 
 function getDefaultDbPath(): string {
-  return path.join(app.getPath("userData"), "lizmeter.db");
+  return path.join(getDataDir(), DB_FILE_NAME);
 }
 
 export function closeDatabase(): void {
@@ -2221,6 +2221,7 @@ interface TodoRow {
   parent_id: number | null;
   parent_title: string | null;
   child_count: number;
+  completed_child_count: number;
   created_at: string;
   completed_at: string | null;
   state_id: number;
@@ -2237,6 +2238,9 @@ const TODO_SELECT = `
          t.source, t.source_label, t.created_at, t.completed_at, t.parent_id,
          p.title AS parent_title,
          (SELECT COUNT(*) FROM todos c WHERE c.parent_id = t.id) AS child_count,
+         (SELECT COUNT(*) FROM todos c
+            INNER JOIN todo_states cs ON cs.id = c.state_id
+            WHERE c.parent_id = t.id AND cs.is_completed = 1) AS completed_child_count,
          s.id AS state_id, s.label AS state_label, s.color AS state_color,
          s.position AS state_position, s.is_completed AS state_is_completed,
          s.is_default AS state_is_default, s.created_at AS state_created_at,
@@ -2287,6 +2291,9 @@ function rowToTodo(row: TodoRow): Todo {
     parentId: row.parent_id,
     parentTitle: row.parent_title,
     childCount: row.child_count,
+    // Coalesced like `priority`: the sql.js shim hands back null rather than 0 for a
+    // correlated subquery that matches no rows.
+    completedChildCount: row.completed_child_count ?? 0,
     createdAt: row.created_at,
     completedAt: row.completed_at,
   };

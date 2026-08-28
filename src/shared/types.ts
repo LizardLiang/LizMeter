@@ -266,6 +266,8 @@ export interface Todo {
   parentTitle: string | null;
   /** How many todos name this one as their parent. Counts direct children only, not the whole subtree. */
   childCount: number;
+  /** How many of those direct children sit in a completed state. Drives the row's progress ring. */
+  completedChildCount: number;
   createdAt: string;
   completedAt: string | null;
 }
@@ -738,6 +740,38 @@ export type PlaylistAddTrackInput =
 export type RepeatMode = "off" | "queue" | "one";
 export type MusicPlaybackState = "playing" | "paused" | "buffering" | "stopped";
 
+// --- Data location ---
+
+/** Where LizMeter keeps the database and attachments, and whether that folder is reachable. */
+export interface DataLocationInfo {
+  /** The folder holding `lizmeter.db` and `attachments/` right now. */
+  dataDir: string;
+  /** Electron's per-user folder — where the data lives unless the user moved it. */
+  defaultDataDir: string;
+  /** True when the user moved the data away from `defaultDataDir`. */
+  isCustom: boolean;
+  /** False when `dataDir` does not exist, for instance on a drive that is not connected. */
+  available: boolean;
+}
+
+/** Why a move was refused. `TARGET_HAS_DATA` is the one the UI can recover from, by retrying with `useExisting`. */
+export type DataLocationMoveErrorCode =
+  | "SAME_DIR"
+  | "NESTED"
+  | "NOT_WRITABLE"
+  | "TARGET_HAS_DATA"
+  | "COPY_FAILED";
+
+export type DataLocationMoveResult =
+  | { ok: true; dataDir: string; }
+  | { ok: false; code: DataLocationMoveErrorCode; message: string; };
+
+export interface DataLocationMoveInput {
+  targetDir: string;
+  /** Adopt a database already sitting in the target instead of copying over it. */
+  useExisting?: boolean;
+}
+
 // --- Electron API (exposed via contextBridge) ---
 
 export interface ElectronAPI {
@@ -853,6 +887,18 @@ export interface ElectronAPI {
   worklog: {
     log: (input: WorklogLogInput) => Promise<WorklogLogResult>;
     markLogged: (input: { sessionIds: string[]; worklogId: string; }) => Promise<void>;
+  };
+  dataLocation: {
+    get: () => Promise<DataLocationInfo>;
+    /** Opens the OS folder picker. Resolves with `null` when the user cancels. */
+    choose: () => Promise<string | null>;
+    /**
+     * Copies the database and attachments into the chosen folder, records it, then relaunches the
+     * app. The old copy is left behind on purpose — deleting it is the user's call.
+     */
+    move: (input: DataLocationMoveInput) => Promise<DataLocationMoveResult>;
+    /** Shows the current data folder in the OS file manager. */
+    reveal: () => Promise<void>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

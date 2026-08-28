@@ -4,6 +4,8 @@ import type {
   BinaryInfo,
   BinaryStatus,
   CacheStats,
+  DataLocationInfo,
+  DataLocationMoveErrorCode,
   IssueProviderStatus,
   JiraAuthType,
   JiraProviderStatus,
@@ -129,6 +131,13 @@ export function SettingsPage({
   const [cacheClearing, setCacheClearing] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
 
+  // Data location state
+  const [dataLocation, setDataLocation] = useState<DataLocationInfo | null>(null);
+  const [dataMoving, setDataMoving] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
+  /** Set when the chosen folder already holds a database, so the user can adopt it instead. */
+  const [pendingAdoptDir, setPendingAdoptDir] = useState<string | null>(null);
+
   useEffect(() => {
     void window.electronAPI.issues.providerStatus().then(setTokenStatus);
     void window.electronAPI.linear.providerStatus().then(setLinearStatus);
@@ -144,6 +153,7 @@ export function SettingsPage({
     }).catch(() => {});
     void window.electronAPI.music.binaryStatus().then(setBinaryStatus).catch(() => {});
     void window.electronAPI.music.binaryInfo().then(setBinaryInfo).catch(() => {});
+    void window.electronAPI.dataLocation.get().then(setDataLocation).catch(() => {});
   }, []);
 
   async function handleSaveToken() {
@@ -436,6 +446,48 @@ export function SettingsPage({
     } finally {
       setIsSaving(false);
     }
+  }
+
+  /**
+   * Runs the move and reports it. A successful move relaunches the app from the main process, so
+   * the "Moving…" state is never cleared on that path — the window is about to go away.
+   */
+  async function runDataMove(targetDir: string, useExisting: boolean) {
+    setDataMoving(true);
+    setDataError(null);
+    try {
+      const result = await window.electronAPI.dataLocation.move({ targetDir, useExisting });
+      if (result.ok) {
+        setPendingAdoptDir(null);
+        return;
+      }
+      if (result.code === ("TARGET_HAS_DATA" satisfies DataLocationMoveErrorCode)) {
+        setPendingAdoptDir(targetDir);
+      } else {
+        setPendingAdoptDir(null);
+        setDataError(result.message);
+      }
+      setDataMoving(false);
+    } catch (err) {
+      setPendingAdoptDir(null);
+      setDataError(err instanceof Error ? err.message : "Failed to move the data folder.");
+      setDataMoving(false);
+    }
+  }
+
+  async function handleChooseDataFolder() {
+    setDataError(null);
+    setPendingAdoptDir(null);
+    const target = await window.electronAPI.dataLocation.choose();
+    if (target === null) return;
+    await runDataMove(target, false);
+  }
+
+  async function handleResetDataFolder() {
+    if (dataLocation === null) return;
+    setDataError(null);
+    setPendingAdoptDir(null);
+    await runDataMove(dataLocation.defaultDataDir, false);
   }
 
   return (
@@ -1126,6 +1178,87 @@ export function SettingsPage({
             {binaryInfo.storagePath}
           </p>
         </div>
+      )}
+
+      {/* --- Data Location Section --- */}
+      <div className={styles.sectionDivider} />
+      <h2 className={styles.sectionHeading}>Data Location</h2>
+
+      {dataLocation !== null && (
+        <>
+          <div className={styles.field}>
+            <label className={styles.label}>
+              Current Folder {dataLocation.isCustom ? "(custom)" : "(default)"}
+            </label>
+            <p className={styles.tokenHint} style={{ margin: "6px 0 0", wordBreak: "break-all" }}>
+              {dataLocation.dataDir}
+            </p>
+            {!dataLocation.available && <div className={styles.errorMsg}>This folder is not reachable right now.</div>}
+          </div>
+
+          <p className={styles.tokenHint}>
+            LizMeter keeps lizmeter.db and the attachments folder here. Choosing a new folder copies both, then restarts
+            the app. The old copy is left where it is — delete it yourself once you have checked the move. Avatars,
+            saved tokens and the music cache do not move.
+          </p>
+
+          {pendingAdoptDir !== null
+            ? (
+              <div className={styles.tokenForm}>
+                <div className={styles.errorMsg}>That folder already holds a LizMeter database.</div>
+                <p className={styles.tokenHint}>
+                  Open the data already in{" "}
+                  {pendingAdoptDir}, or cancel and pick an empty folder. Nothing is copied either way, and the data in
+                  the current folder is left untouched.
+                </p>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button
+                    className={styles.saveBtn}
+                    onClick={() => void runDataMove(pendingAdoptDir, true)}
+                    disabled={dataMoving}
+                  >
+                    {dataMoving ? "Switching…" : "Use the Data There"}
+                  </button>
+                  <button
+                    className={styles.testTokenBtn}
+                    onClick={() => setPendingAdoptDir(null)}
+                    disabled={dataMoving}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )
+            : (
+              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                <button
+                  className={styles.saveBtn}
+                  onClick={() => void handleChooseDataFolder()}
+                  disabled={dataMoving}
+                >
+                  {dataMoving ? "Moving…" : "Change Folder…"}
+                </button>
+                <button
+                  className={styles.testTokenBtn}
+                  onClick={() => void window.electronAPI.dataLocation.reveal()}
+                  disabled={!dataLocation.available}
+                >
+                  Open Folder
+                </button>
+                {dataLocation.isCustom && (
+                  <button
+                    className={styles.removeTokenBtn}
+                    onClick={() => void handleResetDataFolder()}
+                    disabled={dataMoving}
+                  >
+                    Reset to Default
+                  </button>
+                )}
+              </div>
+            )}
+
+          {dataError !== null && <div className={styles.errorMsg}>{dataError}</div>}
+        </>
       )}
     </div>
   );
