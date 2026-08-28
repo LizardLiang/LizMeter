@@ -1,0 +1,101 @@
+// electron/main/sync/migration.ts
+// Milestone 6: the one-time steps that turn an existing populated database into device 0 of a
+// synced set (FR-015, FR-016), and the initial publication of its existing rows once sync is
+// actually turned on for the first time.
+
+import type Database from "better-sqlite3";
+import fs from "node:fs";
+import { getDeviceId, getOrAssignDeviceNumber, registerDevice } from "./device-identity.ts";
+import { allColumnsFor, encodeRowFields } from "./row-codec.ts";
+import { newUuid, recordUpsert, setSyncEnabled } from "./sync-writer.ts";
+
+type DbHandle = Database.Database;
+
+const SYNC_ROW_TABLES = ["todos", "tags", "todo_labels", "todo_states", "todo_projects"] as const;
+
+/**
+ * Timestamped backup before the one-way step, matching the convention already used elsewhere in
+ * the data folder (`.pre-nesting-*`, `.pre-states-*`). Copies the db file plus its `-wal`/`-shm`
+ * siblings, when present, exactly as `data-location.ts`'s own move does.
+ */
+export function backupBeforeSyncMigration(dbPath: string): string {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = `${dbPath}.pre-sync-${stamp}.bak`;
+  fs.copyFileSync(dbPath, backupPath);
+  for (const suffix of ["-wal", "-shm"]) {
+    const side = `${dbPath}${suffix}`;
+    if (fs.existsSync(side)) fs.copyFileSync(side, `${backupPath}${suffix}`);
+  }
+  return backupPath;
+}
+
+/** Adds a uuid to every row of every synced table that predates this column. */
+export function backfillUuids(database: DbHandle): void {
+  for (const table of SYNC_ROW_TABLES) {
+    const rows = database.prepare(`SELECT id FROM ${table} WHERE uuid IS NULL`).all() as Array<{ id: number }>;
+    if (rows.length === 0) continue;
+    const update = database.prepare(`UPDATE ${table} SET uuid = ? WHERE id = ?`);
+    const run = database.transaction(() => {
+      for (const row of rows) update.run(newUuid(), row.id);
+    });
+    run();
+  }
+}
+
+export interface SyncMigrationResult {
+  backupPath: string | null;
+  deviceNumber: number;
+}
+
+/**
+ * Runs once, when the user turns on sync for the first time on a machine that already has data
+ * (FR-015, FR-016). Takes a backup, backfills every missing uuid, and registers this machine as
+ * device 0 -- its existing ids 1..N already satisfy `0 * stride + n`, so nothing is renumbered.
+ */
+export function runSyncMigration(database: DbHandle, dbPath: string | undefined): SyncMigrationResult {
+  const backupPath = dbPath !== undefined && dbPath !== ":memory:" && fs.existsSync(dbPath)
+    ? backupBeforeSyncMigration(dbPath)
+    : null;
+
+  backfillUuids(database);
+
+  const deviceNumber = getOrAssignDeviceNumber(database);
+  registerDevice(database, getDeviceId(), deviceNumber);
+
+  return { backupPath, deviceNumber };
+}
+
+/**
+ * Publishes every existing row across the synced tables as one initial `upsert` oplog entry
+ * each -- the "first machine publishes its existing data" step (Milestone 6 item 2), distinct
+ * from `moveDataTo`'s file copy, which moves the SQLite file itself.
+ */
+export function publishExistingData(database: DbHandle): void {
+  for (const table of SYNC_ROW_TABLES) {
+    const columns = allColumnsFor(database, table);
+    const rows = database.prepare(`SELECT * FROM ${table}`).all() as Array<Record<string, unknown>>;
+
+    for (const row of rows) {
+      const rowUuid = row["uuid"] as string | null;
+      if (!rowUuid) continue;
+
+      const fields = encodeRowFields(database, table, row, columns);
+      // A todo's numeric id is globally meaningful (FR-004, FR-005) and must be replicated
+      // verbatim -- every other synced table's local id is device-specific and stays behind.
+      if (table === "todos") fields["id"] = row["id"] as number;
+
+      recordUpsert(database, table, rowUuid, fields);
+    }
+  }
+}
+
+/**
+ * Turns sync on for the first time on this (already-populated) machine: migrates identity,
+ * flips the enabled flag, then publishes the existing rows so peers have something to merge.
+ */
+export function enableSyncOnExistingMachine(database: DbHandle, dbPath: string | undefined): SyncMigrationResult {
+  const result = runSyncMigration(database, dbPath);
+  setSyncEnabled(database, true);
+  publishExistingData(database);
+  return result;
+}

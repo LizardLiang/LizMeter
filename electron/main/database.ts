@@ -53,6 +53,16 @@ import {
 import { attachmentKindForExt, attachmentUrl, extFromFileName } from "./attachment-url.ts";
 import { DB_FILE_NAME, getDataDir } from "./data-location.ts";
 import type { InternalTrackRecord } from "./music/internal-types.ts";
+import { attachmentRowKey } from "./sync/oplog.ts";
+import {
+  allocateTodoIdIfSyncEnabled,
+  ensureUuid,
+  newUuid,
+  recordDelete,
+  recordLink,
+  recordReorder,
+  recordUpsert,
+} from "./sync/sync-writer.ts";
 import { toRendererTrack } from "./music/internal-types.ts";
 
 let db: Database.Database | null = null;
@@ -285,6 +295,79 @@ export function initDatabase(dbPath?: string): void {
     -- column they name is created by the statement immediately preceding them.
     CREATE INDEX IF NOT EXISTS idx_todo_attachments_todo ON todo_attachments(todo_id);
     CREATE INDEX IF NOT EXISTS idx_todo_attachments_sha ON todo_attachments(sha256);
+
+    -- --- Multi-writer sync (electron/main/sync/) ---
+    -- All machine-local: never written to the shared folder themselves, they are this device's
+    -- own bookkeeping about the shared folder's contents.
+
+    -- Every device this one has ever seen, its permanent block number, and how far this device
+    -- has read into that peer's oplog file. The read cursor is an efficiency optimization only;
+    -- correctness never depends on it because oplog apply is idempotent (sync_applied_ops below).
+    CREATE TABLE IF NOT EXISTS sync_devices (
+      device_id         TEXT PRIMARY KEY,
+      device_number     INTEGER NOT NULL UNIQUE,
+      first_seen_at     TEXT NOT NULL,
+      last_seen_at      TEXT NOT NULL,
+      last_applied_seq  INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- Every oplog entry's opId, once applied. A re-read of the same file segment (a watcher
+    -- double-fire, or a restart) is a guaranteed no-op, not a correctness hazard.
+    CREATE TABLE IF NOT EXISTS sync_applied_ops (
+      op_id       TEXT PRIMARY KEY,
+      device_id   TEXT NOT NULL,
+      applied_at  TEXT NOT NULL
+    );
+
+    -- Name-unique convergence (FR-010): the losing row's uuid redirects to the winner's. Every
+    -- reference to a uuid is resolved through this table first.
+    CREATE TABLE IF NOT EXISTS sync_id_aliases (
+      table_name  TEXT NOT NULL,
+      old_uuid    TEXT NOT NULL,
+      new_uuid    TEXT NOT NULL,
+      created_at  TEXT NOT NULL,
+      PRIMARY KEY (table_name, old_uuid)
+    );
+
+    -- User-visible automatic-resolution log (FR-009, FR-031, FR-041): a discard, a clock-drift
+    -- clamp, a placeholder block, a stray file, or a stale-machine rebuild.
+    CREATE TABLE IF NOT EXISTS sync_notices (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind        TEXT NOT NULL,
+      message     TEXT NOT NULL,
+      detail      TEXT,
+      created_at  TEXT NOT NULL,
+      dismissed   INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_sync_notices_created_at ON sync_notices(created_at DESC);
+
+    -- Per-(row, field) high-water HLC mark. Field-level LWW (FR-008) needs this across merge
+    -- passes, not just within one: without it, a late-arriving older edit from a device that
+    -- was offline could overwrite a newer value applied in an earlier pass, since that earlier
+    -- winning entry is no longer part of the current batch being compared.
+    CREATE TABLE IF NOT EXISTS sync_field_clocks (
+      table_name        TEXT NOT NULL,
+      row_uuid          TEXT NOT NULL,
+      field_name        TEXT NOT NULL,
+      hlc_physical_ms   INTEGER NOT NULL,
+      hlc_counter       INTEGER NOT NULL,
+      hlc_device_number INTEGER NOT NULL,
+      PRIMARY KEY (table_name, row_uuid, field_name)
+    );
+
+    -- Delete-always-wins (FR-007), tracked independently of the oplog file itself: this is what
+    -- actually stops a late-arriving edit from resurrecting a deleted row once the oplog file
+    -- has been compacted past the delete entry. Trimmed at the same 90-day boundary (Milestone 7).
+    CREATE TABLE IF NOT EXISTS sync_tombstones (
+      table_name        TEXT NOT NULL,
+      row_uuid          TEXT NOT NULL,
+      deleted_at        TEXT NOT NULL,
+      hlc_physical_ms   INTEGER NOT NULL,
+      hlc_counter       INTEGER NOT NULL,
+      hlc_device_number INTEGER NOT NULL,
+      PRIMARY KEY (table_name, row_uuid)
+    );
   `);
 
   // Idempotent migration: add issue columns if they don't exist yet
@@ -307,6 +390,36 @@ export function initDatabase(dbPath?: string): void {
 
   seedTodoStates(db);
   migrateTodosToStates(db);
+  migrateSyncColumns(db);
+}
+
+/** Tables that carry a permanent uuid for multi-writer sync (Milestone 1). */
+const SYNC_UUID_TABLES = ["todos", "tags", "todo_labels", "todo_states", "todo_projects"] as const;
+
+/**
+ * Idempotent migration, mirroring the `PRAGMA table_info` guard pattern already used above:
+ * adds the nullable `uuid` column (plus its unique index) to every synced table, and the
+ * `sync_order` fractional-ordering column to the two tables whose local order also syncs
+ * (`todo_labels` is excluded on purpose -- it has no position column and is always ordered
+ * alphabetically, so there is nothing to converge).
+ */
+function migrateSyncColumns(database: DbHandle): void {
+  for (const table of SYNC_UUID_TABLES) {
+    const cols = (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+      .map((c) => c.name);
+    if (!cols.includes("uuid")) {
+      database.exec(`ALTER TABLE ${table} ADD COLUMN uuid TEXT`);
+    }
+    database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_${table}_uuid ON ${table}(uuid) WHERE uuid IS NOT NULL`);
+  }
+
+  for (const table of ["todo_states", "todo_projects"] as const) {
+    const cols = (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>)
+      .map((c) => c.name);
+    if (!cols.includes("sync_order")) {
+      database.exec(`ALTER TABLE ${table} ADD COLUMN sync_order TEXT`);
+    }
+  }
 }
 
 type DbHandle = ReturnType<typeof getDb>;
@@ -533,6 +646,20 @@ export function getDb(): Database.Database {
   return db;
 }
 
+/**
+ * Test-only: makes `handle` the active connection without opening, closing, or schema-checking
+ * anything. Lets a test hold two independently-initialized databases (e.g. simulating two sync
+ * devices sharing one folder, see `src/test/two-device-harness.ts`) and switch which one every
+ * exported function in this module operates against.
+ *
+ * Passing `null` detaches the current handle without closing it -- needed right before calling
+ * `initDatabase()` again to create a *second* independent database, since `initDatabase()`
+ * unconditionally closes whatever handle it currently holds.
+ */
+export function setActiveDatabaseForTesting(handle: Database.Database | null): void {
+  db = handle;
+}
+
 function validateTimerType(timerType: unknown): asserts timerType is TimerType {
   if (!VALID_TIMER_TYPES.includes(timerType as TimerType)) {
     throw new Error(
@@ -636,6 +763,19 @@ export function saveSession(input: SaveSessionInput): Session {
     issueProvider,
     issueId,
   );
+
+  recordUpsert(database, "sessions", id, {
+    title,
+    timer_type: input.timerType,
+    planned_duration_seconds: input.plannedDurationSeconds,
+    actual_duration_seconds: input.actualDurationSeconds,
+    completed_at: completedAt,
+    issue_number: input.issueNumber ?? null,
+    issue_title: input.issueTitle ?? null,
+    issue_url: input.issueUrl ?? null,
+    issue_provider: issueProvider,
+    issue_id: issueId,
+  });
 
   return buildSessionResult(id, title, input, completedAt);
 }
@@ -797,6 +937,20 @@ export function saveSessionWithTracking(input: SaveSessionWithTrackingInput): Se
       issueId,
     );
 
+    recordUpsert(database, "sessions", id, {
+      title,
+      timer_type: input.timerType,
+      planned_duration_seconds: input.plannedDurationSeconds,
+      actual_duration_seconds: input.actualDurationSeconds,
+      completed_at: completedAt,
+      issue_number: input.issueNumber ?? null,
+      issue_title: input.issueTitle ?? null,
+      issue_url: input.issueUrl ?? null,
+      issue_provider: issueProvider,
+      issue_id: issueId,
+    });
+
+    // Claude Code tracking data is machine-local (FR-003) and never syncs.
     if (input.claudeCodeSessions && input.claudeCodeSessions.length > 0) {
       for (const ccSession of input.claudeCodeSessions) {
         const ccId = crypto.randomUUID();
@@ -916,6 +1070,7 @@ export function deleteSession(id: string): void {
   const database = getDb();
   // No-op if ID doesn't exist — delete is safe to call with any ID
   database.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+  recordDelete(database, "sessions", id);
 }
 
 export function getSessionById(id: string): Session | null {
@@ -961,6 +1116,7 @@ export function updateSessionDuration(id: string, actualDurationSeconds: number)
   database
     .prepare("UPDATE sessions SET actual_duration_seconds = ? WHERE id = ?")
     .run(actualDurationSeconds, id);
+  recordUpsert(database, "sessions", id, { actual_duration_seconds: actualDurationSeconds });
   const updated = getSessionById(id);
   if (!updated) throw new Error(`Session not found after update: ${id}`);
   return updated;
@@ -976,10 +1132,12 @@ export function updateWorklogStatus(
     database
       .prepare("UPDATE sessions SET worklog_status = ?, worklog_id = ? WHERE id = ?")
       .run(status, worklogId, sessionId);
+    recordUpsert(database, "sessions", sessionId, { worklog_status: status, worklog_id: worklogId });
   } else {
     database
       .prepare("UPDATE sessions SET worklog_status = ? WHERE id = ?")
       .run(status, sessionId);
+    recordUpsert(database, "sessions", sessionId, { worklog_status: status });
   }
 }
 
@@ -1047,9 +1205,11 @@ export function createTag(input: CreateTagInput): Tag {
   const name = validateTagName(input.name);
   const color = validateTagColor(input.color);
   const createdAt = new Date().toISOString();
+  const uuid = newUuid();
   database
-    .prepare("INSERT INTO tags (name, color, created_at) VALUES (?, ?, ?)")
-    .run(name, color, createdAt);
+    .prepare("INSERT INTO tags (name, color, created_at, uuid) VALUES (?, ?, ?, ?)")
+    .run(name, color, createdAt, uuid);
+  recordUpsert(database, "tags", uuid, { name, color, created_at: createdAt });
   const row = database
     .prepare("SELECT id, name, color, created_at FROM tags WHERE name = ? COLLATE NOCASE")
     .get(name) as TagRow;
@@ -1074,6 +1234,7 @@ export function updateTag(input: UpdateTagInput): Tag {
   if (result.changes === 0) {
     throw new Error(`Tag with id ${input.id} not found`);
   }
+  recordUpsert(database, "tags", ensureUuid(database, "tags", input.id), { name, color });
   const row = database
     .prepare("SELECT id, name, color, created_at FROM tags WHERE id = ?")
     .get(input.id) as TagRow;
@@ -1082,7 +1243,9 @@ export function updateTag(input: UpdateTagInput): Tag {
 
 export function deleteTag(id: number): void {
   const database = getDb();
+  const uuid = ensureUuid(database, "tags", id);
   database.prepare("DELETE FROM tags WHERE id = ?").run(id);
+  recordDelete(database, "tags", uuid);
 }
 
 export function assignTag(input: AssignTagInput): void {
@@ -1090,6 +1253,7 @@ export function assignTag(input: AssignTagInput): void {
   database
     .prepare("INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?, ?)")
     .run(input.sessionId, input.tagId);
+  recordLink(database, "session_tags", "link", input.sessionId, ensureUuid(database, "tags", input.tagId));
 }
 
 export function unassignTag(input: AssignTagInput): void {
@@ -1097,6 +1261,7 @@ export function unassignTag(input: AssignTagInput): void {
   database
     .prepare("DELETE FROM session_tags WHERE session_id = ? AND tag_id = ?")
     .run(input.sessionId, input.tagId);
+  recordLink(database, "session_tags", "unlink", input.sessionId, ensureUuid(database, "tags", input.tagId));
 }
 
 export function listTagsForSession(sessionId: string): Tag[] {
@@ -1725,15 +1890,21 @@ export function createTodoState(input: CreateTodoStateInput): TodoState {
     .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_states")
     .get() as { next: number };
 
+  const createdAt = new Date().toISOString();
+  const uuid = newUuid();
   database
     .prepare(
-      "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at) VALUES (?, ?, ?, 0, 0, ?)",
+      "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at, uuid) VALUES (?, ?, ?, 0, 0, ?, ?)",
     )
-    .run(label, color, next, new Date().toISOString());
+    .run(label, color, next, createdAt, uuid);
 
+  // last_insert_rowid() must be read before recordUpsert runs any SQL of its own (it writes to
+  // settings/sync_field_clocks on this same connection) -- it is connection-global and would
+  // otherwise reflect recordUpsert's own insert instead of this row's.
   const row = database
     .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = last_insert_rowid()`)
     .get() as TodoStateRow;
+  recordUpsert(database, "todo_states", uuid, { label, color, is_completed: false, is_default: false, created_at: createdAt });
   return rowToTodoState(row);
 }
 
@@ -1780,6 +1951,16 @@ export function updateTodoState(input: UpdateTodoStateInput): TodoState {
   });
   apply();
 
+  // Only fields this call actually touched go to the oplog -- see the comment in updateTodo's
+  // own recordUpsert call for why re-publishing an untouched field is a real correctness bug,
+  // not a cosmetic one.
+  const changedStateFields: Record<string, string | boolean> = {};
+  if (input.label !== undefined) changedStateFields["label"] = label;
+  if (input.color !== undefined) changedStateFields["color"] = color;
+  if (input.isCompleted !== undefined) changedStateFields["is_completed"] = isCompleted;
+  if (input.isDefault !== undefined) changedStateFields["is_default"] = isDefault;
+  recordUpsert(database, "todo_states", ensureUuid(database, "todo_states", input.id), changedStateFields);
+
   const row = database
     .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = ?`)
     .get(input.id) as TodoStateRow;
@@ -1812,6 +1993,8 @@ export function deleteTodoState(id: number, reassignToId: number): number {
     .prepare("SELECT COUNT(*) AS count FROM todos WHERE state_id = ?")
     .get(id) as { count: number };
 
+  const uuid = ensureUuid(database, "todo_states", id);
+
   const apply = database.transaction(() => {
     database.prepare("UPDATE todos SET state_id = ? WHERE state_id = ?").run(reassignToId, id);
     database.prepare("DELETE FROM todo_states WHERE id = ?").run(id);
@@ -1824,6 +2007,8 @@ export function deleteTodoState(id: number, reassignToId: number): number {
     remaining.forEach((row, index) => setPosition.run(index, row.id));
   });
   apply();
+
+  recordDelete(database, "todo_states", uuid);
 
   return count;
 }
@@ -1846,6 +2031,7 @@ export function reorderTodoStates(orderedIds: number[]): TodoState[] {
     finalOrder.forEach((id, index) => setPosition.run(index, id));
   });
   apply();
+  recordReorder(database, "todo_states", finalOrder);
 
   return listTodoStates();
 }
@@ -1924,13 +2110,17 @@ export function createTodoProject(input: CreateTodoProjectInput): TodoProject {
     .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_projects")
     .get() as { next: number };
 
+  const createdAt = new Date().toISOString();
+  const uuid = newUuid();
   database
-    .prepare("INSERT INTO todo_projects (name, color, position, created_at) VALUES (?, ?, ?, ?)")
-    .run(name, color, next, new Date().toISOString());
+    .prepare("INSERT INTO todo_projects (name, color, position, created_at, uuid) VALUES (?, ?, ?, ?, ?)")
+    .run(name, color, next, createdAt, uuid);
 
+  // See the comment in createTodoState: last_insert_rowid() must be read before recordUpsert.
   const row = database
     .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = last_insert_rowid()`)
     .get() as TodoProjectRow;
+  recordUpsert(database, "todo_projects", uuid, { name, color, created_at: createdAt });
   return rowToTodoProject(row);
 }
 
@@ -1953,6 +2143,10 @@ export function updateTodoProject(input: UpdateTodoProjectInput): TodoProject {
   }
 
   database.prepare("UPDATE todo_projects SET name = ?, color = ? WHERE id = ?").run(name, color, input.id);
+  const changedProjectFields: Record<string, string> = {};
+  if (input.name !== undefined) changedProjectFields["name"] = name;
+  if (input.color !== undefined) changedProjectFields["color"] = color;
+  recordUpsert(database, "todo_projects", ensureUuid(database, "todo_projects", input.id), changedProjectFields);
 
   const row = database
     .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = ?`)
@@ -1976,6 +2170,8 @@ export function deleteTodoProject(id: number): number {
     .prepare("SELECT COUNT(*) AS count FROM todos WHERE project_id = ?")
     .get(id) as { count: number };
 
+  const uuid = ensureUuid(database, "todo_projects", id);
+
   const apply = database.transaction(() => {
     // Explicit rather than relying on ON DELETE SET NULL: an upgraded database added the column
     // by ALTER TABLE, and the pragma is not guaranteed to have been on when those rows were written.
@@ -1990,6 +2186,8 @@ export function deleteTodoProject(id: number): number {
     remaining.forEach((row, index) => setPosition.run(index, row.id));
   });
   apply();
+
+  recordDelete(database, "todo_projects", uuid);
 
   return count;
 }
@@ -2012,6 +2210,7 @@ export function reorderTodoProjects(orderedIds: number[]): TodoProject[] {
     finalOrder.forEach((id, index) => setPosition.run(index, id));
   });
   apply();
+  recordReorder(database, "todo_projects", finalOrder);
 
   return listTodoProjects();
 }
@@ -2082,13 +2281,17 @@ export function createTodoLabel(input: CreateTodoLabelInput): TodoLabel {
     .get(name) as TodoLabelRow | undefined;
   if (existing) return rowToTodoLabel(existing);
 
+  const createdAt = new Date().toISOString();
+  const uuid = newUuid();
   database
-    .prepare("INSERT INTO todo_labels (name, color, created_at) VALUES (?, ?, ?)")
-    .run(name, color, new Date().toISOString());
+    .prepare("INSERT INTO todo_labels (name, color, created_at, uuid) VALUES (?, ?, ?, ?)")
+    .run(name, color, createdAt, uuid);
 
+  // See the comment in createTodoState: last_insert_rowid() must be read before recordUpsert.
   const row = database
     .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = last_insert_rowid()`)
     .get() as TodoLabelRow;
+  recordUpsert(database, "todo_labels", uuid, { name, color, created_at: createdAt });
   return rowToTodoLabel(row);
 }
 
@@ -2111,6 +2314,10 @@ export function updateTodoLabel(input: UpdateTodoLabelInput): TodoLabel {
   }
 
   database.prepare("UPDATE todo_labels SET name = ?, color = ? WHERE id = ?").run(name, color, input.id);
+  const changedLabelFields: Record<string, string> = {};
+  if (input.name !== undefined) changedLabelFields["name"] = name;
+  if (input.color !== undefined) changedLabelFields["color"] = color;
+  recordUpsert(database, "todo_labels", ensureUuid(database, "todo_labels", input.id), changedLabelFields);
 
   const row = database
     .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = ?`)
@@ -2129,11 +2336,15 @@ export function deleteTodoLabel(id: number): number {
     .prepare("SELECT COUNT(*) AS count FROM todo_label_links WHERE label_id = ?")
     .get(id) as { count: number };
 
+  const uuid = ensureUuid(database, "todo_labels", id);
+
   const apply = database.transaction(() => {
     database.prepare("DELETE FROM todo_label_links WHERE label_id = ?").run(id);
     database.prepare("DELETE FROM todo_labels WHERE id = ?").run(id);
   });
   apply();
+
+  recordDelete(database, "todo_labels", uuid);
 
   return count;
 }
@@ -2167,8 +2378,12 @@ function labelsByTodoId(database: DbHandle, todoIds: number[]): Map<number, Todo
   return byTodo;
 }
 
-/** Replaces a todo's whole label set. Unknown ids are rejected before anything is written. */
-function replaceTodoLabels(database: DbHandle, todoId: number, labelIds: number[]): void {
+/**
+ * Replaces a todo's whole label set. Unknown ids are rejected before anything is written.
+ * `todoUuid` is the row's already-resolved uuid -- passed in rather than looked up here, since
+ * callers on the create path only get an id back from `last_insert_rowid()`.
+ */
+function replaceTodoLabels(database: DbHandle, todoId: number, todoUuid: string, labelIds: number[]): void {
   const unique = [...new Set(labelIds)];
   for (const id of unique) {
     if (!Number.isInteger(id)) throw new Error("labelIds must be integers");
@@ -2176,9 +2391,23 @@ function replaceTodoLabels(database: DbHandle, todoId: number, labelIds: number[
     if (!found) throw new Error(`Label with id ${id} not found`);
   }
 
+  const before = new Set(
+    (database.prepare("SELECT label_id FROM todo_label_links WHERE todo_id = ?").all(todoId) as Array<
+      { label_id: number }
+    >).map((r) => r.label_id),
+  );
+
   database.prepare("DELETE FROM todo_label_links WHERE todo_id = ?").run(todoId);
   const link = database.prepare("INSERT INTO todo_label_links (todo_id, label_id) VALUES (?, ?)");
   for (const id of unique) link.run(todoId, id);
+
+  const after = new Set(unique);
+  for (const id of before) {
+    if (!after.has(id)) recordLink(database, "todo_label_links", "unlink", todoUuid, ensureUuid(database, "todo_labels", id));
+  }
+  for (const id of after) {
+    if (!before.has(id)) recordLink(database, "todo_label_links", "link", todoUuid, ensureUuid(database, "todo_labels", id));
+  }
 }
 
 /** Rejects an unknown project id up front, so a bad write never reaches the todos table. */
@@ -2459,34 +2688,89 @@ export function createTodo(input: CreateTodoInput): Todo {
     ? null
     : resolveParentId(database, null, input.parentId);
 
+  const createdAt = new Date().toISOString();
+  const uuid = newUuid();
+
   // The insert and the label links go in together: a todo that briefly exists without the
   // labels it was created with would be visible to a concurrent read on the same connection.
   const write = database.transaction(() => {
-    database
-      .prepare(
-        `INSERT INTO todos (title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        title,
-        notes,
-        stateId,
-        projectId,
-        milestone,
-        priority,
-        startDate,
-        dueDate,
-        source,
-        sourceLabel,
-        parentId,
-        new Date().toISOString(),
-        completedAt,
-      );
+    // A device that has turned sync on hands out its own permanent, coordination-free block of
+    // ids (FR-004, FR-005); otherwise AUTOINCREMENT assigns the id exactly as it always has.
+    const explicitId = allocateTodoIdIfSyncEnabled(database);
+
+    if (explicitId !== null) {
+      database
+        .prepare(
+          `INSERT INTO todos (id, title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at, uuid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          explicitId,
+          title,
+          notes,
+          stateId,
+          projectId,
+          milestone,
+          priority,
+          startDate,
+          dueDate,
+          source,
+          sourceLabel,
+          parentId,
+          createdAt,
+          completedAt,
+          uuid,
+        );
+    } else {
+      database
+        .prepare(
+          `INSERT INTO todos (title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at, uuid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          title,
+          notes,
+          stateId,
+          projectId,
+          milestone,
+          priority,
+          startDate,
+          dueDate,
+          source,
+          sourceLabel,
+          parentId,
+          createdAt,
+          completedAt,
+          uuid,
+        );
+    }
 
     // last_insert_rowid() rather than result.lastInsertRowid: the same statement works
     // under better-sqlite3 and the sql.js test shim, which does not return that field.
     const { id } = database.prepare("SELECT last_insert_rowid() AS id").get() as { id: number };
-    if (input.labelIds !== undefined) replaceTodoLabels(database, id, input.labelIds);
+
+    recordUpsert(database, "todos", uuid, {
+      // Unlike every other synced table, a todo's numeric `id` IS globally meaningful (FR-004,
+      // FR-005): it is the block-allocated, permanently-stable, user-visible number, not a
+      // device-local AUTOINCREMENT value. It must be replicated verbatim, never reassigned by
+      // the receiving device -- see merge-engine.ts's special-cased handling of this field.
+      id,
+      title,
+      notes,
+      milestone,
+      priority,
+      start_date: startDate,
+      due_date: dueDate,
+      source,
+      source_label: sourceLabel,
+      created_at: createdAt,
+      completed_at: completedAt,
+      state_uuid: ensureUuid(database, "todo_states", stateId),
+      project_uuid: projectId === null ? null : ensureUuid(database, "todo_projects", projectId),
+      parent_uuid: parentId === null ? null : ensureUuid(database, "todos", parentId),
+    });
+
+    if (input.labelIds !== undefined) replaceTodoLabels(database, id, uuid, input.labelIds);
     return id;
   });
   const id = write();
@@ -2579,8 +2863,33 @@ export function updateTodo(input: UpdateTodoInput): Todo {
       )
       .run(title, notes, stateId, projectId, milestone, priority, startDate, dueDate, parentId, completedAt, input.id);
 
+    const todoUuid = ensureUuid(database, "todos", input.id);
+    // Only the fields this specific call actually touched go to the oplog -- publishing an
+    // unchanged field's current value would carry *this* call's fresh HLC, which can outrank a
+    // genuine concurrent edit to that same field made on another device that this call never
+    // saw, silently reverting it. This is why `updateTodo`'s own "absent means leave alone"
+    // convention must be mirrored exactly here, not flattened into a full-row snapshot.
+    const changedFields: Record<string, string | number | boolean | null> = { id: input.id };
+    if (input.title !== undefined) changedFields["title"] = title;
+    if (input.notes !== undefined) changedFields["notes"] = notes;
+    if (input.milestone !== undefined) changedFields["milestone"] = milestone;
+    if (input.priority !== undefined) changedFields["priority"] = priority;
+    if (input.startDate !== undefined) changedFields["start_date"] = startDate;
+    if (input.dueDate !== undefined) changedFields["due_date"] = dueDate;
+    if (input.stateId !== undefined) {
+      changedFields["state_uuid"] = ensureUuid(database, "todo_states", stateId);
+      changedFields["completed_at"] = completedAt;
+    }
+    if (input.projectId !== undefined) {
+      changedFields["project_uuid"] = projectId === null ? null : ensureUuid(database, "todo_projects", projectId);
+    }
+    if (input.parentId !== undefined) {
+      changedFields["parent_uuid"] = parentId === null ? null : ensureUuid(database, "todos", parentId);
+    }
+    recordUpsert(database, "todos", todoUuid, changedFields);
+
     // Absent leaves the label set alone; an empty array is a deliberate "remove them all".
-    if (input.labelIds !== undefined) replaceTodoLabels(database, input.id, input.labelIds);
+    if (input.labelIds !== undefined) replaceTodoLabels(database, input.id, todoUuid, input.labelIds);
   });
   write();
 
@@ -2598,6 +2907,7 @@ export function updateTodo(input: UpdateTodoInput): Todo {
 export function deleteTodo(id: number): string[] {
   const database = getDb();
   let shas: string[] = [];
+  const uuid = ensureUuid(database, "todos", id);
   const remove = database.transaction(() => {
     // Read before the delete rather than trusting ON DELETE CASCADE to have fired: the
     // caller needs these to garbage-collect blobs, and a cascade leaves nothing to read.
@@ -2610,6 +2920,7 @@ export function deleteTodo(id: number): string[] {
     database.prepare("DELETE FROM todos WHERE id = ?").run(id);
   });
   remove();
+  recordDelete(database, "todos", uuid);
   return shas;
 }
 
@@ -2752,11 +3063,20 @@ export function createTodoAttachment(input: CreateTodoAttachmentInput): TodoAtta
       new Date().toISOString(),
     );
 
-  // last_insert_rowid() rather than result.lastInsertRowid: the sql.js test shim does
-  // not populate that field. Same reasoning as createTodo.
+  // last_insert_rowid() rather than result.lastInsertRowid: the sql.js test shim does not
+  // populate that field. Must be read before recordUpsert runs any SQL of its own -- see the
+  // comment in createTodoState.
   const row = database
     .prepare(`${ATTACHMENT_SELECT} WHERE id = last_insert_rowid()`)
     .get() as TodoAttachmentRow;
+
+  recordUpsert(database, "todo_attachments", attachmentRowKey(ensureUuid(database, "todos", input.todoId), input.sha256), {
+    file_name: input.fileName,
+    mime_type: input.mimeType,
+    size_bytes: input.sizeBytes,
+    kind,
+  });
+
   return rowToTodoAttachment(row);
 }
 
@@ -2783,6 +3103,11 @@ export function deleteTodoAttachment(id: number): TodoAttachment | null {
   const existing = getTodoAttachment(id);
   if (!existing) return null;
   database.prepare("DELETE FROM todo_attachments WHERE id = ?").run(id);
+  recordDelete(
+    database,
+    "todo_attachments",
+    attachmentRowKey(ensureUuid(database, "todos", existing.todoId), existing.sha256),
+  );
   return existing;
 }
 
