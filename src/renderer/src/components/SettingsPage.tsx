@@ -12,6 +12,8 @@ import type {
   LinearProviderStatus,
   LinearTeam,
   StopwatchSettings,
+  SyncNotice,
+  SyncStatus,
   TimerSettings,
   WidgetSettings,
 } from "../../../shared/types.ts";
@@ -137,6 +139,26 @@ export function SettingsPage({
   const [dataError, setDataError] = useState<string | null>(null);
   /** Set when the chosen folder already holds a database, so the user can adopt it instead. */
   const [pendingAdoptDir, setPendingAdoptDir] = useState<string | null>(null);
+
+  // Sync state -- there is no "turn sync on" toggle here; it turns on implicitly the first time
+  // Change Folder targets a folder with real data to protect or another device's history to
+  // adopt (see sync-manager.ts's decidePendingSyncAction).
+  const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
+  const [syncNotices, setSyncNotices] = useState<SyncNotice[]>([]);
+  const [syncDisabling, setSyncDisabling] = useState(false);
+
+  const refreshSync = useCallback(() => {
+    void window.electronAPI.sync.getStatus().then(setSyncStatus).catch(() => {});
+    void window.electronAPI.sync.listNotices().then(setSyncNotices).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    refreshSync();
+    // Sync state changes in the background (the watcher, the periodic re-scan) with no user
+    // action, so a one-time load on mount alone would go stale within seconds.
+    const interval = setInterval(refreshSync, 15_000);
+    return () => clearInterval(interval);
+  }, [refreshSync]);
 
   useEffect(() => {
     void window.electronAPI.issues.providerStatus().then(setTokenStatus);
@@ -488,6 +510,21 @@ export function SettingsPage({
     setDataError(null);
     setPendingAdoptDir(null);
     await runDataMove(dataLocation.defaultDataDir, false);
+  }
+
+  async function handleDisableSync() {
+    setSyncDisabling(true);
+    try {
+      await window.electronAPI.sync.disable();
+      refreshSync();
+    } finally {
+      setSyncDisabling(false);
+    }
+  }
+
+  async function handleDismissNotice(id: number) {
+    await window.electronAPI.sync.dismissNotice(id);
+    refreshSync();
   }
 
   return (
@@ -1211,6 +1248,11 @@ export function SettingsPage({
                   {pendingAdoptDir}, or cancel and pick an empty folder. Nothing is copied either way, and the data in
                   the current folder is left untouched.
                 </p>
+                <p className={styles.tokenHint}>
+                  If that folder holds another machine&rsquo;s synced data, using it here adopts that machine&rsquo;s
+                  todos and sessions as this machine&rsquo;s own working set — this machine will show that data, and
+                  this machine&rsquo;s current database stays on disk, untouched, as a backup.
+                </p>
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                   <button
                     className={styles.saveBtn}
@@ -1260,6 +1302,78 @@ export function SettingsPage({
           {dataError !== null && <div className={styles.errorMsg}>{dataError}</div>}
         </>
       )}
+
+      {/* --- Sync Section --- */}
+      <div className={styles.sectionDivider} />
+      <h2 className={styles.sectionHeading}>Sync</h2>
+
+      {syncStatus === null || !syncStatus.enabled
+        ? (
+          <p className={styles.tokenHint}>
+            Sync is off. Point the data folder above at a shared cloud-drive folder to turn it on — the same Change
+            Folder button, no separate step. LizMeter will publish this machine&rsquo;s data there, and a second machine
+            pointed at the same folder will offer to adopt it.
+          </p>
+        )
+        : (
+          <>
+            <div className={styles.field}>
+              <label className={styles.label}>Status</label>
+              <p className={styles.tokenHint} style={{ margin: "6px 0 0" }}>
+                {syncStatus.halted !== null
+                  ? "Paused — a shared file is not fully downloaded yet"
+                  : syncStatus.lastSyncedAt !== null
+                  ? `Last synced ${new Date(syncStatus.lastSyncedAt).toLocaleString()}`
+                  : "Waiting for the first sync pass"}
+              </p>
+              {syncStatus.halted !== null && <div className={styles.errorMsg}>{syncStatus.halted.reason}</div>}
+            </div>
+
+            {syncStatus.devices.length > 0 && (
+              <div className={styles.field}>
+                <label className={styles.label}>Machines</label>
+                <p className={styles.tokenHint} style={{ margin: "6px 0 0" }}>
+                  {syncStatus.devices
+                    .map((d) => `#${d.deviceNumber} (last seen ${new Date(d.lastSeenAt).toLocaleString()})`)
+                    .join(", ")}
+                </p>
+              </div>
+            )}
+
+            {syncNotices.length > 0 && (
+              <div className={styles.field}>
+                <label className={styles.label}>Recent automatic resolutions</label>
+                {syncNotices.map((notice) => (
+                  <div key={notice.id} className={styles.tokenForm} style={{ marginTop: 6 }}>
+                    <p className={styles.tokenHint} style={{ margin: 0 }}>{notice.message}</p>
+                    {notice.detail !== null && (
+                      <p className={styles.tokenHint} style={{ margin: "4px 0 0", wordBreak: "break-all" }}>
+                        {notice.detail}
+                      </p>
+                    )}
+                    <button
+                      className={styles.testTokenBtn}
+                      style={{ marginTop: 6 }}
+                      onClick={() => void handleDismissNotice(notice.id)}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              <button
+                className={styles.removeTokenBtn}
+                onClick={() => void handleDisableSync()}
+                disabled={syncDisabling}
+              >
+                {syncDisabling ? "Turning off…" : "Turn Off Sync"}
+              </button>
+            </div>
+          </>
+        )}
     </div>
   );
 }

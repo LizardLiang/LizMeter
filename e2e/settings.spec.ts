@@ -163,3 +163,17 @@ test("Settings page shows the Data Location section with the current folder", as
   // Nothing to reset when the data still sits in the default folder.
   await expect(window.locator("button", { hasText: "Reset to Default" })).toHaveCount(0);
 });
+
+test("Settings page shows the Sync section, quiet by default", async () => {
+  const window = await getWindow(app);
+  await navigateTo(window, "Settings");
+
+  const heading = window.locator("h2", { hasText: "Sync" });
+  await heading.scrollIntoViewIfNeeded();
+  await expect(heading).toBeVisible();
+
+  // A fresh install has never pointed its data folder at a shared location, so sync has never
+  // turned on -- there is no separate "enable" toggle, per the tactical plan's Milestone 6.
+  await expect(window.locator("text=Sync is off")).toBeVisible();
+  await expect(window.locator('button:has-text("Turn Off Sync")')).toHaveCount(0);
+});

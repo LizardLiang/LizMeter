@@ -49,6 +49,7 @@ import {
 } from "./attachment-store.ts";
 import { extFromFileName } from "./attachment-url.ts";
 import { getDataDirStatus, moveDataTo } from "./data-location.ts";
+import { decidePendingSyncAction, writePendingSyncAction } from "./sync/sync-manager.ts";
 import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widget-window.ts";
 import { getMainWindow } from "./index.ts";
 import {
@@ -124,9 +125,11 @@ import { LinearProvider } from "./issue-providers/linear-provider.ts";
 import { IssueProviderError } from "./issue-providers/types.ts";
 import { deleteToken, hasToken, loadToken, saveToken } from "./issue-providers/token-storage.ts";
 import { registerMusicIpcHandlers } from "./music/music-ipc.ts";
+import { registerSyncIpcHandlers } from "./sync/sync-ipc.ts";
 
 export function registerIpcHandlers(): void {
   registerMusicIpcHandlers();
+  registerSyncIpcHandlers();
   ipcMain.handle("session:save", (_event, input: SaveSessionInput) => {
     return saveSession(input);
   });
@@ -662,6 +665,11 @@ export function registerIpcHandlers(): void {
   ipcMain.handle(
     "data-location:move",
     (_event, input: DataLocationMoveInput): DataLocationMoveResult => {
+      // Decided while the database is still open, on the pre-move data -- targetHasOtherDevicesData
+      // and hasAnySyncableLocalData both need a live connection. Writing nothing here (the
+      // ordinary-relocate case) leaves this feature invisible, exactly like today's move.
+      const pendingSyncAction = decidePendingSyncAction(input.targetDir);
+
       // Copying an open SQLite file can capture a half-written page, so fold the WAL back into
       // the main file and drop the connection before anything is read.
       try {
@@ -675,9 +683,13 @@ export function registerIpcHandlers(): void {
 
       if (!result.ok) {
         // Nothing moved, so reopen at the unchanged location -- a refused move must leave the app
-        // working, not wedged with a closed database.
+        // working, not wedged with a closed database. No pending sync action was ever written.
         initDatabase();
         return result;
+      }
+
+      if (pendingSyncAction !== null) {
+        writePendingSyncAction(pendingSyncAction);
       }
 
       // Relaunch rather than reopen: the protocol handler, the widget window and the renderer all

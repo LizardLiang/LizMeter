@@ -132,6 +132,49 @@ export function clearCustomDataDir(): void {
   invalidateDataDirCache();
 }
 
+// --- Multi-writer sync: where this device's own lizmeter.db actually lives ---
+//
+// A device that adopted another machine's shared history (FR-017) must never open its working
+// database at a path inside the (possibly shared) data folder -- see the tactical plan's
+// Milestone 6 correction in implementation-notes.md: if it did, and the user's Data Location
+// also names the same shared cloud folder, a second machine's rebuild would silently overwrite
+// the first machine's live database file at the exact same path, reproducing the corruption
+// this feature exists to prevent. The marker lives in userData, next to device-identity.json,
+// so it survives every future data-folder move.
+
+const ADOPTED_MARKER_FILE_NAME = "sync-adopted.json";
+
+function adoptedMarkerPath(): string {
+  return path.join(getDefaultDataDir(), ADOPTED_MARKER_FILE_NAME);
+}
+
+/** True once this device has adopted another machine's shared sync history (FR-017). */
+export function isAdoptedDevice(): boolean {
+  return fs.existsSync(adoptedMarkerPath());
+}
+
+/**
+ * Marks this device as an adopter. Must be called before the very first `initDatabase()` of the
+ * process that completes an adoption -- {@link getDbDir} changes what it returns immediately, so
+ * the database that gets opened next is the private one, never one already sitting in the
+ * shared folder.
+ */
+export function markDeviceAsAdopted(): void {
+  fs.writeFileSync(adoptedMarkerPath(), `${JSON.stringify({ adoptedAt: new Date().toISOString() }, null, 2)}
+`, "utf8");
+}
+
+/**
+ * Where `lizmeter.db` itself lives. Identical to {@link getDataDir} for every device that has
+ * never adopted -- zero behavior change for the existing single-writer case and for the first
+ * machine that turns sync on (its db legitimately continues living in its chosen folder, safe
+ * because no other device ever opens that exact path). An adopted device's working database
+ * lives in Electron's own userData instead, private to this machine.
+ */
+export function getDbDir(): string {
+  return isAdoptedDevice() ? getDefaultDataDir() : getDataDir();
+}
+
 /** True when `child` is `parent` or sits underneath it. Case-insensitive on Windows. */
 function isInside(child: string, parent: string): boolean {
   const rel = path.relative(parent, child);

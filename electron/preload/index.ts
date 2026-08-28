@@ -29,6 +29,8 @@ import type {
   PlaylistAddTrackInput,
   SaveSessionInput,
   SaveSessionWithTrackingInput,
+  SyncNotice,
+  SyncStatus,
   TimerSettings,
   UpdateTagInput,
   UpdateTodoInput,
@@ -156,6 +158,13 @@ contextBridge.exposeInMainWorld("electronAPI", {
     choose: () => ipcRenderer.invoke("data-location:choose"),
     move: (input: DataLocationMoveInput) => ipcRenderer.invoke("data-location:move", input),
     reveal: () => ipcRenderer.invoke("data-location:reveal"),
+  },
+  sync: {
+    getStatus: (): Promise<SyncStatus> => ipcRenderer.invoke("sync:get-status"),
+    disable: (): Promise<void> => ipcRenderer.invoke("sync:disable"),
+    listNotices: (input?: { includeDismissed?: boolean }): Promise<SyncNotice[]> =>
+      ipcRenderer.invoke("sync:list-notices", input),
+    dismissNotice: (id: number): Promise<void> => ipcRenderer.invoke("sync:dismiss-notice", { id }),
   },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),

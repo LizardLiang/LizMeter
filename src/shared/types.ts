@@ -772,6 +772,40 @@ export interface DataLocationMoveInput {
   useExisting?: boolean;
 }
 
+// --- Multi-writer sync ---
+// There is no explicit "turn sync on" action -- it happens implicitly the first time
+// dataLocation.move targets a folder with real data to protect or another device's history to
+// adopt. See the tactical plan's Milestone 6 and sync-manager.ts's decidePendingSyncAction.
+
+export interface SyncDeviceInfo {
+  deviceId: string;
+  deviceNumber: number;
+  lastSeenAt: string;
+}
+
+export interface SyncStatus {
+  enabled: boolean;
+  lastSyncedAt: string | null;
+  halted: { reason: string; } | null;
+  devices: SyncDeviceInfo[];
+}
+
+export type SyncNoticeKind =
+  | "discard-after-delete"
+  | "clock-drift"
+  | "placeholder-blocked"
+  | "stray-file"
+  | "stale-machine-rebuild";
+
+export interface SyncNotice {
+  id: number;
+  kind: SyncNoticeKind;
+  message: string;
+  detail: string | null;
+  createdAt: string;
+  dismissed: boolean;
+}
+
 // --- Electron API (exposed via contextBridge) ---
 
 export interface ElectronAPI {
@@ -899,6 +933,12 @@ export interface ElectronAPI {
     move: (input: DataLocationMoveInput) => Promise<DataLocationMoveResult>;
     /** Shows the current data folder in the OS file manager. */
     reveal: () => Promise<void>;
+  };
+  sync: {
+    getStatus: () => Promise<SyncStatus>;
+    disable: () => Promise<void>;
+    listNotices: (input?: { includeDismissed?: boolean; }) => Promise<SyncNotice[]>;
+    dismissNotice: (id: number) => Promise<void>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

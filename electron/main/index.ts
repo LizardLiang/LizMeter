@@ -10,6 +10,14 @@ import { destroyTracker } from "./claude-code-tracker.ts";
 import { registerIpcHandlers } from "./ipc-handlers.ts";
 import { destroyPipeServer, startPipeServer } from "./pipe-server.ts";
 import {
+  applyPendingSyncActionAfterInit,
+  consumePendingSyncActionBeforeInit,
+  setTodosChangedCallback,
+  startSyncManager,
+  stopSyncManager,
+} from "./sync/sync-manager.ts";
+import { markDeviceAsAdopted } from "./data-location.ts";
+import {
   initJiraProviderFromDisk,
   initLinearProviderFromDisk,
   initProviderFromDisk,
@@ -180,6 +188,14 @@ app.whenReady().then(() => {
     return;
   }
 
+  // Must run before initDatabase(): consuming an "adopt" action marks this device's *working*
+  // database as private (userData), never the shared data folder -- see getDbDir() in
+  // data-location.ts and implementation-notes.md's Milestone 6 correction for why.
+  const pendingSyncAction = consumePendingSyncActionBeforeInit();
+  if (pendingSyncAction?.action === "adopt") {
+    markDeviceAsAdopted();
+  }
+
   try {
     initDatabase();
   } catch (err) {
@@ -205,6 +221,8 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(file).toString());
   });
 
+  applyPendingSyncActionAfterInit(pendingSyncAction);
+
   // Collects blobs left behind by a crash between the file write and the row insert.
   sweepOrphanBlobs();
 
@@ -214,6 +232,11 @@ app.whenReady().then(() => {
   initProviderFromDisk();
   initLinearProviderFromDisk();
   initJiraProviderFromDisk();
+  setTodosChangedCallback(() => {
+    const win = getMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send("todo:changed");
+  });
+  startSyncManager();
   createWindow();
 
   // Create widget if enabled in settings
@@ -241,6 +264,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  stopSyncManager();
   destroyPipeServer();
   destroyTracker();
   closeDatabase();

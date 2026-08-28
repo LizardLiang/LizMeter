@@ -10,12 +10,14 @@
 // transaction blocks the connection for its duration.
 
 import type Database from "better-sqlite3";
+import crypto from "node:crypto";
 import { collectAttachmentBlobs } from "../attachment-store.ts";
 import { getOrAssignDeviceNumber } from "./device-identity.ts";
 import { compareHlc, receive, type Hlc } from "./hlc.ts";
 import { generateOrderedKeys } from "./lexorank.ts";
 import type { OplogEntry, OplogFieldValue, OplogUpsertEntry } from "./oplog.ts";
 import { foreignKeyByFieldName } from "./row-codec.ts";
+import { addSyncNotice } from "./notices.ts";
 
 type DbHandle = Database.Database;
 
@@ -49,12 +51,6 @@ function markApplied(database: DbHandle, opId: string, hlc: Hlc): void {
   database
     .prepare("INSERT OR IGNORE INTO sync_applied_ops (op_id, device_id, applied_at) VALUES (?, ?, ?)")
     .run(opId, String(hlc.deviceNumber), new Date().toISOString());
-}
-
-function addNotice(database: DbHandle, kind: string, message: string, detail?: string): void {
-  database
-    .prepare("INSERT INTO sync_notices (kind, message, detail, created_at) VALUES (?, ?, ?, ?)")
-    .run(kind, message, detail ?? null, new Date().toISOString());
 }
 
 /** Follows old_uuid -> new_uuid chains left by name-unique convergence, to the final live uuid. */
@@ -101,7 +97,7 @@ export function applyOplogEntries(database: DbHandle, entries: readonly OplogEnt
     for (const entry of sorted) {
       const { clamped } = receive(database, deviceNumber, entry.hlc);
       if (clamped) {
-        addNotice(
+        addSyncNotice(
           database,
           "clock-drift",
           `A change from device ${entry.hlc.deviceNumber} arrived with a clock far ahead of this one and was clamped`,
@@ -236,7 +232,7 @@ function applyUpsert(database: DbHandle, entry: OplogUpsertEntry): boolean {
   const canonicalUuid = resolveAlias(database, table, entry.rowUuid);
 
   if (isTombstoned(database, table, canonicalUuid)) {
-    addNotice(
+    addSyncNotice(
       database,
       "discard-after-delete",
       `An edit to a deleted ${table} record was discarded`,
@@ -289,7 +285,17 @@ function convergeOnName(
   const existing = database
     .prepare(`SELECT id, uuid, created_at FROM ${table} WHERE ${nameField} = ? COLLATE NOCASE`)
     .get(incomingName) as { id: number; uuid: string | null; created_at: string } | undefined;
-  if (!existing || existing.uuid === null || existing.uuid === incomingUuid) return null;
+  if (!existing) return null;
+
+  // Every row should always carry a uuid from the moment it is created (seeded defaults
+  // included) -- but this is cheap insurance against any insert path that ever forgets to: a
+  // row still missing one at merge time gets one now, so it can converge instead of silently
+  // colliding with the incoming row's name a moment later.
+  if (existing.uuid === null) {
+    existing.uuid = crypto.randomUUID();
+    database.prepare(`UPDATE ${table} SET uuid = ? WHERE id = ?`).run(existing.uuid, existing.id);
+  }
+  if (existing.uuid === incomingUuid) return null;
 
   const incomingCreatedAt = typeof entry.fields["created_at"]?.value === "string"
     ? (entry.fields["created_at"]!.value as string)
@@ -451,7 +457,7 @@ function applyFieldsLww(
 function applySessionUpsert(database: DbHandle, entry: OplogUpsertEntry): boolean {
   const sessionId = entry.rowUuid;
   if (isTombstoned(database, "sessions", sessionId)) {
-    addNotice(database, "discard-after-delete", "An edit to a deleted session was discarded", `session ${sessionId}`);
+    addSyncNotice(database, "discard-after-delete", "An edit to a deleted session was discarded", `session ${sessionId}`);
     return true;
   }
 

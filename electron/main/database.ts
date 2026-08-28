@@ -51,7 +51,7 @@ import {
   TODO_PRIORITY_LABELS,
 } from "../../src/shared/types.ts";
 import { attachmentKindForExt, attachmentUrl, extFromFileName } from "./attachment-url.ts";
-import { DB_FILE_NAME, getDataDir } from "./data-location.ts";
+import { DB_FILE_NAME, getDbDir } from "./data-location.ts";
 import type { InternalTrackRecord } from "./music/internal-types.ts";
 import { attachmentRowKey } from "./sync/oplog.ts";
 import {
@@ -388,9 +388,14 @@ export function initDatabase(dbPath?: string): void {
     db.exec("ALTER TABLE sessions ADD COLUMN worklog_id TEXT");
   }
 
+  // Must run before seedTodoStates/migrateTodosToStates/migrateProjectTextToRows: each of those
+  // inserts rows directly via SQL, and every synced table's `uuid` column must already exist
+  // (and be backfillable at insert time) before any row -- seeded, migrated, or user-created --
+  // is ever written. A row without a uuid can never converge correctly during a merge (see the
+  // Milestone 6 correction in implementation-notes.md for the bug this ordering fix closed).
+  migrateSyncColumns(db);
   seedTodoStates(db);
   migrateTodosToStates(db);
-  migrateSyncColumns(db);
 }
 
 /** Tables that carry a permanent uuid for multi-writer sync (Milestone 1). */
@@ -450,11 +455,19 @@ function seedTodoStates(database: DbHandle): void {
   if (count === 0) {
     const createdAt = new Date().toISOString();
     const insert = database.prepare(
-      "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at, uuid) VALUES (?, ?, ?, ?, ?, ?, ?)",
     );
     const seed = database.transaction(() => {
       SEED_TODO_STATES.forEach((state, index) => {
-        insert.run(state.label, state.color, index, state.isCompleted ? 1 : 0, state.isDefault ? 1 : 0, createdAt);
+        insert.run(
+          state.label,
+          state.color,
+          index,
+          state.isCompleted ? 1 : 0,
+          state.isDefault ? 1 : 0,
+          createdAt,
+          crypto.randomUUID(),
+        );
       });
     });
     seed();
@@ -588,7 +601,7 @@ function migrateProjectTextToRows(database: DbHandle, columns: string[]): void {
 
     const findProject = database.prepare("SELECT id FROM todo_projects WHERE name = ? COLLATE NOCASE");
     const insertProject = database.prepare(
-      "INSERT INTO todo_projects (name, color, position, created_at) VALUES (?, ?, ?, ?)",
+      "INSERT INTO todo_projects (name, color, position, created_at, uuid) VALUES (?, ?, ?, ?, ?)",
     );
     const repoint = database.prepare(
       "UPDATE todos SET project_id = ? WHERE project_id IS NULL AND project = ? COLLATE NOCASE",
@@ -597,7 +610,7 @@ function migrateProjectTextToRows(database: DbHandle, columns: string[]): void {
     for (const { name } of names) {
       let row = findProject.get(name) as { id: number } | undefined;
       if (!row) {
-        insertProject.run(name, DEFAULT_TODO_COLOR, position, new Date().toISOString());
+        insertProject.run(name, DEFAULT_TODO_COLOR, position, new Date().toISOString(), crypto.randomUUID());
         position += 1;
         row = findProject.get(name) as { id: number };
       }
@@ -623,8 +636,19 @@ export function migrateTodosToStatesNow(): void {
   migrateTodosToStates(getDb());
 }
 
+/** Exported for the same reason as migrateTodosToStatesNow: tests need to rebuild a pre-uuid
+ *  shape (see sync/__tests__/migration-fixture.test.ts) and re-run just this migration step. */
+export function migrateSyncColumnsNow(): void {
+  migrateSyncColumns(getDb());
+}
+
 function getDefaultDbPath(): string {
-  return path.join(getDataDir(), DB_FILE_NAME);
+  return path.join(getDbDir(), DB_FILE_NAME);
+}
+
+/** Exported so sync-manager.ts can pass the real on-disk path to migration.ts's backup step. */
+export function getCurrentDbPath(): string {
+  return getDefaultDbPath();
 }
 
 export function closeDatabase(): void {
