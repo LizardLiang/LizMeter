@@ -159,6 +159,11 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
     case "TICK": {
       // Only valid when running
       if (state.status !== "running") return state;
+      // The interval fires every 250ms but remainingSeconds only moves once a
+      // second, so ~3 of every 4 ticks carry an unchanged value. Returning a
+      // fresh object for those re-rendered the whole tree — and pushed a widget
+      // IPC update — for nothing. Same identity lets React bail out.
+      if (state.remainingSeconds === action.payload) return state;
       return { ...state, remainingSeconds: action.payload };
     }
 
