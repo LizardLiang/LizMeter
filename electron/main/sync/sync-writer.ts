@@ -117,6 +117,11 @@ export function recordDelete(database: DbHandle, table: OplogUpsertEntry["table"
        VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(table, rowUuid, new Date().toISOString(), hlc.physicalMs, hlc.counter, hlc.deviceNumber);
+
+  // Mirrors applyDelete's own cleanup in merge-engine.ts -- a deleted row's per-field high-water
+  // marks have nothing left to guard once the row is gone, and leaving them behind is dead
+  // weight that a local delete must clear exactly as a remote-applied delete already does.
+  database.prepare("DELETE FROM sync_field_clocks WHERE table_name = ? AND row_uuid = ?").run(table, rowUuid);
 }
 
 /** Appends a link/unlink entry for a join table. No-op when sync is off. */

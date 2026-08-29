@@ -2403,17 +2403,36 @@ function labelsByTodoId(database: DbHandle, todoIds: number[]): Map<number, Todo
 }
 
 /**
- * Replaces a todo's whole label set. Unknown ids are rejected before anything is written.
+ * Validates that every label id exists, without writing anything.
+ *
+ * B-4: must run before `recordUpsert` for the same create/update, not just before
+ * `replaceTodoLabels`'s own writes. `recordUpsert` appends to the oplog file via
+ * `fs.appendFileSync`, which no SQL transaction rollback can undo -- so a stale label id
+ * discovered only inside `replaceTodoLabels` (as it used to be, when this check lived there)
+ * throws *after* the todo's own upsert has already been durably published to every peer, even
+ * though the local transaction then rolls back the todo row itself. Every peer ends up with a
+ * todo the originating machine does not have, and worse, the next successful create recycles the
+ * same block-allocated id (`allocateNextTodoId`'s counter bump is a plain SQL write, rolled back
+ * along with everything else), so the *next* publish collides with the still-published phantom
+ * and aborts every future merge pass. See `createTodo`/`updateTodo` for where this now runs.
+ */
+function assertLabelIdsExist(database: DbHandle, labelIds: readonly number[]): void {
+  for (const id of new Set(labelIds)) {
+    if (!Number.isInteger(id)) throw new Error("labelIds must be integers");
+    const found = database.prepare("SELECT id FROM todo_labels WHERE id = ?").get(id) as { id: number } | undefined;
+    if (!found) throw new Error(`Label with id ${id} not found`);
+  }
+}
+
+/**
+ * Replaces a todo's whole label set. Callers must already have validated every id via
+ * {@link assertLabelIdsExist} *before* calling `recordUpsert` for this same operation -- see its
+ * doc comment for why the ordering, not just the check's existence, is what B-4 requires.
  * `todoUuid` is the row's already-resolved uuid -- passed in rather than looked up here, since
  * callers on the create path only get an id back from `last_insert_rowid()`.
  */
 function replaceTodoLabels(database: DbHandle, todoId: number, todoUuid: string, labelIds: number[]): void {
   const unique = [...new Set(labelIds)];
-  for (const id of unique) {
-    if (!Number.isInteger(id)) throw new Error("labelIds must be integers");
-    const found = database.prepare("SELECT id FROM todo_labels WHERE id = ?").get(id) as { id: number } | undefined;
-    if (!found) throw new Error(`Label with id ${id} not found`);
-  }
 
   const before = new Set(
     (database.prepare("SELECT label_id FROM todo_label_links WHERE todo_id = ?").all(todoId) as Array<
@@ -2718,6 +2737,10 @@ export function createTodo(input: CreateTodoInput): Todo {
   // The insert and the label links go in together: a todo that briefly exists without the
   // labels it was created with would be visible to a concurrent read on the same connection.
   const write = database.transaction(() => {
+    // B-4: validated before anything below writes to the oplog -- see assertLabelIdsExist's doc
+    // comment for why a bad label id must never be discovered only after recordUpsert has run.
+    if (input.labelIds !== undefined) assertLabelIdsExist(database, input.labelIds);
+
     // A device that has turned sync on hands out its own permanent, coordination-free block of
     // ids (FR-004, FR-005); otherwise AUTOINCREMENT assigns the id exactly as it always has.
     const explicitId = allocateTodoIdIfSyncEnabled(database);
@@ -2879,6 +2902,9 @@ export function updateTodo(input: UpdateTodoInput): Todo {
   // Editing a todo that is already completed keeps its original completion time.
 
   const write = database.transaction(() => {
+    // B-4: validated before recordUpsert runs below -- see assertLabelIdsExist's doc comment.
+    if (input.labelIds !== undefined) assertLabelIdsExist(database, input.labelIds);
+
     database
       .prepare(
         `UPDATE todos SET title = ?, notes = ?, state_id = ?, project_id = ?, milestone = ?, priority = ?,

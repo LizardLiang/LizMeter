@@ -12,7 +12,8 @@ import path from "node:path";
 import { ATTACHMENT_MAX_BYTES } from "../../src/shared/types.ts";
 import { attachmentFileName, extFromFileName } from "./attachment-url.ts";
 import { ATTACHMENTS_DIR_NAME, getDataDir } from "./data-location.ts";
-import { countAttachmentsBySha, listAllAttachmentShas } from "./database.ts";
+import { countAttachmentsBySha, getDb, listAllAttachmentShas } from "./database.ts";
+import { isSyncEnabled } from "./sync/sync-writer.ts";
 
 /** Extensions refused outright. An SVG served from a privileged scheme is a needless surface. */
 const BLOCKED_EXTENSIONS = new Set(["svg", "svgz"]);
@@ -82,9 +83,20 @@ export function attachmentPathFor(sha256: string, ext: string): string {
  *
  * `ext` is optional because the callers that garbage-collect after a todo delete only carry
  * shas. Without it, every `<sha256>.*` file is removed instead of one named file.
+ *
+ * A no-op while sync is enabled (B-3): `countAttachmentsBySha` only ever counts *this* device's
+ * own `todo_attachments` rows, and once sync is on that count is not authoritative -- a peer can
+ * hold a live reference to the exact same content-addressed blob that has not merged into this
+ * device's table yet. Deleting it here would destroy the only copy on disk for every device, not
+ * just this one. This applies to every caller, not just the startup sweep: deferring past the
+ * first merge pass is not enough either, since a merge can legitimately defer an attachment row
+ * whose parent todo has not arrived (see merge-engine.ts's `applyAttachmentUpsert`). The tradeoff
+ * is accepted local disk growth while sync is on rather than any risk of destroying a peer's
+ * attachment -- see implementation-notes.md's Fix Round for the accepted-debt note.
  */
 export function deleteBlobIfUnreferenced(sha256: string, ext?: string): void {
   if (countAttachmentsBySha(sha256) > 0) return;
+  if (isSyncEnabled(getDb())) return;
 
   const dir = getAttachmentsDir();
   const names = ext === undefined

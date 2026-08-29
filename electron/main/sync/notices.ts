@@ -13,7 +13,8 @@ export type SyncNoticeKind =
   | "clock-drift"
   | "placeholder-blocked"
   | "stray-file"
-  | "stale-machine-rebuild";
+  | "stale-machine-rebuild"
+  | "adopted-backup";
 
 export function addSyncNotice(database: DbHandle, kind: SyncNoticeKind, message: string, detail?: string): void {
   database

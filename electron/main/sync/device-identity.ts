@@ -17,6 +17,7 @@ import type Database from "better-sqlite3";
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { getSyncDevicesDir } from "./oplog.ts";
 
 type DbHandle = Database.Database;
 
@@ -91,23 +92,54 @@ function writeSetting(database: DbHandle, key: string, value: string): void {
 }
 
 /**
+ * True when `dataDir`'s shared sync folder holds no device's oplog file yet -- the only signal
+ * that may award device number 0 (see {@link getOrAssignDeviceNumber}'s header comment for why
+ * local row count is not that signal). A folder a device is only now about to publish into for
+ * the first time reads as virgin; a folder any peer has ever written to, even one this device has
+ * never synced with before, does not.
+ */
+function isVirginSyncFolder(dataDir: string): boolean {
+  const dir = getSyncDevicesDir(dataDir);
+  if (!fs.existsSync(dir)) return true;
+  return !fs.readdirSync(dir).some((name) => name.endsWith(".oplog.jsonl"));
+}
+
+/**
  * The integer this device hands out todo numbers from. Read from `settings` (machine-local per
  * FR-003) and assigned exactly once, lazily, the first time it is needed.
  *
- * A database that already holds todos when this is first called is treated as the pre-existing
- * "legacy" machine and gets block 0 -- its existing ids 1..N already ARE `0 * stride + n`, so no
- * renumbering is needed (FR-016). Every other machine draws a random block, collision-checked
- * against every peer this device has ever seen in `sync_devices`.
+ * Device number 0 is reserved for the one device that *creates* a shared sync folder -- the one
+ * whose first sync-enabling act finds no peer's oplog file there yet (`dataDir` provided, and
+ * {@link isVirginSyncFolder} true). This used to be inferred from whether this device's own local
+ * `todos` table already held rows, on the reasoning that a populated database must be the
+ * pre-existing "legacy" machine (FR-016). That inference broke the moment any device's working
+ * database could legitimately be non-empty independent of sync history -- which is exactly what
+ * moving every device's live database to a private per-machine location (see data-location.ts's
+ * `getDbDir`) makes routine: an adopting device that used LizMeter standalone for months before
+ * ever touching sync has a very populated local database and must still draw a random block, not
+ * block 0, because another device already originated the shared folder it is joining. Every case
+ * other than "this device is originating a brand-new shared folder" draws a random block,
+ * collision-checked against every peer this device has ever seen in `sync_devices` -- including a
+ * device that has plenty of its own local data but is joining a shared folder for the first time.
+ *
+ * `dataDir` is omitted by every call site except the two that ever perform a first-ever
+ * assignment (migration.ts's `runSyncMigration`, sync-manager.ts's adopt branch) -- every other
+ * caller (merge-engine.ts, snapshot.ts, sync-writer.ts) only ever runs once sync is already
+ * enabled, meaning a number was necessarily assigned already and `stored !== null` returns before
+ * this parameter would matter. Omitting it always falls back to drawing at random rather than
+ * ever assuming "0", since 0 is a one-time-only reservation that must never be inferred by
+ * omission.
  */
-export function getOrAssignDeviceNumber(database: DbHandle): number {
+export function getOrAssignDeviceNumber(database: DbHandle, dataDir?: string): number {
   const stored = readSetting(database, DEVICE_NUMBER_KEY);
   if (stored !== null) {
     const parsed = Number.parseInt(stored, 10);
     if (Number.isInteger(parsed)) return parsed;
   }
 
-  const { count } = database.prepare("SELECT COUNT(*) AS count FROM todos").get() as { count: number };
-  const deviceNumber = count > 0 ? 0 : drawUnusedDeviceNumber(database);
+  const deviceNumber = dataDir !== undefined && isVirginSyncFolder(dataDir)
+    ? 0
+    : drawUnusedDeviceNumber(database);
 
   writeSetting(database, DEVICE_NUMBER_KEY, String(deviceNumber));
   return deviceNumber;

@@ -134,45 +134,132 @@ export function clearCustomDataDir(): void {
 
 // --- Multi-writer sync: where this device's own lizmeter.db actually lives ---
 //
-// A device that adopted another machine's shared history (FR-017) must never open its working
-// database at a path inside the (possibly shared) data folder -- see the tactical plan's
-// Milestone 6 correction in implementation-notes.md: if it did, and the user's Data Location
-// also names the same shared cloud folder, a second machine's rebuild would silently overwrite
-// the first machine's live database file at the exact same path, reproducing the corruption
-// this feature exists to prevent. The marker lives in userData, next to device-identity.json,
-// so it survives every future data-folder move.
+// No device's live `lizmeter.db` (+ `-wal`/`-shm`) may ever sit inside the shared, cloud-synced
+// folder -- not an adopting device, and not the first ("original") device that turns sync on
+// either. That first-device gap was Milestone 6's own flagged shortcoming (see
+// implementation-notes.md's Fix Round section): the correction below moves *every* device's
+// working database into Electron's own private `userData` folder the moment sync is enabled on
+// it, by whichever path (adopting a shared folder, or being the one that creates it). Before
+// sync is ever turned on, nothing here is consulted and the database colocates with attachments
+// at {@link getDataDir}, exactly as it did before this feature existed -- zero behavior change
+// for a user who never enables sync. The markers live in userData, next to device-identity.json,
+// so they survive every future data-folder move.
 
 const ADOPTED_MARKER_FILE_NAME = "sync-adopted.json";
+const PRIVATE_DB_MARKER_FILE_NAME = "sync-private-db.json";
 
 function adoptedMarkerPath(): string {
   return path.join(getDefaultDataDir(), ADOPTED_MARKER_FILE_NAME);
 }
 
-/** True once this device has adopted another machine's shared sync history (FR-017). */
+function privateDbMarkerPath(): string {
+  return path.join(getDefaultDataDir(), PRIVATE_DB_MARKER_FILE_NAME);
+}
+
+/** True once this device has adopted another machine's shared sync history (FR-017). Informational --
+ *  {@link hasPrivateDb} is what actually governs where the database opens; every adopter also has
+ *  a private db, but a device can have a private db without ever having adopted (see the "enable
+ *  sync on the first machine" path in migration.ts). */
 export function isAdoptedDevice(): boolean {
   return fs.existsSync(adoptedMarkerPath());
 }
 
 /**
- * Marks this device as an adopter. Must be called before the very first `initDatabase()` of the
- * process that completes an adoption -- {@link getDbDir} changes what it returns immediately, so
- * the database that gets opened next is the private one, never one already sitting in the
- * shared folder.
+ * Marks this device as an adopter, and implies {@link markPrivateDb}. Must be called before the
+ * very first `initDatabase()` of the process that completes an adoption -- {@link getDbDir}
+ * changes what it returns immediately, so the database that gets opened next is the private one,
+ * never one already sitting in the shared folder.
  */
 export function markDeviceAsAdopted(): void {
   fs.writeFileSync(adoptedMarkerPath(), `${JSON.stringify({ adoptedAt: new Date().toISOString() }, null, 2)}
 `, "utf8");
+  markPrivateDb();
+}
+
+/**
+ * True once this device's live database lives privately in userData rather than the (possibly
+ * shared) data folder -- set the moment sync is enabled on this device, by either path. Every
+ * adopter satisfies this via {@link isAdoptedDevice}; the first device to turn sync on satisfies
+ * it via its own explicit marker instead, since it did not adopt anyone else's history.
+ */
+export function hasPrivateDb(): boolean {
+  return isAdoptedDevice() || fs.existsSync(privateDbMarkerPath());
+}
+
+/**
+ * Marks this device's database as private without claiming it adopted anything. Called by the
+ * "enable sync on an already-populated machine" path (migration.ts), before the very first
+ * `initDatabase()` after the user pointed Data Location at a shared folder -- same ordering
+ * requirement as {@link markDeviceAsAdopted}.
+ */
+export function markPrivateDb(): void {
+  if (fs.existsSync(privateDbMarkerPath())) return;
+  fs.writeFileSync(privateDbMarkerPath(), `${JSON.stringify({ privateSince: new Date().toISOString() }, null, 2)}
+`, "utf8");
+}
+
+/**
+ * Renames any database already sitting at this device's private db location out of the way,
+ * before it is about to be adopted-into (FR-017's "rebuild a fresh local database").
+ *
+ * Without this, a device that used LizMeter standalone for months before ever touching sync
+ * would have `initDatabase()` open -- and `rebuildFromSnapshot` then wipe -- its own real
+ * history: its private db location (`userData`) is exactly where that pre-existing database
+ * already lives, since every device's database sits there by default until it is deliberately
+ * moved. Must be called after {@link markDeviceAsAdopted} and before the very first
+ * `initDatabase()` of the process completing the adoption. Returns the backup's path (for
+ * FR-017's "surface the old file's location"), or `null` when there was nothing there to move.
+ */
+export function backupExistingPrivateDbBeforeAdopt(): string | null {
+  const dir = getDefaultDataDir();
+  const dbPath = path.join(dir, DB_FILE_NAME);
+  if (!fs.existsSync(dbPath)) return null;
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = `${dbPath}.pre-adopt-${stamp}.bak`;
+  fs.renameSync(dbPath, backupPath);
+  for (const suffix of ["-wal", "-shm"]) {
+    const side = `${dbPath}${suffix}`;
+    if (fs.existsSync(side)) fs.renameSync(side, `${backupPath}${suffix}`);
+  }
+  return backupPath;
 }
 
 /**
  * Where `lizmeter.db` itself lives. Identical to {@link getDataDir} for every device that has
- * never adopted -- zero behavior change for the existing single-writer case and for the first
- * machine that turns sync on (its db legitimately continues living in its chosen folder, safe
- * because no other device ever opens that exact path). An adopted device's working database
- * lives in Electron's own userData instead, private to this machine.
+ * never enabled sync -- zero behavior change for the existing single-writer case. Once sync is
+ * enabled, by any path, the database lives in Electron's own userData instead, private to this
+ * machine; only oplogs, snapshots, and attachments ever live in the shared folder from that point
+ * on (see {@link relocateDbToPrivateStorage} for the one-time move that makes this true for the
+ * device that *creates* a shared folder, and the adopt path in sync-manager.ts for the device
+ * that joins one).
  */
 export function getDbDir(): string {
-  return isAdoptedDevice() ? getDefaultDataDir() : getDataDir();
+  return hasPrivateDb() ? getDefaultDataDir() : getDataDir();
+}
+
+/**
+ * Copies this device's own `lizmeter.db` (+ `-wal`/`-shm`, when present) from `sourceDir` into
+ * its private per-machine location (Electron's userData folder), if it is not already there.
+ *
+ * Used exactly once per device, the moment it turns sync on via the "first machine" path
+ * (migration.ts's `enableSyncOnExistingMachine`): the live database must move out of whatever
+ * folder Data Location was pointing at *before* that folder is repointed at (or already is) a
+ * shared cloud folder, or it reproduces the exact corruption this feature exists to prevent. The
+ * caller must checkpoint and close the database before calling, exactly like {@link moveDataTo}.
+ * The old copy at `sourceDir` is left in place -- same "leave the original, the user can delete
+ * it" convention {@link moveDataTo} already follows.
+ */
+export function relocateDbToPrivateStorage(sourceDir: string): void {
+  const source = path.resolve(sourceDir);
+  const target = path.resolve(getDefaultDataDir());
+  if (source === target) return; // already private -- nothing to move
+
+  for (const name of MOVED_FILES) {
+    const from = path.join(source, name);
+    if (!fs.existsSync(from)) continue;
+    fs.copyFileSync(from, path.join(target, name));
+  }
 }
 
 /** True when `child` is `parent` or sits underneath it. Case-insensitive on Windows. */
@@ -204,8 +291,29 @@ function isWritable(dir: string): boolean {
  * `useExisting` skips the copy and adopts whatever database already sits in `targetDir`. Without
  * it a populated target is refused with `TARGET_HAS_DATA` so a move can never silently overwrite
  * one set of todos with another.
+ *
+ * `copyDb` (default `true`) and `copyAttachments` (default `true`) let a sync-aware caller
+ * (sync-manager.ts's pending-action handling in ipc-handlers.ts) split the two. A device turning
+ * sync on must never let its database land inside the newly-shared `targetDir` — see
+ * {@link relocateDbToPrivateStorage} for where its db actually goes instead — so that caller
+ * passes `copyDb: false`. An adopting device additionally passes `copyAttachments: false`: it is
+ * about to discard its own local rows wholesale (FR-017), so its own local attachments have
+ * nothing to contribute to the shared pool and copying them in would only orphan them there.
+ *
+ * The db-file portion sources from {@link getDbDir}, not unconditionally from {@link getDataDir}
+ * — once this device already has a private database (`hasPrivateDb()`), that private folder is
+ * where its *live* database actually is, and `getDataDir()` no longer holds a database file at
+ * all. Sourcing from `getDataDir()` unconditionally would either silently copy nothing (once no
+ * device's db lives there any more) or, before this fix, could copy a peer's live database that
+ * a stale assumption placed there. Attachments always source from `getDataDir()` — they are
+ * correctly shared there for every device, synced or not.
  */
-export function moveDataTo(targetDir: string, options: { useExisting?: boolean } = {}): MoveDataResult {
+export function moveDataTo(
+  targetDir: string,
+  options: { useExisting?: boolean; copyDb?: boolean; copyAttachments?: boolean } = {},
+): MoveDataResult {
+  const copyDb = options.copyDb ?? true;
+  const copyAttachments = options.copyAttachments ?? true;
   const source = path.resolve(getDataDir());
   const target = path.resolve(targetDir);
 
@@ -237,8 +345,12 @@ export function moveDataTo(targetDir: string, options: { useExisting?: boolean }
     return { ok: false, code: "NOT_WRITABLE", message: "That folder is not writable." };
   }
 
+  // The refusal only makes sense when this call might actually place a db file in `target` --
+  // a sync enable/adopt caller with `copyDb: false` has already made its own placement decision
+  // and this check would otherwise false-negative once no device's db lives in a shared folder
+  // any more (see this function's own header comment).
   const targetDb = path.join(target, DB_FILE_NAME);
-  const targetHasData = fs.existsSync(targetDb);
+  const targetHasData = copyDb && fs.existsSync(targetDb);
   if (targetHasData && options.useExisting !== true) {
     return {
       ok: false,
@@ -247,16 +359,19 @@ export function moveDataTo(targetDir: string, options: { useExisting?: boolean }
     };
   }
 
-  if (!targetHasData) {
-    try {
-      copyDataInto(source, target);
-    } catch (err) {
-      return {
-        ok: false,
-        code: "COPY_FAILED",
-        message: `Could not copy the data: ${err instanceof Error ? err.message : String(err)}`,
-      };
+  try {
+    if (copyDb && !targetHasData) {
+      copyDbInto(getDbDir(), target);
     }
+    if (copyAttachments) {
+      copyAttachmentsInto(source, target);
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      code: "COPY_FAILED",
+      message: `Could not copy the data: ${err instanceof Error ? err.message : String(err)}`,
+    };
   }
 
   // The pointer is written last. A crash mid-copy therefore leaves the app pointed at the intact
@@ -277,13 +392,15 @@ export function moveDataTo(targetDir: string, options: { useExisting?: boolean }
   return { ok: true, dataDir: target };
 }
 
-function copyDataInto(source: string, target: string): void {
+function copyDbInto(source: string, target: string): void {
   for (const name of MOVED_FILES) {
     const from = path.join(source, name);
     if (!fs.existsSync(from)) continue;
     fs.copyFileSync(from, path.join(target, name));
   }
+}
 
+function copyAttachmentsInto(source: string, target: string): void {
   const attachmentsFrom = path.join(source, ATTACHMENTS_DIR_NAME);
   if (!fs.existsSync(attachmentsFrom)) return;
   // Blobs are named by their own sha256, so a file already present in the target is byte-identical.

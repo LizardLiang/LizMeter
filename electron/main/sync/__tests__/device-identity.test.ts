@@ -24,11 +24,15 @@ import {
   registerDevice,
   TODO_ID_BLOCK_STRIDE,
 } from "../device-identity.ts";
+import { getSyncDevicesDir } from "../oplog.ts";
 
 let root: string;
+let sharedDir: string;
 
 beforeEach(() => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), "lizmeter-device-identity-"));
+  sharedDir = path.join(root, "shared");
+  fs.mkdirSync(sharedDir, { recursive: true });
   mockPaths.userData = root;
   invalidateDeviceIdCache();
   initDatabase(":memory:");
@@ -55,26 +59,56 @@ describe("getDeviceId", () => {
 });
 
 describe("getOrAssignDeviceNumber", () => {
-  it("assigns block 0 to a database that already has todos (the legacy machine, FR-016)", () => {
+  // Fix Round: device 0 is decided from the *shared folder's* own contents (dataDir), never
+  // from whether this device's local database happens to have rows -- see the function's own
+  // header comment for why the old "local row count" heuristic broke (B-2).
+
+  it("assigns block 0 when the shared folder holds no peer's oplog file yet, regardless of local data", () => {
     const db = getDb();
     const { id: stateId } = db.prepare("SELECT id FROM todo_states LIMIT 1").get() as { id: number };
     db.prepare("INSERT INTO todos (title, state_id, created_at) VALUES ('existing', ?, ?)").run(
       stateId,
       new Date().toISOString(),
     );
-    expect(getOrAssignDeviceNumber(db)).toBe(0);
+    expect(getOrAssignDeviceNumber(db, sharedDir)).toBe(0);
   });
 
-  it("assigns a random non-zero block to an empty database", () => {
+  it("assigns a random non-zero block to an empty local database, when the shared folder is also virgin", () => {
     const db = getDb();
-    const deviceNumber = getOrAssignDeviceNumber(db);
-    expect(deviceNumber).toBeGreaterThan(0);
+    const deviceNumber = getOrAssignDeviceNumber(db, sharedDir);
+    // Still 0 in this case (an empty local db in a virgin shared folder is the ordinary
+    // "originating a brand-new shared folder" case) -- the interesting contrast is the next test.
+    expect(deviceNumber).toBe(0);
+  });
+
+  it("draws a random block for a device with plenty of local data, once the shared folder already has peer activity (B-2)", () => {
+    const db = getDb();
+    const { id: stateId } = db.prepare("SELECT id FROM todo_states LIMIT 1").get() as { id: number };
+    for (let i = 0; i < 5; i++) {
+      db.prepare("INSERT INTO todos (title, state_id, created_at) VALUES (?, ?, ?)").run(
+        `pre-existing standalone todo ${i}`,
+        stateId,
+        new Date().toISOString(),
+      );
+    }
+    const peerDir = getSyncDevicesDir(sharedDir);
+    fs.mkdirSync(peerDir, { recursive: true });
+    fs.writeFileSync(path.join(peerDir, "11111111-1111-1111-1111-111111111111.oplog.jsonl"), "");
+
+    // Under the old (broken) heuristic this would have returned 0, colliding with the peer that
+    // already occupies block 0 -- exactly Hermes's B-2 finding.
+    expect(getOrAssignDeviceNumber(db, sharedDir)).not.toBe(0);
+  });
+
+  it("draws a random block, never 0, when dataDir is omitted (every non-first-assignment caller)", () => {
+    const db = getDb();
+    expect(getOrAssignDeviceNumber(db)).toBeGreaterThan(0);
   });
 
   it("is stable across repeated calls", () => {
     const db = getDb();
-    const first = getOrAssignDeviceNumber(db);
-    const second = getOrAssignDeviceNumber(db);
+    const first = getOrAssignDeviceNumber(db, sharedDir);
+    const second = getOrAssignDeviceNumber(db, sharedDir);
     expect(first).toBe(second);
   });
 
@@ -100,6 +134,10 @@ describe("allocateNextTodoId", () => {
         new Date().toISOString(),
       );
     }
+    // Device number is pre-assigned directly (the "how does a device become 0" decision is
+    // covered by the getOrAssignDeviceNumber describe block above) so this test is purely about
+    // allocateNextTodoId's own counter-continuation behavior for device 0.
+    db.prepare("INSERT INTO settings (key, value) VALUES ('sync.deviceNumber', '0')").run();
     const { maxId } = db.prepare("SELECT MAX(id) AS maxId FROM todos").get() as { maxId: number };
     expect(allocateNextTodoId(db)).toBe(maxId + 1);
   });

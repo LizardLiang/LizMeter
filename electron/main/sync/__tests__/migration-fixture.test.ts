@@ -44,7 +44,7 @@ import {
   migrateSyncColumnsNow,
   saveSession,
 } from "../../database.ts";
-import { invalidateDataDirCache } from "../../data-location.ts";
+import { getDataDir, invalidateDataDirCache } from "../../data-location.ts";
 import { invalidateDeviceIdCache } from "../device-identity.ts";
 import { getSyncDevicesDir, readOplogEntries } from "../oplog.ts";
 import { backupBeforeSyncMigration, enableSyncOnExistingMachine } from "../migration.ts";
@@ -119,7 +119,7 @@ describe("migrating a populated pre-sync database", () => {
     makeLegacyPreSyncSchema();
     migrateSyncColumnsNow();
 
-    const backfill = enableSyncOnExistingMachine(getDb(), undefined); // :memory: -> no backup path
+    const backfill = enableSyncOnExistingMachine(getDb(), undefined, getDataDir()); // :memory: -> no backup path
     expect(backfill.backupPath).toBeNull();
     expect(backfill.deviceNumber).toBe(0); // this machine already has data -- FR-016's "legacy machine"
 
@@ -149,7 +149,7 @@ describe("migrating a populated pre-sync database", () => {
     makeLegacyPreSyncSchema();
     migrateSyncColumnsNow();
 
-    enableSyncOnExistingMachine(getDb(), undefined);
+    enableSyncOnExistingMachine(getDb(), undefined, getDataDir());
 
     expect(isSyncEnabled(getDb())).toBe(true);
 
@@ -180,9 +180,9 @@ describe("migrating a populated pre-sync database", () => {
     // backfillUuids (a separate step, run once via enableSyncOnExistingMachine) is what actually
     // fills the value in -- covered by the "backfills a uuid..." test above. Running it twice
     // must not re-generate a *different* uuid for a row that already has one.
-    const before = enableSyncOnExistingMachine(getDb(), undefined);
+    const before = enableSyncOnExistingMachine(getDb(), undefined, getDataDir());
     const uuidAfterFirstBackfill = (db.prepare("SELECT uuid FROM todos LIMIT 1").get() as { uuid: string }).uuid;
-    const after = enableSyncOnExistingMachine(getDb(), undefined);
+    const after = enableSyncOnExistingMachine(getDb(), undefined, getDataDir());
     const uuidAfterSecondBackfill = (db.prepare("SELECT uuid FROM todos LIMIT 1").get() as { uuid: string }).uuid;
     expect(uuidAfterSecondBackfill).toBe(uuidAfterFirstBackfill);
     expect(before.deviceNumber).toBe(after.deviceNumber);

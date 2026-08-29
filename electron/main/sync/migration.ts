@@ -49,17 +49,20 @@ export interface SyncMigrationResult {
 
 /**
  * Runs once, when the user turns on sync for the first time on a machine that already has data
- * (FR-015, FR-016). Takes a backup, backfills every missing uuid, and registers this machine as
- * device 0 -- its existing ids 1..N already satisfy `0 * stride + n`, so nothing is renumbered.
+ * (FR-015, FR-016). Takes a backup, backfills every missing uuid, and registers this machine's
+ * device number -- 0 when this device is the one *originating* the shared folder (see
+ * `getOrAssignDeviceNumber`'s header comment for why that is decided from the shared folder's own
+ * contents, `dataDir`, rather than from whether this database already has data). Its existing ids
+ * 1..N already satisfy `0 * stride + n` when it draws 0, so nothing is renumbered.
  */
-export function runSyncMigration(database: DbHandle, dbPath: string | undefined): SyncMigrationResult {
+export function runSyncMigration(database: DbHandle, dbPath: string | undefined, dataDir: string): SyncMigrationResult {
   const backupPath = dbPath !== undefined && dbPath !== ":memory:" && fs.existsSync(dbPath)
     ? backupBeforeSyncMigration(dbPath)
     : null;
 
   backfillUuids(database);
 
-  const deviceNumber = getOrAssignDeviceNumber(database);
+  const deviceNumber = getOrAssignDeviceNumber(database, dataDir);
   registerDevice(database, getDeviceId(), deviceNumber);
 
   return { backupPath, deviceNumber };
@@ -92,9 +95,18 @@ export function publishExistingData(database: DbHandle): void {
 /**
  * Turns sync on for the first time on this (already-populated) machine: migrates identity,
  * flips the enabled flag, then publishes the existing rows so peers have something to merge.
+ *
+ * `dataDir` is the shared folder this machine is publishing into -- by the time this runs, its
+ * live database has already been relocated out of that folder into its own private storage (see
+ * data-location.ts's `relocateDbToPrivateStorage`, called by the `data-location:move` IPC handler
+ * before this machine relaunches into this migration step).
  */
-export function enableSyncOnExistingMachine(database: DbHandle, dbPath: string | undefined): SyncMigrationResult {
-  const result = runSyncMigration(database, dbPath);
+export function enableSyncOnExistingMachine(
+  database: DbHandle,
+  dbPath: string | undefined,
+  dataDir: string,
+): SyncMigrationResult {
+  const result = runSyncMigration(database, dbPath, dataDir);
   setSyncEnabled(database, true);
   publishExistingData(database);
   return result;

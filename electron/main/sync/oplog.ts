@@ -119,6 +119,26 @@ export function appendOplogEntry(dataDir: string, deviceId: string, entry: Oplog
 
 const KNOWN_OPS = new Set(["upsert", "delete", "link", "unlink"]);
 
+/**
+ * Every table name a legitimate oplog entry may ever name -- `SyncedRowTable | SyncedAttachmentTable
+ * | SyncedLinkTable` reproduced as a runtime value, since the TypeScript union those types
+ * describe is erased at compile time and is not a control on its own (B-1). `entry.table` reaches
+ * a SQL template literal in several places downstream (merge-engine.ts, row-codec.ts) without any
+ * further check, so this is the one place that must refuse anything else, before a parsed entry
+ * from a peer's file is ever treated as trustworthy.
+ */
+const KNOWN_TABLES = new Set<string>([
+  "todos",
+  "tags",
+  "todo_labels",
+  "todo_states",
+  "todo_projects",
+  "sessions",
+  "todo_attachments",
+  "todo_label_links",
+  "session_tags",
+]);
+
 export interface ReadOplogResult {
   entries: OplogEntry[];
   /** Lines skipped because of a future schema version or malformed JSON -- never fatal (FR-020). */
@@ -173,7 +193,14 @@ export function readOplogEntries(filePath: string): ReadOplogResult {
   return { entries, skipped };
 }
 
-function isPlausibleEntry(value: unknown): value is OplogEntry {
+/**
+ * The oplog boundary's one validation gate (B-1): everything downstream trusts that an
+ * `OplogEntry` it holds named a real table and a well-formed shape, precisely because nothing
+ * gets past this function without both. Exported so snapshot.ts can apply the identical check to
+ * a snapshot file's `entries` array, which is just as much untrusted peer-authored content as a
+ * live oplog file and was not otherwise passing through this gate at all.
+ */
+export function isPlausibleEntry(value: unknown): value is OplogEntry {
   if (typeof value !== "object" || value === null) return false;
   const v = value as Record<string, unknown>;
   return (
@@ -182,6 +209,7 @@ function isPlausibleEntry(value: unknown): value is OplogEntry {
     typeof v["op"] === "string" &&
     KNOWN_OPS.has(v["op"]) &&
     typeof v["table"] === "string" &&
+    KNOWN_TABLES.has(v["table"]) &&
     typeof v["hlc"] === "object" &&
     v["hlc"] !== null
   );
