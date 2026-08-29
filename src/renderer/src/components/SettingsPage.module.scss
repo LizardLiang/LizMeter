@@ -24,6 +24,50 @@
   letter-spacing: 0.04em;
 }
 
+/**
+ * A field whose content sits *under* its label rather than beside it.
+ *
+ * `.field` is a `space-between` row, which is right for "label ......... control" but wrong the
+ * moment a block has a label plus several children: they all become flex siblings and get squeezed
+ * into narrow columns side by side. Anything list-shaped (sync notices, a confirmation with body
+ * text) belongs here instead.
+ */
+.fieldStack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+/** One sync notice: full width, its own surface, text that wraps instead of stacking sideways. */
+.noticeCard {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 12px;
+  background: #1f2335;
+  border: 1px solid #292e42;
+  border-radius: 8px;
+}
+
+.noticeMessage {
+  font-size: 12px;
+  color: #c0caf5;
+  margin: 0;
+  line-height: 1.5;
+}
+
+/** Holds ids, filenames and paths, so it has to break anywhere rather than force the card wider. */
+.noticeDetail {
+  font-size: 11px;
+  color: #565f89;
+  margin: 0;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
 .inputRow {
   display: flex;
   align-items: center;

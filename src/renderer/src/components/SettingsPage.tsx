@@ -1495,21 +1495,13 @@ export function SettingsPage({
             )}
 
             {syncNotices.length > 0 && (
-              <div className={styles.field}>
+              <div className={styles.fieldStack}>
                 <label className={styles.label}>Recent automatic resolutions</label>
                 {syncNotices.map((notice) => (
-                  <div key={notice.id} className={styles.tokenForm} style={{ marginTop: 6 }}>
-                    <p className={styles.tokenHint} style={{ margin: 0 }}>{notice.message}</p>
-                    {notice.detail !== null && (
-                      <p className={styles.tokenHint} style={{ margin: "4px 0 0", wordBreak: "break-all" }}>
-                        {notice.detail}
-                      </p>
-                    )}
-                    <button
-                      className={styles.testTokenBtn}
-                      style={{ marginTop: 6 }}
-                      onClick={() => void handleDismissNotice(notice.id)}
-                    >
+                  <div key={notice.id} className={styles.noticeCard}>
+                    <p className={styles.noticeMessage}>{notice.message}</p>
+                    {notice.detail !== null && <p className={styles.noticeDetail}>{notice.detail}</p>}
+                    <button className={styles.testTokenBtn} onClick={() => void handleDismissNotice(notice.id)}>
                       Dismiss
                     </button>
                   </div>
@@ -1518,9 +1510,9 @@ export function SettingsPage({
             )}
 
             {pendingRenumberCount > 0 && (
-              <div className={styles.field}>
+              <div className={styles.fieldStack}>
                 <label className={styles.label}>Todo numbers</label>
-                <p className={styles.tokenHint} style={{ margin: "6px 0 0" }}>
+                <p className={styles.tokenHint} style={{ margin: 0 }}>
                   {pendingRenumberCount}{" "}
                   todo{pendingRenumberCount === 1 ? " has a very long number" : "s have very long numbers"}{" "}
                   left over from an older version. Renumbering folds them into the normal sequence. Todos that already
@@ -1528,7 +1520,7 @@ export function SettingsPage({
                 </p>
                 {renumberConfirming
                   ? (
-                    <div className={styles.tokenForm} style={{ marginTop: 8 }}>
+                    <div className={styles.tokenForm}>
                       <div className={styles.errorMsg}>Update your other machines first.</div>
                       <p className={styles.tokenHint}>
                         A machine still running the older version keeps handing out long numbers, so this would need
@@ -1554,9 +1546,11 @@ export function SettingsPage({
                     </div>
                   )
                   : (
+                    // `.fieldStack` stretches its children, which would make a lone button span the
+                    // full panel width.
                     <button
                       className={styles.testTokenBtn}
-                      style={{ marginTop: 8 }}
+                      style={{ alignSelf: "flex-start" }}
                       onClick={() => void handleRenumber(false)}
                     >
                       Renumber Todos…
