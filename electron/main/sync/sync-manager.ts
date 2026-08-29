@@ -13,7 +13,7 @@ import { DB_FILE_NAME, getDataDir } from "../data-location.ts";
 import { getDeviceId, getOrAssignDeviceNumber, registerDevice } from "./device-identity.ts";
 import { NotFullyHydratedError } from "./hydration-guard.ts";
 import { runMergePass } from "./merge-pass.ts";
-import { enableSyncOnExistingMachine } from "./migration.ts";
+import { countBlockAllocatedTodos, enableSyncOnExistingMachine, renumberBlockAllocatedTodoIds } from "./migration.ts";
 import { addSyncNotice, listSyncNotices, dismissSyncNotice, type SyncNoticeRow } from "./notices.ts";
 import {
   clearPendingSyncAction,
@@ -182,6 +182,45 @@ export function dismissNotice(id: number): void {
 export function disableSync(): void {
   stopSyncManager();
   setSyncEnabled(getDb(), false);
+}
+
+// --- One-time renumber of block-allocated todo ids ---
+
+/** How many todos still carry a number the retired block scheme handed out. */
+export function getPendingRenumberCount(): number {
+  return countBlockAllocatedTodos(getDb());
+}
+
+export interface RenumberOutcome {
+  status: "confirm-required" | "done" | "nothing-to-do";
+  count: number;
+  renumbered: Array<{ from: number; to: number }>;
+  backupPath: string | null;
+}
+
+/**
+ * Folds this machine's block-allocated todo ids into the dense sequence, once, on request.
+ *
+ * Refuses without an explicit `confirm`, matching {@link requiresAdoptConfirmation} and
+ * {@link requiresUnsyncedDbConfirmation}: this rewrites numbers the user may have referenced
+ * elsewhere and cannot be undone except from the backup it takes, so it never runs on the first
+ * ask. The caller is expected to warn that every machine should be updated first -- a peer still
+ * running the old build keeps issuing block ids, and would simply need this run again afterwards.
+ */
+export function renumberLegacyTodoIds(confirm: boolean): RenumberOutcome {
+  const database = getDb();
+  const count = countBlockAllocatedTodos(database);
+  if (count === 0) return { status: "nothing-to-do", count: 0, renumbered: [], backupPath: null };
+  if (!confirm) return { status: "confirm-required", count, renumbered: [], backupPath: null };
+
+  const result = renumberBlockAllocatedTodoIds(database, getCurrentDbPath());
+  onTodosChanged?.();
+  return {
+    status: "done",
+    count: result.renumbered.length,
+    renumbered: result.renumbered,
+    backupPath: result.backupPath,
+  };
 }
 
 // --- Milestone 6: wiring the Data Location move flow to sync setup ---

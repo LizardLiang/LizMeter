@@ -157,10 +157,17 @@ export function SettingsPage({
   const [syncStatus, setSyncStatus] = useState<SyncStatus | null>(null);
   const [syncNotices, setSyncNotices] = useState<SyncNotice[]>([]);
   const [syncDisabling, setSyncDisabling] = useState(false);
+  // How many todos still carry a 15-digit number from the retired block-allocation scheme. Zero on
+  // any machine that never ran it, which is why the whole control stays hidden in that case.
+  const [pendingRenumberCount, setPendingRenumberCount] = useState(0);
+  const [renumberConfirming, setRenumberConfirming] = useState(false);
+  const [renumberRunning, setRenumberRunning] = useState(false);
+  const [renumberResult, setRenumberResult] = useState<string | null>(null);
 
   const refreshSync = useCallback(() => {
     void window.electronAPI.sync.getStatus().then(setSyncStatus).catch(() => {});
     void window.electronAPI.sync.listNotices().then(setSyncNotices).catch(() => {});
+    void window.electronAPI.sync.pendingRenumberCount().then(setPendingRenumberCount).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -573,6 +580,32 @@ export function SettingsPage({
   async function handleDismissNotice(id: number) {
     await window.electronAPI.sync.dismissNotice(id);
     refreshSync();
+  }
+
+  /**
+   * One-way, so it refuses on the first press and runs only once the user confirms -- the same
+   * shape the adopt and unsynced-db moves already use.
+   */
+  async function handleRenumber(confirm: boolean) {
+    if (!confirm) {
+      setRenumberConfirming(true);
+      return;
+    }
+    setRenumberRunning(true);
+    try {
+      const outcome = await window.electronAPI.sync.renumberLegacyIds({ confirm: true });
+      setRenumberResult(
+        outcome.status === "done"
+          ? `Renumbered ${outcome.count} todo${outcome.count === 1 ? "" : "s"}.`
+          : "Nothing needed renumbering.",
+      );
+      setRenumberConfirming(false);
+      const remaining = await window.electronAPI.sync.pendingRenumberCount();
+      setPendingRenumberCount(remaining);
+      refreshSync();
+    } finally {
+      setRenumberRunning(false);
+    }
   }
 
   return (
@@ -1482,6 +1515,58 @@ export function SettingsPage({
                   </div>
                 ))}
               </div>
+            )}
+
+            {pendingRenumberCount > 0 && (
+              <div className={styles.field}>
+                <label className={styles.label}>Todo numbers</label>
+                <p className={styles.tokenHint} style={{ margin: "6px 0 0" }}>
+                  {pendingRenumberCount}{" "}
+                  todo{pendingRenumberCount === 1 ? " has a very long number" : "s have very long numbers"}{" "}
+                  left over from an older version. Renumbering folds them into the normal sequence. Todos that already
+                  have short numbers keep them.
+                </p>
+                {renumberConfirming
+                  ? (
+                    <div className={styles.tokenForm} style={{ marginTop: 8 }}>
+                      <div className={styles.errorMsg}>Update your other machines first.</div>
+                      <p className={styles.tokenHint}>
+                        A machine still running the older version keeps handing out long numbers, so this would need
+                        running again afterwards. The new numbers replace the old ones everywhere — anything you wrote
+                        down that refers to a long number will no longer match. A backup is saved first.
+                      </p>
+                      <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                        <button
+                          className={styles.saveBtn}
+                          onClick={() => void handleRenumber(true)}
+                          disabled={renumberRunning}
+                        >
+                          {renumberRunning ? "Renumbering…" : "Renumber Todos"}
+                        </button>
+                        <button
+                          className={styles.testTokenBtn}
+                          onClick={() => setRenumberConfirming(false)}
+                          disabled={renumberRunning}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )
+                  : (
+                    <button
+                      className={styles.testTokenBtn}
+                      style={{ marginTop: 8 }}
+                      onClick={() => void handleRenumber(false)}
+                    >
+                      Renumber Todos…
+                    </button>
+                  )}
+              </div>
+            )}
+
+            {renumberResult !== null && (
+              <p className={styles.tokenHint} style={{ margin: "6px 0 0" }}>{renumberResult}</p>
             )}
 
             <div style={{ display: "flex", gap: 8, marginTop: 8 }}>

@@ -6,7 +6,7 @@
 // (`settings['sync.enabled']` unset or "false") -- so a database that never syncs behaves
 // exactly as it did before this feature shipped: no oplog files, no device-number surprises, no
 // change to how todo ids are assigned. This is what lets `uuid` generation stay unconditional
-// (harmless, and ready the moment sync is later turned on) while todo-id block allocation and
+// (harmless, and ready the moment sync is later turned on) while the synced todo-id counter and
 // oplog writing stay strictly opt-in.
 
 import type Database from "better-sqlite3";
@@ -50,6 +50,10 @@ export function newUuid(): string {
 /**
  * The explicit numeric id a synced `todos` insert must use, or `null` when sync is off and the
  * table's own `AUTOINCREMENT` should assign the id exactly as it always has.
+ *
+ * Both paths produce the same shape of number -- small and sequential. The synced path only needs
+ * its own counter because `AUTOINCREMENT` cannot be told about ids this device learned from a peer
+ * (see `advanceTodoIdWatermark`).
  */
 export function allocateTodoIdIfSyncEnabled(database: DbHandle): number | null {
   if (!isSyncEnabled(database)) return null;
@@ -98,8 +102,14 @@ export function recordUpsert(
        (table_name, row_uuid, field_name, hlc_physical_ms, hlc_counter, hlc_device_number)
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
+  // `id` (todos only) gets a clock like every other field. It used to be skipped here on the
+  // reasoning that an id is "consumed once at insert time, never a real LWW field" -- true under
+  // the retired block scheme, where two devices could not possibly claim the same number. Dense
+  // ids collide by design, so an id genuinely does change (once, when a merge bumps the losing
+  // claimant), and that change has to win or lose against a peer's on exactly the same LWW terms
+  // as any other field. Without a clock here, a device's own bump could be silently undone by the
+  // older entry it was resolving.
   for (const field of Object.keys(fields)) {
-    if (field === "id") continue; // todos-only: consumed once at insert time, never a real LWW field
     setClock.run(table, rowUuid, field, hlc.physicalMs, hlc.counter, hlc.deviceNumber);
   }
 }

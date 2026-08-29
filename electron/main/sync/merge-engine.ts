@@ -12,7 +12,7 @@
 import type Database from "better-sqlite3";
 import crypto from "node:crypto";
 import { collectAttachmentBlobs } from "../attachment-store.ts";
-import { getOrAssignDeviceNumber } from "./device-identity.ts";
+import { advanceTodoIdWatermark, getOrAssignDeviceNumber } from "./device-identity.ts";
 import { compareHlc, receive, type Hlc } from "./hlc.ts";
 import { generateOrderedKeys } from "./lexorank.ts";
 import type { OplogEntry, OplogFieldValue, OplogUpsertEntry } from "./oplog.ts";
@@ -125,6 +125,10 @@ export function applyOplogEntries(database: DbHandle, entries: readonly OplogEnt
   const deviceNumber = getOrAssignDeviceNumber(database);
 
   const run = database.transaction(() => {
+    // Captured before anything is applied, so the renumbering notice can tell "this todo moved
+    // under the user" apart from "this todo arrived and was placed".
+    const todoIdsBefore = snapshotTodoIds(database);
+
     for (const entry of sorted) {
       const { clamped } = receive(database, deviceNumber, entry.hlc);
       if (clamped) {
@@ -167,6 +171,17 @@ export function applyOplogEntries(database: DbHandle, entries: readonly OplogEnt
 
     recomputeLocalPositionFromSyncOrder(database, "todo_states");
     recomputeLocalPositionFromSyncOrder(database, "todo_projects");
+
+    // Derive every todo's visible id from the full set of claims now that the whole pass has been
+    // applied -- once, over the settled set, rather than per-entry as rows stream in.
+    reconcileTodoIds(database);
+    noticeUserVisibleRenumbering(database, todoIdsBefore);
+
+    // Take this device's todo counter past everything the pass just learned about, so a machine
+    // returning from an offline window does not immediately re-claim numbers its peer already
+    // used. Reads the table after reconciliation, so it clears the derived ids too.
+    const { maxId } = database.prepare("SELECT COALESCE(MAX(id), 0) AS maxId FROM todos").get() as { maxId: number };
+    advanceTodoIdWatermark(database, maxId);
   });
   run();
 
@@ -316,13 +331,15 @@ function applyUpsert(database: DbHandle, entry: OplogUpsertEntry): ApplyOutcome 
       localId = converged.localId;
       effectiveUuid = converged.uuid;
     } else {
-      // A todo's numeric id is globally meaningful (FR-004, FR-005) and must be replicated
-      // verbatim rather than left to this device's own AUTOINCREMENT -- every other synced
-      // table's local id is device-specific and is never carried through the oplog.
-      const explicitId = table === "todos" && typeof entry.fields["id"]?.value === "number"
-        ? entry.fields["id"]!.value as number
-        : null;
-      localId = insertPlaceholderRow(database, table, canonicalUuid, explicitId);
+      // The peer's *claim* on a number, not a final id: two machines working apart routinely claim
+      // the same one. The row is parked on any free number here and `reconcileTodoIds` (run once
+      // at the end of the pass, over the whole set) decides what it actually ends up holding.
+      // `id` is read as a fallback for entries written before `claimed_id` existed.
+      const claimedId = table === "todos" ? incomingClaimedId(entry) : null;
+      localId = insertPlaceholderRow(database, table, canonicalUuid, freeTodoIdNear(database, claimedId));
+      if (claimedId !== null) {
+        database.prepare("UPDATE todos SET claimed_id = ? WHERE id = ?").run(claimedId, localId);
+      }
     }
   }
 
@@ -390,6 +407,166 @@ function convergeOnName(
     .prepare("INSERT OR REPLACE INTO sync_id_aliases (table_name, old_uuid, new_uuid, created_at) VALUES (?, ?, ?, ?)")
     .run(table, incomingUuid, existing.uuid, new Date().toISOString());
   return { localId: existing.id, uuid: existing.uuid };
+}
+
+// --- Dense todo id collision resolution ---
+
+/**
+ * Moves a todo row from one numeric id to another, carrying every reference with it.
+ *
+ * `foreign_keys = ON` (database.ts) makes the obvious `UPDATE todos SET id = ?` throw the moment
+ * any child row points at the old id, and `runMergePassSafely` funnels a throw here into a bare
+ * `console.warn` -- so getting this wrong fails *silently, on every merge pass, forever*. Exactly
+ * the shape of the shipped R2-B3 bug, where a bare DELETE's foreign-key violation rolled back a
+ * whole wipe unnoticed.
+ *
+ * `defer_foreign_keys` postpones the constraint check to COMMIT, so the row and its three
+ * referencing sites can move together inside the transaction `applyOplogEntries` already holds and
+ * be consistent by the time anything is verified. This is deliberately used instead of declaring
+ * `ON UPDATE CASCADE`: that would mean rebuilding `todos` (a ~15-column table assembled by three
+ * separate migrations) plus both referencing tables on every existing install, to change one
+ * constraint. Primary-key uniqueness is NOT deferred, so the caller must always vacate the target
+ * id before calling this.
+ */
+export function moveTodoRowId(database: DbHandle, fromId: number, toId: number): void {
+  if (fromId === toId) return;
+  database.pragma("defer_foreign_keys = ON");
+  database.prepare("UPDATE todos SET id = ? WHERE id = ?").run(toId, fromId);
+  database.prepare("UPDATE todos SET parent_id = ? WHERE parent_id = ?").run(toId, fromId);
+  database.prepare("UPDATE todo_label_links SET todo_id = ? WHERE todo_id = ?").run(toId, fromId);
+  database.prepare("UPDATE todo_attachments SET todo_id = ? WHERE todo_id = ?").run(toId, fromId);
+}
+
+/** FR-031 posture: recorded for the user to find in Settings, never an OS notification. */
+function noteReassignment(database: DbHandle, oldId: number, newId: number): void {
+  addSyncNotice(
+    database,
+    "todo-id-reassigned",
+    `Todo #${oldId} was renumbered to #${newId} because another machine had already used that number.`,
+    `old id ${oldId}, new id ${newId}`,
+  );
+}
+
+/** The number a peer's entry claims, tolerating the pre-`claimed_id` entries that carried `id`. */
+function incomingClaimedId(entry: OplogUpsertEntry): number | null {
+  const claimed = entry.fields["claimed_id"]?.value;
+  if (typeof claimed === "number") return claimed;
+  const legacy = entry.fields["id"]?.value;
+  return typeof legacy === "number" ? legacy : null;
+}
+
+/**
+ * A number this row can be parked on right now: its claim when that happens to be free, otherwise
+ * any unused number. Nothing about this choice is load-bearing -- `reconcileTodoIds` overwrites it
+ * with the derived answer before the merge transaction commits -- it only has to not collide.
+ */
+function freeTodoIdNear(database: DbHandle, claimedId: number | null): number | null {
+  if (claimedId === null) return null;
+  const taken = database.prepare("SELECT 1 FROM todos WHERE id = ?").get(claimedId) !== undefined;
+  if (!taken) return claimedId;
+  const { maxId } = database.prepare("SELECT COALESCE(MAX(id), 0) AS maxId FROM todos").get() as { maxId: number };
+  return maxId + 1;
+}
+
+interface TodoIdRow {
+  id: number;
+  claimed_id: number | null;
+  created_at: string;
+  uuid: string | null;
+}
+
+/** The total order both machines sort by. Same rule `convergeOnName` uses for FR-010. */
+function compareTodoIdRows(a: TodoIdRow, b: TodoIdRow): number {
+  if (a.created_at !== b.created_at) return a.created_at < b.created_at ? -1 : 1;
+  const au = a.uuid ?? "";
+  const bu = b.uuid ?? "";
+  if (au !== bu) return au < bu ? -1 : 1;
+  return a.id - b.id;
+}
+
+/**
+ * Derives every todo's visible id from the full set of claims, and applies the result.
+ *
+ * This is the heart of dense-id convergence, and it is a **pure function of the merged set**: the
+ * earliest-created claimant of a number keeps it, and every later claimant of an already-taken
+ * number is placed after the highest claim, in the same order. Two machines holding the same set
+ * of todos therefore compute byte-identical assignments without exchanging a single message about
+ * it.
+ *
+ * The design this replaced tried to negotiate instead -- each machine picked a replacement number
+ * from its own counter and published it as a last-write-wins field. That never converged: a
+ * machine's own write always carries a newer clock than the peer's, so each side permanently
+ * rejected the other's answer and the two stayed stably, silently disagreed. Deriving rather than
+ * negotiating removes the arbitration entirely.
+ *
+ * Uncontested todos keep their number forever -- their claim is always free, so they are assigned
+ * it on every pass and never move. Only a genuinely contested number can shift, and only until
+ * both machines have seen the same todos.
+ */
+export function reconcileTodoIds(database: DbHandle): number {
+  const rows = database
+    .prepare("SELECT id, claimed_id, created_at, uuid FROM todos")
+    .all() as TodoIdRow[];
+  if (rows.length === 0) return 0;
+
+  const ordered = [...rows].sort(compareTodoIdRows);
+  const claimOf = (r: TodoIdRow): number => r.claimed_id ?? r.id;
+
+  const taken = new Set<number>();
+  const desired = new Map<number, number>(); // current id -> id it should hold
+  const contested: TodoIdRow[] = [];
+
+  for (const row of ordered) {
+    const claim = claimOf(row);
+    if (taken.has(claim)) {
+      contested.push(row);
+      continue;
+    }
+    taken.add(claim);
+    desired.set(row.id, claim);
+  }
+
+  let next = Math.max(...ordered.map(claimOf), 0) + 1;
+  for (const row of contested) {
+    while (taken.has(next)) next += 1;
+    taken.add(next);
+    desired.set(row.id, next);
+    next += 1;
+  }
+
+  const moves = [...desired.entries()].filter(([from, to]) => from !== to);
+  if (moves.length === 0) return 0;
+
+  // Two phases via temporary negative ids: primary-key uniqueness is NOT deferrable, so a row
+  // cannot move onto a number another row has not vacated yet. Negatives can never collide with a
+  // real id, which makes the intermediate state safe regardless of how the moves permute.
+  database.pragma("defer_foreign_keys = ON");
+  moves.forEach(([from], index) => moveTodoRowId(database, from, -(index + 1)));
+  moves.forEach(([, to], index) => moveTodoRowId(database, -(index + 1), to));
+
+  return moves.length;
+}
+
+/** uuid -> visible id, for the before/after comparison that decides what is worth telling the user. */
+function snapshotTodoIds(database: DbHandle): Map<string, number> {
+  const rows = database.prepare("SELECT id, uuid FROM todos WHERE uuid IS NOT NULL").all() as Array<
+    { id: number; uuid: string }
+  >;
+  return new Map(rows.map((r) => [r.uuid, r.id]));
+}
+
+/**
+ * Reports only the renumberings this machine's user would actually notice: a todo that was already
+ * on screen under one number and is now under another. A row that arrived during this same pass
+ * has no "before" here, so the parking slot it briefly occupied on its way to its derived id is
+ * never mentioned -- that is bookkeeping, not something the user saw.
+ */
+function noticeUserVisibleRenumbering(database: DbHandle, before: Map<string, number>): void {
+  const after = snapshotTodoIds(database);
+  for (const [uuid, previousId] of before) {
+    const currentId = after.get(uuid);
+    if (currentId !== undefined && currentId !== previousId) noteReassignment(database, previousId, currentId);
+  }
 }
 
 function placeholderText(uuid: string): string {
@@ -480,6 +657,7 @@ function applyFieldsLww(
   localId: number,
   fields: Record<string, { value: OplogFieldValue; hlc: Hlc }>,
 ): boolean {
+  const currentId = localId;
   const fkByFieldName = foreignKeyByFieldName(table);
   const getClock = database.prepare(
     "SELECT hlc_physical_ms, hlc_counter, hlc_device_number FROM sync_field_clocks WHERE table_name = ? AND row_uuid = ? AND field_name = ?",
@@ -493,10 +671,6 @@ function applyFieldsLww(
   let fullyApplied = true;
 
   for (const [fieldName, change] of Object.entries(fields)) {
-    // `id` (todos only) is consumed once, at insert time, by the caller -- it is never a
-    // column to UPDATE, and it has no LWW clock of its own since it never changes.
-    if (fieldName === "id") continue;
-
     const existingClock = getClock.get(table, rowUuid, fieldName) as
       | { hlc_physical_ms: number; hlc_counter: number; hlc_device_number: number }
       | undefined;
@@ -509,19 +683,30 @@ function applyFieldsLww(
       if (compareHlc(change.hlc, existingHlc) <= 0) continue; // not newer -- this field keeps its current value
     }
 
+    // `id` never travels as a value to write: the visible id is derived by `reconcileTodoIds`.
+    // A peer running an older build still publishes one, so it is folded into that row's claim
+    // instead of being written to the primary key.
+    if (fieldName === "id") {
+      if (table === "todos" && typeof change.value === "number") {
+        database.prepare("UPDATE todos SET claimed_id = ? WHERE id = ? AND claimed_id IS NULL")
+          .run(change.value, currentId);
+      }
+      continue;
+    }
+
     const fk = fkByFieldName[fieldName];
     if (fk) {
       // fk.column comes from row-codec.ts's own static FOREIGN_KEYS config, never from the
       // entry -- safe to interpolate regardless of what fieldName itself is.
       if (change.value === null) {
-        database.prepare(`UPDATE ${table} SET ${fk.column} = NULL WHERE id = ?`).run(localId);
+        database.prepare(`UPDATE ${table} SET ${fk.column} = NULL WHERE id = ?`).run(currentId);
       } else if (typeof change.value === "string") {
         const refId = localIdByUuid(database, fk.refTable, resolveAlias(database, fk.refTable, change.value));
         if (refId === null) {
           fullyApplied = false; // referenced row not synced yet -- retry this entry on a later pass (B-5)
           continue;
         }
-        database.prepare(`UPDATE ${table} SET ${fk.column} = ? WHERE id = ?`).run(refId, localId);
+        database.prepare(`UPDATE ${table} SET ${fk.column} = ? WHERE id = ?`).run(refId, currentId);
       } else {
         continue;
       }
@@ -533,7 +718,7 @@ function applyFieldsLww(
         console.warn(`[sync] skipping unknown field "${fieldName}" for table "${table}" (row ${rowUuid})`);
         continue;
       }
-      database.prepare(`UPDATE ${table} SET ${fieldName} = ? WHERE id = ?`).run(change.value, localId);
+      database.prepare(`UPDATE ${table} SET ${fieldName} = ? WHERE id = ?`).run(change.value, currentId);
     }
 
     setClock.run(table, rowUuid, fieldName, change.hlc.physicalMs, change.hlc.counter, change.hlc.deviceNumber);

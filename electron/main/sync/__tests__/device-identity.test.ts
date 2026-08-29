@@ -17,12 +17,12 @@ vi.mock("electron", () => ({
 
 import { getDb, initDatabase } from "../../database.ts";
 import {
+  advanceTodoIdWatermark,
   allocateNextTodoId,
   getDeviceId,
   getOrAssignDeviceNumber,
   invalidateDeviceIdCache,
   registerDevice,
-  TODO_ID_BLOCK_STRIDE,
 } from "../device-identity.ts";
 import { getSyncDevicesDir } from "../oplog.ts";
 
@@ -124,20 +124,25 @@ describe("getOrAssignDeviceNumber", () => {
 });
 
 describe("allocateNextTodoId", () => {
-  it("continues device 0's block exactly where existing AUTOINCREMENT ids left off (FR-016)", () => {
+  // Ids are dense on every machine now, not carved into per-device blocks: the counter simply
+  // continues from whatever this database already holds. Two machines therefore CAN hand out the
+  // same number while apart, which is resolved at merge time (see todo-id-sync.test.ts) rather
+  // than prevented by making every non-originating machine's ids 15 digits long.
+  function seedTodos(count: number): void {
     const db = getDb();
     const { id: stateId } = db.prepare("SELECT id FROM todo_states LIMIT 1").get() as { id: number };
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < count; i++) {
       db.prepare("INSERT INTO todos (title, state_id, created_at) VALUES (?, ?, ?)").run(
         `todo ${i}`,
         stateId,
         new Date().toISOString(),
       );
     }
-    // Device number is pre-assigned directly (the "how does a device become 0" decision is
-    // covered by the getOrAssignDeviceNumber describe block above) so this test is purely about
-    // allocateNextTodoId's own counter-continuation behavior for device 0.
-    db.prepare("INSERT INTO settings (key, value) VALUES ('sync.deviceNumber', '0')").run();
+  }
+
+  it("continues exactly where existing ids left off", () => {
+    const db = getDb();
+    seedTodos(5);
     const { maxId } = db.prepare("SELECT MAX(id) AS maxId FROM todos").get() as { maxId: number };
     expect(allocateNextTodoId(db)).toBe(maxId + 1);
   });
@@ -151,12 +156,41 @@ describe("allocateNextTodoId", () => {
     expect(third).toBe(second + 1);
   });
 
-  it("keeps every non-zero device's ids inside its own stride, never overlapping device 0's range", () => {
+  it("hands out a small number regardless of which device number this machine drew", () => {
     const db = getDb();
     registerDevice(db, "some-other-device", 7);
     db.prepare("INSERT INTO settings (key, value) VALUES ('sync.deviceNumber', '7')").run();
-    const id = allocateNextTodoId(db);
-    expect(id).toBeGreaterThanOrEqual(7 * TODO_ID_BLOCK_STRIDE);
-    expect(id).toBeLessThan(8 * TODO_ID_BLOCK_STRIDE);
+    expect(allocateNextTodoId(db)).toBeLessThan(10_000);
+  });
+
+  it("does not reuse the number of a deleted todo", () => {
+    const db = getDb();
+    seedTodos(3);
+    const first = allocateNextTodoId(db);
+    db.prepare("DELETE FROM todos").run();
+    // The watermark is persisted, so an emptied table does not reset the sequence -- reusing a
+    // number would silently repoint any reference the user already wrote down.
+    expect(allocateNextTodoId(db)).toBe(first + 1);
+  });
+});
+
+describe("advanceTodoIdWatermark", () => {
+  it("moves the counter past a peer's highest id", () => {
+    const db = getDb();
+    advanceTodoIdWatermark(db, 73);
+    expect(allocateNextTodoId(db)).toBe(74);
+  });
+
+  it("never moves the counter backwards", () => {
+    const db = getDb();
+    advanceTodoIdWatermark(db, 73);
+    advanceTodoIdWatermark(db, 5);
+    expect(allocateNextTodoId(db)).toBe(74);
+  });
+
+  it("ignores a meaningless value", () => {
+    const db = getDb();
+    advanceTodoIdWatermark(db, 0);
+    expect(allocateNextTodoId(db)).toBe(1);
   });
 });

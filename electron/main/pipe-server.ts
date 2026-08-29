@@ -18,6 +18,7 @@ import {
   createTodoLabel,
   createTodoProject,
   createTodoState,
+  getDb,
   deleteTodoLabel,
   deleteTodoProject,
   deleteTodoState,
@@ -202,7 +203,31 @@ function requireTodoId(data: Record<string, unknown>, command: string): number {
   if (typeof id !== "number" || !Number.isInteger(id)) {
     throw new Error(`${command} requires an integer 'todoId'`);
   }
+  assertTodoIdentity(data, id, command);
   return id;
+}
+
+/** A todo's permanent uuid, which -- unlike its number -- never changes. */
+function todoUuidFor(id: number): string | null {
+  const row = getDb().prepare("SELECT uuid FROM todos WHERE id = ?").get(id) as { uuid: string | null } | undefined;
+  return row?.uuid ?? null;
+}
+
+/**
+ * Refuses a write whose caller is addressing a number that no longer means what it did when the
+ * caller listed it. `expectUuid` is optional -- a caller that does not pass one keeps the old
+ * behavior -- but when it is supplied and does not match, the write is rejected rather than
+ * silently applied to whichever todo now holds that number.
+ */
+function assertTodoIdentity(data: Record<string, unknown>, id: number, command: string): void {
+  const expected = data.expectUuid;
+  if (typeof expected !== "string" || expected === "") return;
+
+  const actual = todoUuidFor(id);
+  if (actual === expected) return;
+  throw new Error(
+    `${command}: todo #${id} is not the todo you listed (it was renumbered by a sync). List the todos again and retry with the current number.`,
+  );
 }
 
 // --- Taxonomy commands ---
@@ -344,7 +369,12 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
       const labelIds = resolveLabelNames(data.label === undefined ? undefined : [data.label], "label");
       const stateId = resolveStateLabel(data.state);
       const parentId = optionalNumber(data.parentId, "parentId") ?? undefined;
-      return { todos: listTodos({ filter, projectId, labelId: labelIds?.[0], stateId, parentId }) };
+      const todos = listTodos({ filter, projectId, labelId: labelIds?.[0], stateId, parentId });
+      // Each todo's permanent uuid rides along so a caller can prove, on a later write, that the
+      // number it is about to address still means the same todo. A merge can renumber todos
+      // between a list and a write (see merge-engine.ts's reconcileTodoIds), and without this the
+      // write would silently land on whichever todo inherited the number.
+      return { todos: todos.map((todo) => ({ ...todo, uuid: todoUuidFor(todo.id) })) };
     }
 
     case "todo.complete": {

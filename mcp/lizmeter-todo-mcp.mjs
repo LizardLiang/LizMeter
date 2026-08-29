@@ -385,6 +385,31 @@ function formatNames(list) {
   return (list ?? []).map((entry) => entry.name).join(", ");
 }
 
+/**
+ * The uuid each todo had the last time this process listed it, keyed by the number it was listed
+ * under. A merge can renumber todos between a list and a write, so a write replays the identity it
+ * saw and the app refuses it if the number now means a different todo. Without this the write lands
+ * silently on whichever todo inherited the number.
+ *
+ * Deliberately not surfaced in the tool output: numbers stay the way the user and the model talk
+ * about todos, and the uuid is only ever machinery.
+ */
+const lastSeenUuidById = new Map();
+
+function rememberListedTodos(todos) {
+  lastSeenUuidById.clear();
+  for (const todo of todos) {
+    if (typeof todo.uuid === "string" && todo.uuid !== "") lastSeenUuidById.set(todo.id, todo.uuid);
+  }
+}
+
+/** Adds the identity guard to a write payload, when this process has listed that todo. */
+function withIdentityGuard(payload, id) {
+  const uuid = lastSeenUuidById.get(id);
+  if (uuid !== undefined) payload.expectUuid = uuid;
+  return payload;
+}
+
 function formatTodo(todo) {
   const box = todo.state && todo.state.isCompleted ? "[x]" : "[ ]";
 
@@ -430,6 +455,7 @@ async function callTool(name, args = {}) {
       if (args.parentId !== undefined) payload.parentId = args.parentId;
       const result = await sendCommand("todo.list", payload);
       const todos = result.todos ?? [];
+      rememberListedTodos(todos);
       if (todos.length === 0) return "No todos match that filter.";
       return todos.map(formatTodo).join("\n");
     }
@@ -445,7 +471,7 @@ async function callTool(name, args = {}) {
       if (Object.keys(payload).length === 1) {
         throw new Error("Pass at least one field to change besides 'id'");
       }
-      const result = await sendCommand("todo.update", payload);
+      const result = await sendCommand("todo.update", withIdentityGuard(payload, args.id));
       return "Updated todo #" + result.todo.id + ": " + result.todo.title
         + " [" + result.todo.state.label + "]";
     }
@@ -549,7 +575,7 @@ async function callTool(name, args = {}) {
       if (typeof args.id !== "number" || !Number.isInteger(args.id)) {
         throw new Error("'id' is required and must be an integer");
       }
-      const result = await sendCommand("todo.complete", { todoId: args.id });
+      const result = await sendCommand("todo.complete", withIdentityGuard({ todoId: args.id }, args.id));
       return "Completed todo #" + result.todo.id + ": " + result.todo.title;
     }
 

@@ -274,8 +274,14 @@ describe("FR-020: an unknown future schema version is skipped, not fatal", () =>
   });
 });
 
-describe("FR-005: two offline machines never assign the same permanent todo number", () => {
-  it("keeps every todo id distinct after both devices create work before ever syncing with each other", () => {
+describe("two offline machines converge on one todo number each, without coordinating", () => {
+  // Rewritten when todo ids became dense. The retired block scheme guaranteed two machines could
+  // never claim the same number, at the cost of 15-digit ids on every machine but the first. Dense
+  // ids deliberately give up that guarantee -- offline machines DO claim the same numbers -- and
+  // buy it back at merge time, where both derive the same assignment from the full set of claims.
+  // What this test protects is therefore the outcome, not the old mechanism: nothing lost, no
+  // duplicates, and both machines agreeing which todo holds which number.
+  it("resolves the overlapping claims both devices make while apart, losing nothing", () => {
     // Device A originates the shared folder (assigns block 0 -- see device-identity.ts's own
     // header comment) and publishes something, so B's own first-assignment sees a non-virgin
     // folder and is guaranteed a different block. This goes through the real production function
@@ -310,22 +316,30 @@ describe("FR-005: two offline machines never assign the same permanent todo numb
       () => Array.from({ length: 5 }, (_, i) => createTodo({ title: `B todo ${i}` }).id),
     );
 
-    // FR-005's own acceptance criterion: every id either machine handed out while offline is
-    // unique, with no coordination between them at creation time.
-    const overlap = aIds.filter((id) => bIds.includes(id));
-    expect(overlap).toEqual([]);
+    // The overlap is expected now -- both machines counted from the same place while apart.
+    expect(aIds.filter((id) => bIds.includes(id)).length).toBeGreaterThan(0);
+    // ...and every number stayed small, which is the entire point of the change.
+    for (const id of [...aIds, ...bIds]) expect(id).toBeLessThan(10_000);
 
     // Merging both directions must not throw a PRIMARY KEY collision and must preserve every row.
     harness.sync(harness.deviceB);
     harness.sync(harness.deviceA);
+    harness.sync(harness.deviceB);
 
-    const allIdsOnA = harness.as(harness.deviceA, () => listTodos().map((t) => t.id));
-    const allIdsOnB = harness.as(harness.deviceB, () => listTodos().map((t) => t.id));
-    expect(new Set(allIdsOnA).size).toBe(allIdsOnA.length); // no duplicate ids on A
-    expect(new Set(allIdsOnB).size).toBe(allIdsOnB.length); // no duplicate ids on B
-    for (const id of [aFirst.id, ...aIds, ...bIds]) {
-      expect(allIdsOnA).toContain(id);
-      expect(allIdsOnB).toContain(id);
-    }
+    const onA = harness.as(harness.deviceA, () => listTodos().map((t) => `${t.id}:${t.title}`).sort());
+    const onB = harness.as(harness.deviceB, () => listTodos().map((t) => `${t.id}:${t.title}`).sort());
+
+    const idsOnA = harness.as(harness.deviceA, () => listTodos().map((t) => t.id));
+    expect(new Set(idsOnA).size).toBe(idsOnA.length); // no duplicate ids
+
+    // Every todo survived, addressed by title since the numbers are what the merge resolves.
+    const titlesOnA = harness.as(harness.deviceA, () => listTodos().map((t) => t.title).sort());
+    expect(titlesOnA).toEqual(
+      ["A's first todo", ...Array.from({ length: 5 }, (_, i) => `A todo ${i}`), ...Array.from({ length: 5 }, (_, i) => `B todo ${i}`)].sort(),
+    );
+    expect(aFirst.title).toBe("A's first todo");
+
+    // The contract that actually matters: both machines agree on every number.
+    expect(onA).toEqual(onB);
   });
 });

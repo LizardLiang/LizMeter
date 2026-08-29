@@ -1,7 +1,13 @@
 // electron/main/sync/device-identity.ts
 // Machine identity for multi-writer sync: a permanent per-device UUID, independent of any data
-// folder move, plus the per-device "block" used to hand out permanent todo numbers (FR-004,
-// FR-005) without coordination between machines.
+// folder move, plus the counter this device hands out todo numbers from.
+//
+// Todo numbers are DENSE and sequential (1, 2, 3...) on every machine, not carved into per-device
+// blocks. Two machines creating todos while unable to see each other will therefore claim the same
+// number, and that is expected: the collision is resolved at merge time (see merge-engine.ts's
+// `resolveTodoIdCollision`), because a todo's id is the handle the user references it by and a
+// 15-digit block-allocated number is not usable as one. The block scheme this replaced produced
+// ids like 473829100000001 on every machine except the one that originated the shared folder.
 //
 // The device id lives in device-identity.json next to data-location.json, in Electron's own
 // userData folder -- never the (possibly shared, possibly moved) data folder. Identity must
@@ -24,10 +30,15 @@ type DbHandle = Database.Database;
 const IDENTITY_FILE_NAME = "device-identity.json";
 
 const DEVICE_NUMBER_KEY = "sync.deviceNumber";
-const NEXT_LOCAL_COUNTER_KEY = "sync.nextLocalCounter";
+const NEXT_TODO_ID_KEY = "sync.nextTodoId";
 
-/** Every synced todo id lives in `deviceNumber * TODO_ID_BLOCK_STRIDE + localCounter`. */
-export const TODO_ID_BLOCK_STRIDE = 100_000_000;
+/**
+ * The stride the retired block scheme used: an id at or above this could only ever have been
+ * handed out as `deviceNumber * stride + counter`. Kept solely so the one-time renumber
+ * (`renumberBlockAllocatedTodoIds`) can recognize the ids it must fold into the dense run --
+ * nothing allocates against it any more.
+ */
+export const LEGACY_TODO_ID_BLOCK_STRIDE = 100_000_000;
 
 /**
  * Exclusive upper bound for a randomly drawn device number. Device 0 is reserved -- see below.
@@ -160,30 +171,43 @@ function drawUnusedDeviceNumber(database: DbHandle): number {
 }
 
 /**
- * The next permanent todo id this device may hand out. Persists the incremented counter before
- * returning, so a crash between allocating and inserting loses at most one number and never
- * reuses one.
+ * The next todo id this device may hand out. Persists the incremented counter *before* returning,
+ * so a crash between allocating and inserting loses at most one number and never reuses one.
+ *
+ * A high-water mark rather than `MAX(id) + 1`: deleting the newest todo must not free its number
+ * for the next one. A number that has been issued is the handle the user references that todo by,
+ * and handing it to a different todo later would silently repoint an existing reference -- the one
+ * failure the dense-id design exists to prevent.
  */
 export function allocateNextTodoId(database: DbHandle): number {
-  const deviceNumber = getOrAssignDeviceNumber(database);
-  const stored = readSetting(database, NEXT_LOCAL_COUNTER_KEY);
-  const parsedStored = stored !== null ? Number.parseInt(stored, 10) : Number.NaN;
-  const current = Number.isInteger(parsedStored) ? parsedStored : initialLocalCounter(database, deviceNumber);
+  const current = readTodoIdWatermark(database);
+  writeSetting(database, NEXT_TODO_ID_KEY, String(current + 1));
+  return current;
+}
 
-  writeSetting(database, NEXT_LOCAL_COUNTER_KEY, String(current + 1));
-  return deviceNumber * TODO_ID_BLOCK_STRIDE + current;
+/** The watermark's current value, seeded from the existing rows the first time it is read. */
+function readTodoIdWatermark(database: DbHandle): number {
+  const stored = readSetting(database, NEXT_TODO_ID_KEY);
+  const parsed = stored !== null ? Number.parseInt(stored, 10) : Number.NaN;
+  if (Number.isInteger(parsed)) return parsed;
+
+  // Unset: this device is either enabling sync over an existing database or has just rebuilt from
+  // a peer's snapshot. Either way its current rows are the floor.
+  const { maxId } = database.prepare("SELECT COALESCE(MAX(id), 0) AS maxId FROM todos").get() as { maxId: number };
+  return maxId + 1;
 }
 
 /**
- * Seeds the counter so device 0 (the legacy machine) continues exactly where its existing
- * AUTOINCREMENT ids left off, and every other device starts its block at 1.
+ * Raises this device's watermark above every todo id a merge just applied, so a machine returning
+ * from an offline window stops walking straight back into numbers its peer already used. Without
+ * this, every todo the returning machine creates collides and has to be bumped -- correct, but
+ * needless churn the user would see as their numbers moving.
  */
-function initialLocalCounter(database: DbHandle, deviceNumber: number): number {
-  if (deviceNumber !== 0) return 1;
-  const { maxId } = database.prepare("SELECT COALESCE(MAX(id), 0) AS maxId FROM todos").get() as {
-    maxId: number;
-  };
-  return maxId + 1;
+export function advanceTodoIdWatermark(database: DbHandle, seenMaxId: number): void {
+  if (!Number.isInteger(seenMaxId) || seenMaxId <= 0) return;
+  const current = readTodoIdWatermark(database);
+  if (seenMaxId < current) return;
+  writeSetting(database, NEXT_TODO_ID_KEY, String(seenMaxId + 1));
 }
 
 /** Registers (or refreshes) this device in the local peer registry. Idempotent. */

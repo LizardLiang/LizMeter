@@ -827,7 +827,9 @@ export type SyncNoticeKind =
   | "placeholder-blocked"
   | "stray-file"
   | "stale-machine-rebuild"
-  | "adopted-backup";
+  | "adopted-backup"
+  /** A todo's visible number changed because another machine had already claimed it. */
+  | "todo-id-reassigned";
 
 export interface SyncNotice {
   id: number;
@@ -836,6 +838,15 @@ export interface SyncNotice {
   detail: string | null;
   createdAt: string;
   dismissed: boolean;
+}
+
+/** Result of the one-time fold of block-allocated todo ids into the dense sequence. */
+export interface RenumberOutcome {
+  /** `confirm-required` on the first ask -- this rewrites numbers and is not undoable in place. */
+  status: "confirm-required" | "done" | "nothing-to-do";
+  count: number;
+  renumbered: Array<{ from: number; to: number; }>;
+  backupPath: string | null;
 }
 
 // --- Electron API (exposed via contextBridge) ---
@@ -971,6 +982,10 @@ export interface ElectronAPI {
     disable: () => Promise<void>;
     listNotices: (input?: { includeDismissed?: boolean; }) => Promise<SyncNotice[]>;
     dismissNotice: (id: number) => Promise<void>;
+    /** How many todos still carry a 15-digit number from the retired block scheme. */
+    pendingRenumberCount: () => Promise<number>;
+    /** One-way. Returns `confirm-required` until called with `confirm: true`. */
+    renumberLegacyIds: (input?: { confirm?: boolean; }) => Promise<RenumberOutcome>;
   };
   shell: {
     openExternal: (url: string) => Promise<void>;

@@ -425,6 +425,19 @@ function migrateSyncColumns(database: DbHandle): void {
       database.exec(`ALTER TABLE ${table} ADD COLUMN sync_order TEXT`);
     }
   }
+
+  // The number the creating device originally issued for a todo. Immutable, and the only id-ish
+  // value that travels between machines. The visible `todos.id` is DERIVED from the full set of
+  // claims (see merge-engine.ts's `reconcileTodoIds`), so that two machines which created todos
+  // while apart reach the same answer by computing it rather than by negotiating -- an earlier
+  // design let each machine pick a replacement number from its own counter and publish it, which
+  // never converged, because each machine's own write always looked newer than its peer's.
+  const todoCols = (database.prepare("PRAGMA table_info(todos)").all() as Array<{ name: string }>).map((c) => c.name);
+  if (!todoCols.includes("claimed_id")) {
+    database.exec("ALTER TABLE todos ADD COLUMN claimed_id INTEGER");
+    // Existing rows claim the number they already hold.
+    database.exec("UPDATE todos SET claimed_id = id WHERE claimed_id IS NULL");
+  }
 }
 
 type DbHandle = ReturnType<typeof getDb>;
@@ -2748,10 +2761,11 @@ export function createTodo(input: CreateTodoInput): Todo {
     if (explicitId !== null) {
       database
         .prepare(
-          `INSERT INTO todos (id, title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at, uuid)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO todos (id, claimed_id, title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at, uuid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
+          explicitId,
           explicitId,
           title,
           notes,
@@ -2795,13 +2809,18 @@ export function createTodo(input: CreateTodoInput): Todo {
     // last_insert_rowid() rather than result.lastInsertRowid: the same statement works
     // under better-sqlite3 and the sql.js test shim, which does not return that field.
     const { id } = database.prepare("SELECT last_insert_rowid() AS id").get() as { id: number };
+    // The AUTOINCREMENT branch above could not know its number in advance; both branches end up
+    // claiming the number they were actually given.
+    database.prepare("UPDATE todos SET claimed_id = ? WHERE id = ? AND claimed_id IS NULL").run(id, id);
 
     recordUpsert(database, "todos", uuid, {
-      // Unlike every other synced table, a todo's numeric `id` IS globally meaningful (FR-004,
-      // FR-005): it is the block-allocated, permanently-stable, user-visible number, not a
-      // device-local AUTOINCREMENT value. It must be replicated verbatim, never reassigned by
-      // the receiving device -- see merge-engine.ts's special-cased handling of this field.
-      id,
+      // Unlike every other synced table, a todo's number IS globally meaningful: it is the small,
+      // user-visible handle people reference a todo by, in notes and through the MCP tools. What
+      // travels is the *claim* -- the number this device issued -- never the resolved id. Two
+      // machines working apart will claim the same number, and each machine derives the same
+      // final assignment from the full set of claims (merge-engine.ts's `reconcileTodoIds`)
+      // rather than negotiating one, which is what makes them converge.
+      claimed_id: id,
       title,
       notes,
       milestone,

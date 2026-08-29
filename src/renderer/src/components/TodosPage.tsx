@@ -457,7 +457,16 @@ export function TodosPage() {
     toggleTodoLabel,
   } = useTodos();
 
-  const [editing, setEditing] = useState<Todo | null>(null);
+  /**
+   * The open edit dialog is tracked by id and the row is looked up fresh on every render, rather
+   * than holding the `Todo` object the dialog was opened with. A sync merge can renumber todos
+   * (merge-engine.ts's `reconcileTodoIds`) or delete one out from under an open dialog, and a
+   * captured snapshot would go on saving against a number that by then means a different todo --
+   * or none. Deriving means the dialog follows the row, and closes by itself once it is gone.
+   */
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const editing = editingId === null ? null : todos.find((t) => t.id === editingId) ?? null;
+  const setEditing = useCallback((todo: Todo | null) => setEditingId(todo === null ? null : todo.id), []);
   /**
    * Non-null while the create dialog is open. `stateId` is the group whose "+" was clicked;
    * `parent` is set by Ctrl+Shift+O, which creates the new todo as a sub-issue.
@@ -783,7 +792,9 @@ export function TodosPage() {
 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+    // `setEditing` is a stable useCallback with no dependencies of its own, so listing it here
+    // keeps the shortcut handler bound exactly once, as before.
+  }, [setEditing]);
 
   const selectedIds = useMemo(() => [...selected], [selected]);
 

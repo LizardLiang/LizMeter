@@ -8,7 +8,14 @@
 // to adopt. See sync-manager.ts's `decidePendingSyncAction`.
 
 import { ipcMain } from "electron";
-import { dismissNotice, disableSync, getSyncStatus, listNotices } from "./sync-manager.ts";
+import {
+  dismissNotice,
+  disableSync,
+  getPendingRenumberCount,
+  getSyncStatus,
+  listNotices,
+  renumberLegacyTodoIds,
+} from "./sync-manager.ts";
 
 export function registerSyncIpcHandlers(): void {
   ipcMain.handle("sync:get-status", () => {
@@ -25,5 +32,17 @@ export function registerSyncIpcHandlers(): void {
 
   ipcMain.handle("sync:dismiss-notice", (_event, input: { id: number }) => {
     dismissNotice(input.id);
+  });
+
+  // How many todos still carry a 15-digit number from the retired block scheme. Drives whether the
+  // Settings control appears at all -- on a machine with nothing to fix, it should not.
+  ipcMain.handle("sync:pending-renumber-count", () => {
+    return getPendingRenumberCount();
+  });
+
+  // The refuse-once-then-proceed shape `requiresAdoptConfirmation` and
+  // `requiresUnsyncedDbConfirmation` already use: a one-way step never runs on the first ask.
+  ipcMain.handle("sync:renumber-legacy-ids", (_event, input: { confirm?: boolean } = {}) => {
+    return renumberLegacyTodoIds(input.confirm === true);
   });
 }

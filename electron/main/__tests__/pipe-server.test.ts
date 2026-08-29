@@ -142,6 +142,65 @@ describe("todo.add", () => {
 
 // --- todo.list --------------------------------------------------------------
 
+describe("stale-write guard", () => {
+  // A merge can renumber todos between a caller listing them and writing to one. The caller
+  // replays the identity it saw, so a number that has since changed hands is refused instead of
+  // silently taking the write.
+  it("hands out each todo's uuid alongside its number", () => {
+    send({ id: 1, type: "todo.add", title: "a" });
+    const reply = send({ id: 2, type: "todo.list" });
+    const { todos } = reply?.result as { todos: Array<{ id: number; uuid: string | null; }>; };
+    expect(typeof todos[0]!.uuid).toBe("string");
+    expect(todos[0]!.uuid).not.toBe("");
+  });
+
+  it("accepts a write whose expected identity still matches", () => {
+    const added = send({ id: 1, type: "todo.add", title: "a" });
+    const todoId = (added?.result as { todo: { id: number; }; }).todo.id;
+    const { todos } = send({ id: 2, type: "todo.list" })?.result as { todos: Array<{ uuid: string; }>; };
+
+    const reply = send({ id: 3, type: "todo.update", todoId, expectUuid: todos[0]!.uuid, title: "b" });
+    expect((reply?.result as { todo: { title: string; }; }).todo.title).toBe("b");
+  });
+
+  it("refuses a write whose number now belongs to a different todo", () => {
+    const added = send({ id: 1, type: "todo.add", title: "a" });
+    const todoId = (added?.result as { todo: { id: number; }; }).todo.id;
+
+    const reply = send({
+      id: 2,
+      type: "todo.update",
+      todoId,
+      expectUuid: "00000000-0000-0000-0000-000000000000",
+      title: "should not apply",
+    });
+
+    expect(String(reply?.error)).toContain("renumbered");
+    const after = send({ id: 3, type: "todo.list" })?.result as { todos: Array<{ title: string; }>; };
+    expect(after.todos[0]!.title).toBe("a"); // the write really did not land
+  });
+
+  it("refuses a stale todo.complete the same way", () => {
+    const added = send({ id: 1, type: "todo.add", title: "a" });
+    const todoId = (added?.result as { todo: { id: number; }; }).todo.id;
+
+    const reply = send({
+      id: 2,
+      type: "todo.complete",
+      todoId,
+      expectUuid: "00000000-0000-0000-0000-000000000000",
+    });
+    expect(String(reply?.error)).toContain("renumbered");
+  });
+
+  it("keeps working for a caller that sends no identity at all", () => {
+    const added = send({ id: 1, type: "todo.add", title: "a" });
+    const todoId = (added?.result as { todo: { id: number; }; }).todo.id;
+    const reply = send({ id: 2, type: "todo.update", todoId, title: "b" });
+    expect((reply?.result as { todo: { title: string; }; }).todo.title).toBe("b");
+  });
+});
+
 describe("todo.list", () => {
   it("returns every todo by default", () => {
     send({ id: 1, type: "todo.add", title: "a" });

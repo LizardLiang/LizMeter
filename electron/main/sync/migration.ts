@@ -5,7 +5,14 @@
 
 import type Database from "better-sqlite3";
 import { backupDbWithSiblings } from "../data-location.ts";
-import { getDeviceId, getOrAssignDeviceNumber, registerDevice } from "./device-identity.ts";
+import {
+  getDeviceId,
+  getOrAssignDeviceNumber,
+  LEGACY_TODO_ID_BLOCK_STRIDE,
+  registerDevice,
+} from "./device-identity.ts";
+import { moveTodoRowId } from "./merge-engine.ts";
+import { addSyncNotice } from "./notices.ts";
 import { allColumnsFor, encodeRowFields } from "./row-codec.ts";
 import { newUuid, recordUpsert, setSyncEnabled } from "./sync-writer.ts";
 
@@ -78,13 +85,77 @@ export function publishExistingData(database: DbHandle): void {
       if (!rowUuid) continue;
 
       const fields = encodeRowFields(database, table, row, columns);
-      // A todo's numeric id is globally meaningful (FR-004, FR-005) and must be replicated
-      // verbatim -- every other synced table's local id is device-specific and stays behind.
+      // A todo's numeric id is globally meaningful -- it is the handle the user references the
+      // todo by -- so it is published like any other field. Every other synced table's local id is
+      // device-specific and stays behind.
       if (table === "todos") fields["id"] = row["id"] as number;
 
       recordUpsert(database, table, rowUuid, fields);
     }
   }
+}
+
+export interface RenumberResult {
+  backupPath: string | null;
+  renumbered: Array<{ from: number; to: number }>;
+}
+
+/** How many todos still carry a number the retired block scheme handed out. */
+export function countBlockAllocatedTodos(database: DbHandle): number {
+  const { count } = database
+    .prepare("SELECT COUNT(*) AS count FROM todos WHERE id >= ?")
+    .get(LEGACY_TODO_ID_BLOCK_STRIDE) as { count: number };
+  return count;
+}
+
+/**
+ * The one-time fold of block-allocated ids into the dense run (user-initiated, from Settings).
+ *
+ * Deliberately narrow: a todo whose number is below the legacy stride was issued by the machine
+ * that originated the shared folder, and is therefore a number the user may already have written
+ * into a note or passed to the MCP tools -- those never move. Only the unusable 15-digit ids are
+ * reassigned, taking the next numbers after the highest untouched one, in creation order.
+ *
+ * The new number is written to `claimed_id` as well as `id` and published, so the peer adopts the
+ * same assignment through the ordinary derivation path rather than needing a migration of its own.
+ *
+ * Idempotent: a second run finds nothing at or above the stride and does nothing.
+ */
+export function renumberBlockAllocatedTodoIds(database: DbHandle, dbPath?: string): RenumberResult {
+  const legacy = database
+    .prepare("SELECT id, uuid FROM todos WHERE id >= ? ORDER BY created_at ASC, uuid ASC, id ASC")
+    .all(LEGACY_TODO_ID_BLOCK_STRIDE) as Array<{ id: number; uuid: string | null }>;
+  if (legacy.length === 0) return { backupPath: null, renumbered: [] };
+
+  // Same convention as every other one-way step in this codebase (.pre-sync-*, .pre-nesting-*).
+  const backupPath = dbPath !== undefined ? backupDbWithSiblings(dbPath, "renumber", "copy") : null;
+
+  const { maxId } = database
+    .prepare("SELECT COALESCE(MAX(id), 0) AS maxId FROM todos WHERE id < ?")
+    .get(LEGACY_TODO_ID_BLOCK_STRIDE) as { maxId: number };
+
+  const renumbered: Array<{ from: number; to: number }> = [];
+  const run = database.transaction(() => {
+    let next = maxId + 1;
+    for (const row of legacy) {
+      // No two-phase dance needed here, unlike reconcileTodoIds: every target sits below the
+      // stride and above the highest number already in use there, so it cannot be occupied.
+      moveTodoRowId(database, row.id, next);
+      database.prepare("UPDATE todos SET claimed_id = ? WHERE id = ?").run(next, next);
+      if (row.uuid !== null) recordUpsert(database, "todos", row.uuid, { claimed_id: next });
+      renumbered.push({ from: row.id, to: next });
+      next += 1;
+    }
+    addSyncNotice(
+      database,
+      "todo-id-reassigned",
+      `${renumbered.length} todo(s) were renumbered into the normal sequence.`,
+      renumbered.map((r) => `#${r.from} -> #${r.to}`).join(", "),
+    );
+  });
+  run();
+
+  return { backupPath, renumbered };
 }
 
 /**

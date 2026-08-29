@@ -29,6 +29,7 @@ import type {
   PlaylistAddTrackInput,
   SaveSessionInput,
   SaveSessionWithTrackingInput,
+  RenumberOutcome,
   SyncNotice,
   SyncStatus,
   TimerSettings,
@@ -165,6 +166,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     listNotices: (input?: { includeDismissed?: boolean }): Promise<SyncNotice[]> =>
       ipcRenderer.invoke("sync:list-notices", input),
     dismissNotice: (id: number): Promise<void> => ipcRenderer.invoke("sync:dismiss-notice", { id }),
+    pendingRenumberCount: (): Promise<number> => ipcRenderer.invoke("sync:pending-renumber-count"),
+    renumberLegacyIds: (input?: { confirm?: boolean }): Promise<RenumberOutcome> =>
+      ipcRenderer.invoke("sync:renumber-legacy-ids", input),
   },
   shell: {
     openExternal: (url: string) => ipcRenderer.invoke("shell:open-external", url),
