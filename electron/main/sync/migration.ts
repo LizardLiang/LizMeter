@@ -4,7 +4,7 @@
 // actually turned on for the first time.
 
 import type Database from "better-sqlite3";
-import fs from "node:fs";
+import { backupDbWithSiblings } from "../data-location.ts";
 import { getDeviceId, getOrAssignDeviceNumber, registerDevice } from "./device-identity.ts";
 import { allColumnsFor, encodeRowFields } from "./row-codec.ts";
 import { newUuid, recordUpsert, setSyncEnabled } from "./sync-writer.ts";
@@ -15,18 +15,13 @@ const SYNC_ROW_TABLES = ["todos", "tags", "todo_labels", "todo_states", "todo_pr
 
 /**
  * Timestamped backup before the one-way step, matching the convention already used elsewhere in
- * the data folder (`.pre-nesting-*`, `.pre-states-*`). Copies the db file plus its `-wal`/`-shm`
- * siblings, when present, exactly as `data-location.ts`'s own move does.
+ * the data folder (`.pre-nesting-*`, `.pre-states-*`). Thin wrapper over `data-location.ts`'s
+ * shared {@link backupDbWithSiblings} (H3-B2) -- returns `null`, doing nothing, for `:memory:` or
+ * a path that does not exist, which lets `runSyncMigration` below call this unconditionally
+ * instead of duplicating that guard at its own call site.
  */
-export function backupBeforeSyncMigration(dbPath: string): string {
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupPath = `${dbPath}.pre-sync-${stamp}.bak`;
-  fs.copyFileSync(dbPath, backupPath);
-  for (const suffix of ["-wal", "-shm"]) {
-    const side = `${dbPath}${suffix}`;
-    if (fs.existsSync(side)) fs.copyFileSync(side, `${backupPath}${suffix}`);
-  }
-  return backupPath;
+export function backupBeforeSyncMigration(dbPath: string): string | null {
+  return backupDbWithSiblings(dbPath, "sync", "copy");
 }
 
 /** Adds a uuid to every row of every synced table that predates this column. */
@@ -56,9 +51,9 @@ export interface SyncMigrationResult {
  * 1..N already satisfy `0 * stride + n` when it draws 0, so nothing is renumbered.
  */
 export function runSyncMigration(database: DbHandle, dbPath: string | undefined, dataDir: string): SyncMigrationResult {
-  const backupPath = dbPath !== undefined && dbPath !== ":memory:" && fs.existsSync(dbPath)
-    ? backupBeforeSyncMigration(dbPath)
-    : null;
+  // H3-B2: the ":memory:"/existsSync guard now lives inside backupBeforeSyncMigration itself
+  // (via the shared backupDbWithSiblings), not duplicated here.
+  const backupPath = dbPath !== undefined ? backupBeforeSyncMigration(dbPath) : null;
 
   backfillUuids(database);
 

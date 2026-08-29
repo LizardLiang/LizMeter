@@ -16,6 +16,13 @@ vi.mock("electron", () => ({
       throw new Error(`unexpected app.getPath(${name})`);
     },
   },
+  // M-006's runMergePassSafely test reaches notifyUser() on the halt path; sync-manager.ts's
+  // own top-level `import { Notification } from "electron"` needs this mocked too.
+  Notification: class {
+    static isSupported(): boolean {
+      return false;
+    }
+  },
 }));
 
 import {
@@ -24,16 +31,20 @@ import {
   isAdoptedDevice,
   markDeviceAsAdopted,
 } from "../../data-location.ts";
-import { createTodo, getDb, initDatabase, listTodos, setActiveDatabaseForTesting } from "../../database.ts";
+import { createTodo, getCurrentDbPath, getDb, initDatabase, listTodos, setActiveDatabaseForTesting } from "../../database.ts";
 import { invalidateDataDirCache } from "../../data-location.ts";
 import { getDeviceId, invalidateDeviceIdCache } from "../device-identity.ts";
 import { getSyncDevicesDir, readOplogEntries } from "../oplog.ts";
+import { RETENTION_DAYS, writeSnapshotIfDue } from "../snapshot.ts";
 import {
   applyPendingSyncActionAfterInit,
   decidePendingSyncAction,
+  getSyncStatus,
+  listNotices,
   requiresAdoptConfirmation,
+  runMergePassSafely,
 } from "../sync-manager.ts";
-import { isSyncEnabled } from "../sync-writer.ts";
+import { isSyncEnabled, setSyncEnabled } from "../sync-writer.ts";
 
 let root: string;
 let userDataA: string;
@@ -167,5 +178,52 @@ describe("applyPendingSyncActionAfterInit", () => {
     const database = getDb();
     expect(isSyncEnabled(database)).toBe(true);
     expect(listTodos().some((t) => t.title === "from device A")).toBe(true);
+  });
+});
+
+describe("runMergePassSafely / M-006: a failed pre-rebuild backup gets a dedicated notice, not a silent console.warn", () => {
+  const ONE_DAY_MS = 24 * 60 * 60 * 1000;
+  const RETENTION_MS = RETENTION_DAYS * ONE_DAY_MS;
+
+  it("halts with the backup-failure reason and raises a stale-machine-rebuild notice instead of swallowing the error", () => {
+    const database = getDb();
+    setSyncEnabled(database, true);
+    const dataDir = getDataDir();
+    const deviceId = getDeviceId();
+
+    // A snapshot must exist somewhere, or rebuildFromSnapshot's own null-snapshot guard returns
+    // false before ever reaching the backup step this test means to fail.
+    writeSnapshotIfDue(database, dataDir, deviceId, Date.now());
+
+    const staleTimestamp = new Date(Date.now() - RETENTION_MS - ONE_DAY_MS).toISOString();
+    database.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('sync.lastSyncedAt', ?)").run(
+      staleTimestamp,
+    );
+
+    // getCurrentDbPath() resolves to a real on-disk path even though this test's own db is
+    // :memory: -- touch a file there so backupBeforeRebuild's existsSync guard does not
+    // short-circuit before ever reaching the copy this test means to fail.
+    const dbPath = getCurrentDbPath();
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+    fs.writeFileSync(dbPath, "pretend sqlite bytes");
+
+    const copySpy = vi.spyOn(fs, "copyFileSync").mockImplementation(() => {
+      throw new Error("ENOSPC: no space left on device");
+    });
+    try {
+      runMergePassSafely();
+    } finally {
+      copySpy.mockRestore();
+    }
+
+    const status = getSyncStatus();
+    expect(status.halted?.reason).toMatch(/could not write the pre-rebuild backup/);
+
+    const notices = listNotices();
+    expect(
+      notices.some((n) =>
+        n.kind === "stale-machine-rebuild" && n.message.includes("safety backup could not be written")
+      ),
+    ).toBe(true);
   });
 });

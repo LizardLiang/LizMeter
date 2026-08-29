@@ -199,6 +199,37 @@ export function markPrivateDb(): void {
 }
 
 /**
+ * Timestamped backup of a SQLite database plus its `-wal`/`-shm` siblings, when present (H3-B2).
+ * Shared by every destructive-step backup in this feature: {@link backupExistingPrivateDbBeforeAdopt}
+ * below, `migration.ts`'s `backupBeforeSyncMigration`, and `snapshot.ts`'s `backupBeforeRebuild`.
+ * Before this, each had its own byte-for-byte copy of the same "timestamp, transfer three files,
+ * return the path" logic -- a correctness invariant (the `-wal`/`-shm` siblings must travel
+ * together, or a WAL-mode backup is inconsistent), not boilerplate, so a future fix to this
+ * mechanic (e.g. checkpointing before the copy) needed to land in three places to actually apply
+ * everywhere.
+ *
+ * `mode: "copy"` leaves the original in place (the sync-migration and stale-rebuild backups,
+ * whose caller keeps using the original afterward); `mode: "move"` renames the original away (the
+ * pre-adopt backup, whose caller is about to open a fresh file at that exact path).
+ *
+ * Returns `null`, doing nothing, for `:memory:` or a path that does not currently exist -- every
+ * caller treats "nothing to back up" as a safe no-op, not a failure.
+ */
+export function backupDbWithSiblings(dbPath: string, tag: string, mode: "copy" | "move"): string | null {
+  if (dbPath === ":memory:" || !fs.existsSync(dbPath)) return null;
+
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = `${dbPath}.pre-${tag}-${stamp}.bak`;
+  const transfer = mode === "copy" ? fs.copyFileSync : fs.renameSync;
+  transfer(dbPath, backupPath);
+  for (const suffix of ["-wal", "-shm"]) {
+    const side = `${dbPath}${suffix}`;
+    if (fs.existsSync(side)) transfer(side, `${backupPath}${suffix}`);
+  }
+  return backupPath;
+}
+
+/**
  * Renames any database already sitting at this device's private db location out of the way,
  * before it is about to be adopted-into (FR-017's "rebuild a fresh local database").
  *
@@ -211,18 +242,8 @@ export function markPrivateDb(): void {
  * FR-017's "surface the old file's location"), or `null` when there was nothing there to move.
  */
 export function backupExistingPrivateDbBeforeAdopt(): string | null {
-  const dir = getDefaultDataDir();
-  const dbPath = path.join(dir, DB_FILE_NAME);
-  if (!fs.existsSync(dbPath)) return null;
-
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupPath = `${dbPath}.pre-adopt-${stamp}.bak`;
-  fs.renameSync(dbPath, backupPath);
-  for (const suffix of ["-wal", "-shm"]) {
-    const side = `${dbPath}${suffix}`;
-    if (fs.existsSync(side)) fs.renameSync(side, `${backupPath}${suffix}`);
-  }
-  return backupPath;
+  const dbPath = path.join(getDefaultDataDir(), DB_FILE_NAME);
+  return backupDbWithSiblings(dbPath, "adopt", "move");
 }
 
 /**

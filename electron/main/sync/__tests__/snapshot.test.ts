@@ -17,7 +17,17 @@ vi.mock("electron", () => ({
   },
 }));
 
-import { createTodo, createTodoProject, deleteTodo, listTodoProjects, listTodos } from "../../database.ts";
+import Database from "better-sqlite3";
+import {
+  createTodo,
+  createTodoAttachment,
+  createTodoProject,
+  deleteTodo,
+  listTodoAttachments,
+  listTodoProjects,
+  listTodos,
+  saveSessionWithTracking,
+} from "../../database.ts";
 import { createTwoDeviceHarness, type TwoDeviceHarness } from "../../../../src/test/two-device-harness.ts";
 import { getSyncDevicesDir, readOplogEntries } from "../oplog.ts";
 import {
@@ -224,6 +234,101 @@ describe("isStale / rebuildFromSnapshot (FR-019)", () => {
     expect(onB.some((t) => t.title === "device B's own pre-rebuild todo")).toBe(false);
     expect(onB.find((t) => t.id === created.id)?.title).toBe("from the snapshot");
   });
+
+  it("preserves claude_code_sessions/idle_periods across a rebuild by re-linking them to a session that survives it (H3-B1)", () => {
+    // claude_code_sessions/idle_periods are FR-003 machine-local -- never oplogged, never
+    // snapshotted -- so `DELETE FROM sessions` inside wipe() cascades them away unless
+    // rebuildFromSnapshot explicitly preserves and re-links them itself.
+    const session = harness.as(harness.deviceB, () =>
+      saveSessionWithTracking({
+        title: "session with claude code activity",
+        timerType: "work",
+        plannedDurationSeconds: 1500,
+        actualDurationSeconds: 1500,
+        claudeCodeSessions: [{
+          ccSessionUuid: "cc-uuid-1",
+          fileEditCount: 3,
+          totalIdleSeconds: 60,
+          idlePeriodCount: 1,
+          firstActivityAt: "2026-01-01T00:00:00.000Z",
+          lastActivityAt: "2026-01-01T00:10:00.000Z",
+          filesEdited: ["a.ts"],
+          idlePeriods: [
+            { startAt: "2026-01-01T00:05:00.000Z", endAt: "2026-01-01T00:06:00.000Z", durationSeconds: 60 },
+          ],
+        }],
+      }));
+
+    // B's session is a synced row (its oplog entry was appended by saveSessionWithTracking above).
+    // A pulls it in, then publishes a snapshot that includes it -- this is the snapshot B will
+    // rebuild from, so the session (and therefore its cascade-linked activity rows) has somewhere
+    // to survive into.
+    harness.sync(harness.deviceA);
+    const now = Date.now();
+    harness.as(
+      harness.deviceA,
+      () => writeSnapshotIfDue(harness.deviceA.db, harness.sharedDir, harness.deviceA.deviceId, now),
+    );
+
+    const rebuilt = harness.as(
+      harness.deviceB,
+      () => rebuildFromSnapshot(harness.deviceB.db, harness.sharedDir, harness.deviceB.deviceId, now + 1000),
+    );
+    expect(rebuilt).toBe(true);
+
+    const ccSessions = harness.as(
+      harness.deviceB,
+      () =>
+        harness.deviceB.db.prepare("SELECT * FROM claude_code_sessions WHERE session_id = ?").all(
+          session.id,
+        ),
+    ) as Array<{ id: string; cc_session_uuid: string; file_edit_count: number }>;
+    expect(ccSessions.length).toBe(1);
+    expect(ccSessions[0]!.cc_session_uuid).toBe("cc-uuid-1");
+    expect(ccSessions[0]!.file_edit_count).toBe(3);
+
+    const idlePeriods = harness.as(
+      harness.deviceB,
+      () =>
+        harness.deviceB.db.prepare("SELECT * FROM claude_code_idle_periods WHERE cc_session_id = ?").all(
+          ccSessions[0]!.id,
+        ),
+    ) as Array<{ duration_seconds: number }>;
+    expect(idlePeriods.length).toBe(1);
+    expect(idlePeriods[0]!.duration_seconds).toBe(60);
+  });
+
+  it("rebuilds todo_attachments from the snapshot instead of losing them to the cascade (H3-B1)", () => {
+    const created = harness.as(harness.deviceA, () => createTodo({ title: "has an attachment" }));
+    harness.as(harness.deviceA, () =>
+      createTodoAttachment({
+        todoId: created.id,
+        sha256: "a".repeat(64),
+        fileName: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: 1234,
+      }));
+
+    const now = Date.now();
+    harness.as(
+      harness.deviceA,
+      () => writeSnapshotIfDue(harness.deviceA.db, harness.sharedDir, harness.deviceA.deviceId, now),
+    );
+
+    const rebuilt = harness.as(
+      harness.deviceB,
+      () => rebuildFromSnapshot(harness.deviceB.db, harness.sharedDir, harness.deviceB.deviceId, now + 1000),
+    );
+    expect(rebuilt).toBe(true);
+
+    const onB = harness.as(harness.deviceB, () => listTodos().find((t) => t.id === created.id));
+    expect(onB).toBeDefined();
+
+    const attachments = harness.as(harness.deviceB, () => listTodoAttachments(onB!.id));
+    expect(attachments.length).toBe(1);
+    expect(attachments[0]!.fileName).toBe("screenshot.png");
+    expect(attachments[0]!.sha256).toBe("a".repeat(64));
+  });
 });
 
 describe("backupBeforeRebuild", () => {
@@ -254,5 +359,28 @@ describe("backupBeforeRebuild", () => {
   it("is a no-op when there is nothing at the given path (e.g. every :memory:-backed test)", () => {
     expect(backupBeforeRebuild(":memory:")).toBeNull();
     expect(backupBeforeRebuild(path.join(dir, "does-not-exist.db"))).toBeNull();
+  });
+
+  it("marks the backup's own lastSyncedAt as fresh, so restoring it does not immediately re-trigger the same rebuild (H3-B1)", () => {
+    const dbPath = path.join(dir, "lizmeter.db");
+    const seed = new Database(dbPath);
+    seed.exec("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    const staleTimestamp = new Date(Date.now() - RETENTION_MS - ONE_DAY_MS).toISOString();
+    seed.prepare("INSERT INTO settings (key, value) VALUES (?, ?)").run("sync.lastSyncedAt", staleTimestamp);
+    seed.close();
+
+    const backupPath = backupBeforeRebuild(dbPath);
+    expect(backupPath).not.toBeNull();
+
+    const restored = new Database(backupPath!);
+    const row = restored.prepare("SELECT value FROM settings WHERE key = ?").get("sync.lastSyncedAt") as
+      | { value: string }
+      | undefined;
+    restored.close();
+
+    expect(row).toBeDefined();
+    expect(row!.value).not.toBe(staleTimestamp);
+    // "Fresh" means isStale() would read this as not-stale if the backup were restored in place.
+    expect(Date.now() - Date.parse(row!.value)).toBeLessThan(ONE_DAY_MS);
   });
 });

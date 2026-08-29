@@ -21,7 +21,14 @@ import {
   writePendingSyncAction,
   type PendingSyncAction,
 } from "./pending-action.ts";
-import { getLastSyncedAt, isStale, markSyncedNow, rebuildFromSnapshot, writeSnapshotIfDue } from "./snapshot.ts";
+import {
+  getLastSyncedAt,
+  isStale,
+  markSyncedNow,
+  RebuildBackupFailedError,
+  rebuildFromSnapshot,
+  writeSnapshotIfDue,
+} from "./snapshot.ts";
 import { scanForStrayFiles } from "./stray-files.ts";
 import { isSyncEnabled, setSyncEnabled } from "./sync-writer.ts";
 import { startWatching, type SyncWatcher } from "./watcher.ts";
@@ -47,7 +54,9 @@ function notifyUser(title: string, body: string): void {
   }
 }
 
-function runMergePassSafely(): void {
+// Exported so M-006's catch branch below can be exercised directly, without also standing up
+// startSyncManager()'s fs.watch lifecycle -- this function itself never touches the watcher.
+export function runMergePassSafely(): void {
   const database = getDb();
   if (!isSyncEnabled(database)) return;
 
@@ -93,6 +102,27 @@ function runMergePassSafely(): void {
       // act, not a repeat alarm.
       if (isNewHalt) {
         addSyncNotice(database, "placeholder-blocked", err.message);
+        notifyUser("LizMeter sync paused", err.message);
+      }
+      return;
+    }
+    // M-006: a backup-write failure on this, the automatic FR-019 path, is fail-safe for data
+    // (rebuildFromSnapshot throws this before its wipe transaction ever opens -- see
+    // backupBeforeRebuild's own doc comment) but was previously indistinguishable from any other
+    // error here, so it fell into the generic console.warn below: silent, and repeated forever on
+    // every watcher retry with no user-visible signal, unlike the NotFullyHydratedError case just
+    // above. Same dedicated treatment: a halt notice on the transition into "halted", not a repeat
+    // alarm every 30 seconds while the underlying disk/permission problem persists.
+    if (err instanceof RebuildBackupFailedError) {
+      const isNewHalt = haltedReason === null;
+      haltedReason = err.message;
+      if (isNewHalt) {
+        addSyncNotice(
+          database,
+          "stale-machine-rebuild",
+          "This machine needed to rebuild from the latest snapshot, but the safety backup could not be written, so nothing was changed.",
+          err.message,
+        );
         notifyUser("LizMeter sync paused", err.message);
       }
       return;

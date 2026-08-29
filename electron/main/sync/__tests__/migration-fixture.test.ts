@@ -79,9 +79,14 @@ describe("backupBeforeSyncMigration", () => {
     const backupPath = backupBeforeSyncMigration(dbPath);
 
     expect(backupPath).toMatch(/\.pre-sync-.*\.bak$/);
-    expect(fs.readFileSync(backupPath, "utf8")).toBe("pretend sqlite bytes");
+    expect(fs.readFileSync(backupPath!, "utf8")).toBe("pretend sqlite bytes");
     expect(fs.readFileSync(`${backupPath}-wal`, "utf8")).toBe("pretend wal bytes");
     expect(fs.existsSync(`${backupPath}-shm`)).toBe(false);
+  });
+
+  it("is a no-op when there is nothing at the given path (H3-B2: shared guard moved into backupDbWithSiblings)", () => {
+    expect(backupBeforeSyncMigration(":memory:")).toBeNull();
+    expect(backupBeforeSyncMigration(path.join(dir, "does-not-exist.db"))).toBeNull();
   });
 });
 

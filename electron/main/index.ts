@@ -198,15 +198,40 @@ app.whenReady().then(() => {
   // adopter, needs this.
   const pendingSyncAction = consumePendingSyncActionBeforeInit();
   let adoptBackupPath: string | null = null;
-  if (pendingSyncAction?.action === "adopt") {
-    markDeviceAsAdopted();
-    // A device that used LizMeter standalone before ever touching sync already has a real
-    // database sitting at this same private location -- rename it out of the way so the
-    // adoption below opens (and rebuildFromSnapshot then repopulates) a genuinely fresh file,
-    // never that device's own pre-existing history (FR-017's "rebuild a fresh local database").
-    adoptBackupPath = backupExistingPrivateDbBeforeAdopt();
-  } else if (pendingSyncAction?.action === "enable") {
-    markPrivateDb();
+  // M-004: everything below through markPrivateDb() is a synchronous local (userData, never the
+  // shared cloud folder) filesystem write or rename that can throw -- disk full, or a file lock
+  // momentarily held by antivirus/indexing software right after a relaunch, both real on Windows.
+  // consumePendingSyncActionBeforeInit() above already deleted the marker (by design, so a crash
+  // between read and delete cannot replay a stale action forever), so an uncaught throw here would
+  // leave nothing to retry from -- the same "silent, windowless, non-quitting process" R2-B2
+  // exists to prevent for the block below, at a call site R2-B2 did not cover. initDatabase() has
+  // not run yet at this point, so soldiering on afterward risks opening the wrong database (e.g.
+  // a shared folder's, before this device's private-db marker was actually written) -- quitting
+  // cleanly and retrying the whole action from the top next launch is safer than guessing.
+  try {
+    if (pendingSyncAction?.action === "adopt") {
+      markDeviceAsAdopted();
+      // A device that used LizMeter standalone before ever touching sync already has a real
+      // database sitting at this same private location -- rename it out of the way so the
+      // adoption below opens (and rebuildFromSnapshot then repopulates) a genuinely fresh file,
+      // never that device's own pre-existing history (FR-017's "rebuild a fresh local database").
+      adoptBackupPath = backupExistingPrivateDbBeforeAdopt();
+    } else if (pendingSyncAction?.action === "enable") {
+      markPrivateDb();
+    }
+  } catch (err) {
+    console.error("[startup] pre-init sync action setup failed:", err);
+    if (pendingSyncAction !== null) {
+      writePendingSyncAction(pendingSyncAction);
+    }
+    dialog.showErrorBox(
+      "Startup Error",
+      `Could not prepare this machine's sync setup. The app will retry on the next launch.\n\nError: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    app.quit();
+    return;
   }
 
   try {
