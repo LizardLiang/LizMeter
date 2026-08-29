@@ -114,21 +114,40 @@ function ProjectIcon() {
   );
 }
 
-/** An elbow connector: the flattest way to say "this row has work filed under it". */
-function SubIssueIcon() {
+/**
+ * How far a parent's sub-issues have got, as a ring that fills clockwise from 12 o'clock.
+ * It replaces the old elbow-arrow glyph, which could only say "this row has work filed under
+ * it" -- the ring says that and how much of it is done, without costing more width.
+ */
+function SubProgressRing({ done, total }: { done: number; total: number; }) {
+  const radius = 5;
+  const circumference = 2 * Math.PI * radius;
+  const ratio = total > 0 ? Math.min(done / total, 1) : 0;
+
   return (
     <svg
-      className={styles.subIcon}
-      viewBox="0 0 16 16"
+      className={done >= total ? styles.subRingDone : styles.subRing}
+      viewBox="0 0 14 14"
       fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
       aria-hidden="true"
     >
-      <path d="M5 2.5v6a2 2 0 0 0 2 2h4" />
-      <path d="M9 8.5 11.5 10.5 9 12.5" />
+      <circle cx="7" cy="7" r={radius} stroke="currentColor" strokeWidth="1.5" opacity="0.3" />
+      {
+        /* Skipped at zero on purpose: a round cap on a zero-length dash still paints a dot,
+          which would read as "one done". */
+      }
+      {ratio > 0 && (
+        <circle
+          cx="7"
+          cy="7"
+          r={radius}
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray={`${circumference * ratio} ${circumference}`}
+          transform="rotate(-90 7 7)"
+        />
+      )}
     </svg>
   );
 }
@@ -263,10 +282,12 @@ function TodoRow(props: RowProps) {
         {todo.childCount > 0 && (
           <span
             className={styles.subCount}
-            title={`${todo.childCount} sub-issue${todo.childCount === 1 ? "" : "s"}`}
+            title={`${todo.completedChildCount} of ${todo.childCount} sub-issue${
+              todo.childCount === 1 ? "" : "s"
+            } done`}
           >
-            <SubIssueIcon />
-            {todo.childCount}
+            <SubProgressRing done={todo.completedChildCount} total={todo.childCount} />
+            {todo.completedChildCount}/{todo.childCount}
           </span>
         )}
         {todo.milestone && <span className={styles.crumb}>&rsaquo; {todo.milestone}</span>}

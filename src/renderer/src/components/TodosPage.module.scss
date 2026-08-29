@@ -412,11 +412,17 @@
   font-variant-numeric: tabular-nums;
 }
 
-.subIcon {
+.subRing {
   flex-shrink: 0;
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
   color: #7aa2f7;
+}
+
+// Every sub-issue closed. Green earns the glance the blue ring no longer needs.
+.subRingDone {
+  composes: subRing;
+  color: #9ece6a;
 }
 
 .spacer {

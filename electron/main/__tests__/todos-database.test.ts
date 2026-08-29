@@ -419,6 +419,24 @@ describe("todo nesting", () => {
     expect(byId.get(mid.id)?.childCount).toBe(1);
   });
 
+  it("counts how many direct children sit in a completed state", () => {
+    const root = createTodo({ title: "root" });
+    const first = createTodo({ title: "first", parentId: root.id });
+    createTodo({ title: "second", parentId: root.id });
+    complete(first.id);
+
+    const parent = listTodos().find((t) => t.id === root.id);
+    expect(parent?.childCount).toBe(2);
+    expect(parent?.completedChildCount).toBe(1);
+  });
+
+  it("reports no completed children when none are done", () => {
+    const root = createTodo({ title: "root" });
+    createTodo({ title: "only", parentId: root.id });
+
+    expect(listTodos().find((t) => t.id === root.id)?.completedChildCount).toBe(0);
+  });
+
   it("rejects a parent id that does not exist", () => {
     expect(() => createTodo({ title: "orphan", parentId: 9999 })).toThrow(/not found/i);
   });

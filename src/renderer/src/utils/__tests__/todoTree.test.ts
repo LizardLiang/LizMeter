@@ -29,6 +29,7 @@ function makeTodo(id: number, parentId: number | null = null): Todo {
     parentId,
     parentTitle: parentId === null ? null : `Todo ${parentId}`,
     childCount: 0,
+    completedChildCount: 0,
     createdAt: "2026-05-08T00:00:00.000Z",
     completedAt: null,
   };

@@ -55,6 +55,7 @@ function makeTodo(id: number, title: string, state: TodoState, extra: Partial<To
     parentId: null,
     parentTitle: null,
     childCount: 0,
+    completedChildCount: 0,
     createdAt: "2026-05-08T00:00:00.000Z",
     completedAt: null,
     ...extra,
@@ -293,10 +294,20 @@ describe("TodosPage nesting", () => {
     expect(screen.getByTitle("Sub-issue of Ship v1.14")).toHaveTextContent("Ship v1.14");
   });
 
-  it("draws a sub-issue count on a row that has children", async () => {
+  it("draws sub-issue progress on a row that has children", async () => {
     await renderNested();
 
-    expect(screen.getByTitle("1 sub-issue")).toHaveTextContent("1");
+    expect(screen.getByTitle("0 of 1 sub-issue done")).toHaveTextContent("0/1");
+  });
+
+  it("reads the ring as complete once every sub-issue is done", async () => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(210, "Cut the release", todoState, { childCount: 2, completedChildCount: 2 }),
+    ]);
+    render(<TodosPage />);
+    await screen.findByText("Cut the release");
+
+    expect(screen.getByTitle("2 of 2 sub-issues done")).toHaveTextContent("2/2");
   });
 
   it("keeps sub-issues as ordinary rows in their own state group", async () => {

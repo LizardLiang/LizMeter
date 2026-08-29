@@ -36,6 +36,7 @@ function makeTodo(id: number, state: TodoState): Todo {
     parentId: null,
     parentTitle: null,
     childCount: 0,
+    completedChildCount: 0,
     createdAt: "2026-05-08T00:00:00.000Z",
     completedAt: null,
   };
