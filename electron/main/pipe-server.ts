@@ -42,8 +42,15 @@ import type { TodoFilter, TodoLabel, TodoProject, TodoState } from "../../src/sh
 // --- Constants ---
 
 // LIZMETER_PIPE_PATH lets a test (or a second app instance) use another pipe.
-const DEFAULT_PIPE_PATH =
-  process.platform === "win32" ? "\\\\.\\pipe\\lizmeter" : "/tmp/lizmeter.sock";
+//
+// In dev (VITE_DEV_SERVER_URL set), the pipe name gets a "-dev" suffix so a `bun run dev`
+// instance does not steal the pipe from an already-running installed build. Production
+// values below are unchanged when the env var is absent.
+const IS_DEV = Boolean(process.env["VITE_DEV_SERVER_URL"]);
+
+const DEFAULT_PIPE_PATH = IS_DEV
+  ? (process.platform === "win32" ? "\\\\.\\pipe\\lizmeter-dev" : "/tmp/lizmeter-dev.sock")
+  : (process.platform === "win32" ? "\\\\.\\pipe\\lizmeter" : "/tmp/lizmeter.sock");
 
 const PIPE_PATH = process.env.LIZMETER_PIPE_PATH || DEFAULT_PIPE_PATH;
 
