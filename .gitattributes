@@ -1,0 +1,18 @@
+# Line endings.
+#
+# Without this file, a Windows checkout with core.autocrlf=true writes CRLF into the working tree
+# while dprint (which has no newlineKind set in dprint.json, so it defaults to LF) expects LF. The
+# result was that `bun run fmt:check` reported every one of its ~123 covered files as
+# "Text differed by line endings" on every run, so the pre-commit hook could never pass and the
+# formatting/lint gate it exists to enforce was effectively dead.
+#
+# `text=auto` lets git normalize to LF in the repository and auto-detect binary content;
+# `eol=lf` overrides core.autocrlf so the working tree also gets LF, which is what dprint reads.
+* text=auto eol=lf
+
+# Binary assets: never touched, regardless of the auto-detection above.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.wasm binary
