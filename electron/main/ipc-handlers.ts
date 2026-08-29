@@ -48,8 +48,14 @@ import {
   storeBuffer,
 } from "./attachment-store.ts";
 import { extFromFileName } from "./attachment-url.ts";
-import { getDataDirStatus, moveDataTo } from "./data-location.ts";
-import { decidePendingSyncAction, writePendingSyncAction } from "./sync/sync-manager.ts";
+import { getDataDir, getDataDirStatus, moveDataTo, relocateDbToPrivateStorage } from "./data-location.ts";
+import {
+  clearPendingSyncAction,
+  decidePendingSyncAction,
+  requiresAdoptConfirmation,
+  writePendingSyncAction,
+} from "./sync/sync-manager.ts";
+import { isSyncEnabled } from "./sync/sync-writer.ts";
 import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widget-window.ts";
 import { getMainWindow } from "./index.ts";
 import {
@@ -670,8 +676,39 @@ export function registerIpcHandlers(): void {
       // ordinary-relocate case) leaves this feature invisible, exactly like today's move.
       const pendingSyncAction = decidePendingSyncAction(input.targetDir);
 
+      // R2-B1: adopting discards this device's own working set in favor of a peer's (FR-017) --
+      // the folder picker landing on a shared folder must never be enough by itself to trigger
+      // that. The user's original decision was "backup + adopt, machine 2 adopts rather than
+      // merges", which expects a confirmation step; without this gate the OS folder dialog alone
+      // would do it, silently, on every click. Mirrors the TARGET_HAS_DATA/SYNC_ENABLED_CONFIRM_
+      // REQUIRED "refuse once, retry once told" pattern this handler already uses.
+      if (requiresAdoptConfirmation(pendingSyncAction, input.confirmAdopt === true)) {
+        return {
+          ok: false,
+          code: "ADOPT_CONFIRM_REQUIRED",
+          message:
+            "That folder holds another machine's synced data. Using it here discards this machine's own working set and adopts the other machine's todos and sessions instead — this machine's current database is kept as a backup, but there is no way back to it from inside LizMeter.",
+        };
+      }
+
+      // An ordinary relocate (no sync action of its own) while sync is already on would carry
+      // this device's private database to the new folder untouched, but leave every peer's oplog
+      // history behind at the old shared folder -- the new folder does not hold it. That
+      // silently disconnects this device from sync with no error and no warning, so the user
+      // must say so explicitly first, mirroring the TARGET_HAS_DATA "retry once told" pattern.
+      if (pendingSyncAction === null && isSyncEnabled(getDb()) && input.confirmDisconnectSync !== true) {
+        return {
+          ok: false,
+          code: "SYNC_ENABLED_CONFIRM_REQUIRED",
+          message:
+            "This device is syncing with another machine. Moving the data folder now will disconnect it from sync — the new folder does not hold the other machine's history.",
+        };
+      }
+
       // Copying an open SQLite file can capture a half-written page, so fold the WAL back into
-      // the main file and drop the connection before anything is read.
+      // the main file and drop the connection before anything is read -- relocateDbToPrivateStorage
+      // must run after this (M-003: its own doc comment requires the caller to checkpoint and
+      // close first, exactly like moveDataTo).
       try {
         getDb().pragma("wal_checkpoint(TRUNCATE)");
       } catch (err) {
@@ -679,17 +716,47 @@ export function registerIpcHandlers(): void {
       }
       closeDatabase();
 
-      const result = moveDataTo(input.targetDir, { useExisting: input.useExisting === true });
+      // Sync "enable": this device's live database must already be sitting in its private
+      // per-machine location before the shared folder it is about to publish into is ever
+      // pointed at by getDataDir() -- see data-location.ts's getDbDir()/relocateDbToPrivateStorage.
+      // Reads getDataDir() before anything below can repoint it.
+      if (pendingSyncAction?.action === "enable") {
+        relocateDbToPrivateStorage(getDataDir());
+      }
+
+      // H-004: written before moveDataTo can repoint the folder pointer, not after -- a crash
+      // between this write and the relaunch must always leave durable evidence that this action
+      // still has to run, rather than a repointed-but-unmarked folder that silently reproduces
+      // C-001 on the next launch (no marker -> markPrivateDb()/markDeviceAsAdopted() never runs
+      // -> getDbDir() falls through to the now-shared getDataDir() -> initDatabase() opens a
+      // fresh, empty, live database directly in the shared folder). Each retried step tolerates
+      // being re-entered: relocateDbToPrivateStorage's copy leaves its source untouched, and
+      // backupExistingPrivateDbBeforeAdopt is a no-op once nothing sits at the private path.
+      // Undone below if the move itself is refused -- the action has nothing to act on then.
+      if (pendingSyncAction !== null) {
+        writePendingSyncAction(pendingSyncAction);
+      }
+
+      const result = moveDataTo(input.targetDir, {
+        useExisting: input.useExisting === true,
+        // A sync enable/adopt must never let a database land in the newly-shared folder -- see
+        // moveDataTo's own header comment for why. An adopting device additionally skips
+        // attachments: it is about to discard its local rows wholesale (FR-017) and its own
+        // local attachments have nothing to contribute to the shared pool.
+        copyDb: pendingSyncAction === null,
+        copyAttachments: pendingSyncAction?.action !== "adopt",
+      });
 
       if (!result.ok) {
         // Nothing moved, so reopen at the unchanged location -- a refused move must leave the app
-        // working, not wedged with a closed database. No pending sync action was ever written.
+        // working, not wedged with a closed database. The move was refused, not interrupted, so
+        // the marker written above (if any) authorizes nothing and must not survive to the next
+        // launch.
+        if (pendingSyncAction !== null) {
+          clearPendingSyncAction();
+        }
         initDatabase();
         return result;
-      }
-
-      if (pendingSyncAction !== null) {
-        writePendingSyncAction(pendingSyncAction);
       }
 
       // Relaunch rather than reopen: the protocol handler, the widget window and the renderer all

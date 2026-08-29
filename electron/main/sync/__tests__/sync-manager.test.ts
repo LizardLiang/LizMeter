@@ -31,6 +31,7 @@ import { getSyncDevicesDir, readOplogEntries } from "../oplog.ts";
 import {
   applyPendingSyncActionAfterInit,
   decidePendingSyncAction,
+  requiresAdoptConfirmation,
 } from "../sync-manager.ts";
 import { isSyncEnabled } from "../sync-writer.ts";
 
@@ -81,6 +82,30 @@ describe("decidePendingSyncAction", () => {
     fs.writeFileSync(path.join(peerDir, "22222222-2222-2222-2222-222222222222.oplog.jsonl"), "");
 
     expect(decidePendingSyncAction(sharedDir)).toEqual({ action: "adopt", targetDir: sharedDir });
+  });
+});
+
+describe("requiresAdoptConfirmation (R2-B1)", () => {
+  // The ipc-handlers.ts data-location:move handler has no test file in this codebase (Hermes's
+  // own finding), so this decision is extracted as its own pure function specifically to be
+  // testable in isolation -- this proves the guard's own logic; the handler wiring itself
+  // (that ipc-handlers.ts actually calls this function before doing anything destructive) is
+  // verified by code reading, documented as such in implementation-notes.md.
+
+  it("requires confirmation for an adopt action that has not been confirmed", () => {
+    expect(requiresAdoptConfirmation({ action: "adopt", targetDir: sharedDir }, false)).toBe(true);
+  });
+
+  it("does not require confirmation once the caller has explicitly confirmed the adopt", () => {
+    expect(requiresAdoptConfirmation({ action: "adopt", targetDir: sharedDir }, true)).toBe(false);
+  });
+
+  it("never requires confirmation for an 'enable' action -- there is nothing of a peer's to discard", () => {
+    expect(requiresAdoptConfirmation({ action: "enable" }, false)).toBe(false);
+  });
+
+  it("never requires confirmation for an ordinary relocate (no pending sync action at all)", () => {
+    expect(requiresAdoptConfirmation(null, false)).toBe(false);
   });
 });
 

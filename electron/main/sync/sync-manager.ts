@@ -16,13 +16,16 @@ import { runMergePass } from "./merge-pass.ts";
 import { enableSyncOnExistingMachine } from "./migration.ts";
 import { addSyncNotice, listSyncNotices, dismissSyncNotice, type SyncNoticeRow } from "./notices.ts";
 import {
+  clearPendingSyncAction,
   consumePendingSyncAction,
   writePendingSyncAction,
   type PendingSyncAction,
 } from "./pending-action.ts";
-import { isStale, markSyncedNow, rebuildFromSnapshot, writeSnapshotIfDue } from "./snapshot.ts";
+import { getLastSyncedAt, isStale, markSyncedNow, rebuildFromSnapshot, writeSnapshotIfDue } from "./snapshot.ts";
+import { scanForStrayFiles } from "./stray-files.ts";
 import { isSyncEnabled, setSyncEnabled } from "./sync-writer.ts";
 import { startWatching, type SyncWatcher } from "./watcher.ts";
+import type { SyncDeviceInfo, SyncStatus } from "../../../src/shared/types.ts";
 
 type DbHandle = Database.Database;
 
@@ -52,6 +55,10 @@ function runMergePassSafely(): void {
   const deviceId = getDeviceId();
 
   try {
+    // FR-032: reported, never blocking -- a stray file (most commonly a cloud-drive conflicted
+    // copy) must not stop the rest of this pass from running.
+    scanForStrayFiles(database, dataDir);
+
     if (isStale(database)) {
       const rebuilt = rebuildFromSnapshot(database, dataDir, deviceId);
       if (rebuilt) {
@@ -108,20 +115,12 @@ export function stopSyncManager(): void {
   watcher = null;
 }
 
-export interface SyncDeviceInfo {
-  deviceId: string;
-  deviceNumber: number;
-  lastSeenAt: string;
-}
+// SyncDeviceInfo / SyncStatus are declared once, in src/shared/types.ts -- this main-process
+// module and the renderer both need the exact same shape, and declaring it twice let the two
+// definitions drift apart silently (caught only by luck, since nothing re-checked them against
+// each other).
 
-export interface SyncStatusSnapshot {
-  enabled: boolean;
-  lastSyncedAt: string | null;
-  halted: { reason: string } | null;
-  devices: SyncDeviceInfo[];
-}
-
-export function getSyncStatus(): SyncStatusSnapshot {
+export function getSyncStatus(): SyncStatus {
   const database = getDb();
   const devices = database
     .prepare("SELECT device_id, device_number, last_seen_at FROM sync_devices ORDER BY first_seen_at ASC")
@@ -129,9 +128,16 @@ export function getSyncStatus(): SyncStatusSnapshot {
 
   return {
     enabled: isSyncEnabled(database),
-    lastSyncedAt,
+    // Falls back to the persisted setting once the in-process value has never been set this
+    // run (e.g. right after a restart, before the first merge pass completes) -- see
+    // getLastSyncedAt's doc comment.
+    lastSyncedAt: lastSyncedAt ?? getLastSyncedAt(database),
     halted: haltedReason !== null ? { reason: haltedReason } : null,
-    devices: devices.map((d) => ({ deviceId: d.device_id, deviceNumber: d.device_number, lastSeenAt: d.last_seen_at })),
+    devices: devices.map((d): SyncDeviceInfo => ({
+      deviceId: d.device_id,
+      deviceNumber: d.device_number,
+      lastSeenAt: d.last_seen_at,
+    })),
   };
 }
 
@@ -185,13 +191,30 @@ export function decidePendingSyncAction(targetDir: string): PendingSyncAction | 
   return null;
 }
 
-export { writePendingSyncAction };
+export { clearPendingSyncAction, writePendingSyncAction };
+
+/**
+ * R2-B1: the refusal that guards adoption. Picking a folder that holds another machine's synced
+ * history must never be enough by itself to discard this device's own working set -- the user's
+ * original decision ("backup + adopt, machine 2 adopts rather than merges") explicitly expects a
+ * confirmation step, the same way `TARGET_HAS_DATA`/`SYNC_ENABLED_CONFIRM_REQUIRED` already work.
+ * Extracted as its own pure function (rather than inlined in the `data-location:move` handler) so
+ * the decision itself is unit-testable without standing up ipc-handlers.ts's full IPC surface,
+ * which has no test file in this codebase.
+ */
+export function requiresAdoptConfirmation(
+  pendingSyncAction: PendingSyncAction | null,
+  confirmAdopt: boolean,
+): boolean {
+  return pendingSyncAction?.action === "adopt" && confirmAdopt !== true;
+}
 
 /**
  * Step 1 of 2, called at the very start of `app.whenReady()`, before `initDatabase()`. Marking
- * an adoption here (not after) is what makes {@link getDbDir} in data-location.ts resolve to the
- * private userData folder for the very first `initDatabase()` call of this process -- see
- * implementation-notes.md's Milestone 6 correction for why this ordering matters.
+ * this device's database as private here (not after) is what makes {@link getDbDir} in
+ * data-location.ts resolve to the private userData folder for the very first `initDatabase()`
+ * call of this process -- see implementation-notes.md's Fix Round for why this ordering matters,
+ * for both the "adopt" and "enable" actions.
  */
 export function consumePendingSyncActionBeforeInit(): PendingSyncAction | null {
   return consumePendingSyncAction();
@@ -203,7 +226,16 @@ export function applyPendingSyncActionAfterInit(pending: PendingSyncAction | nul
   const database = getDb();
 
   if (pending.action === "enable") {
-    const result = enableSyncOnExistingMachine(database, getCurrentDbPath());
+    // This machine's live database has already been relocated to its private location by the
+    // data-location:move handler (relocateDbToPrivateStorage), before this process relaunched
+    // into this step -- getDataDir() here names the *shared* folder it is publishing into, not
+    // where its own database lives.
+    const result = enableSyncOnExistingMachine(database, getCurrentDbPath(), getDataDir());
+    // Without this, isStale() reads lastSyncedAt as null forever (a null-safe "never synced
+    // yet, so not stale" per its own doc comment) whenever the very first merge pass throws
+    // before reaching its own markSyncedNow call -- this machine could then never be recognized
+    // as eligible for a stale-machine rebuild later, even if genuinely warranted.
+    markSyncedNow(database);
     console.log(
       `[sync] enabled on this machine as device ${result.deviceNumber}` +
         (result.backupPath ? `, backup written to ${result.backupPath}` : ""),
@@ -211,9 +243,10 @@ export function applyPendingSyncActionAfterInit(pending: PendingSyncAction | nul
     return;
   }
 
-  // pending.action === "adopt"
-  const deviceNumber = getOrAssignDeviceNumber(database); // fresh db -> draws a new random block
-  registerDevice(database, getDeviceId(), deviceNumber);
+  // pending.action === "adopt". By this point index.ts has already: marked this device as
+  // adopted (private db), renamed any pre-existing database out of the way
+  // (backupExistingPrivateDbBeforeAdopt), and initDatabase() has opened a genuinely fresh private
+  // database as a result -- so rebuildFromSnapshot below has nothing of this device's own to lose.
   setSyncEnabled(database, true);
 
   const dataDir = getDataDir();
@@ -222,6 +255,17 @@ export function applyPendingSyncActionAfterInit(pending: PendingSyncAction | nul
     // No snapshot published anywhere yet -- fall back to replaying every peer's full oplog.
     runMergePass(database, dataDir, getDeviceId());
   }
+
+  // B-2: `dataDir` is passed here (unlike merge-engine.ts's own internal calls, which never
+  // have a first-assignment reason to), but in practice the actual draw already happened inside
+  // rebuildFromSnapshot/runMergePass above -- applying entries needs a device number for HLC
+  // tracking before this line ever runs. That is harmless precisely because an adopt's target
+  // is never virgin (targetHasOtherDevicesData is what triggered "adopt" in the first place), so
+  // omitting dataDir there still falls through to a random draw, never 0 -- the same outcome
+  // this line's own dataDir argument would produce. This call's real job is simply reading back
+  // whatever number got assigned, so registerDevice below can record it.
+  const deviceNumber = getOrAssignDeviceNumber(database, dataDir);
+  registerDevice(database, getDeviceId(), deviceNumber);
   markSyncedNow(database);
   console.log(`[sync] adopted shared data from ${pending.targetDir} as device ${deviceNumber}`);
 }

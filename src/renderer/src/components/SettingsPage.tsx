@@ -139,6 +139,14 @@ export function SettingsPage({
   const [dataError, setDataError] = useState<string | null>(null);
   /** Set when the chosen folder already holds a database, so the user can adopt it instead. */
   const [pendingAdoptDir, setPendingAdoptDir] = useState<string | null>(null);
+  /** Which refusal set pendingAdoptDir (R2-B1): a foreign LizMeter db file (TARGET_HAS_DATA) reads
+   *  differently from a peer's synced history (ADOPT_CONFIRM_REQUIRED) -- the two can no longer
+   *  coincide now that a synced folder never holds a db file, but the copy and the confirm
+   *  arguments each need to know which one this is. */
+  const [pendingAdoptReason, setPendingAdoptReason] = useState<"existing-data" | "sync-peer" | null>(null);
+  /** Set when a move was refused because it would disconnect this device from sync, so the user
+   *  can confirm and retry (H-001). Holds the folder the user picked, awaiting confirmation. */
+  const [pendingSyncDisconnectDir, setPendingSyncDisconnectDir] = useState<string | null>(null);
 
   // Sync state -- there is no "turn sync on" toggle here; it turns on implicitly the first time
   // Change Folder targets a folder with real data to protect or another device's history to
@@ -474,24 +482,49 @@ export function SettingsPage({
    * Runs the move and reports it. A successful move relaunches the app from the main process, so
    * the "Moving…" state is never cleared on that path — the window is about to go away.
    */
-  async function runDataMove(targetDir: string, useExisting: boolean) {
+  async function runDataMove(
+    targetDir: string,
+    useExisting: boolean,
+    confirmDisconnectSync = false,
+    confirmAdopt = false,
+  ) {
     setDataMoving(true);
     setDataError(null);
     try {
-      const result = await window.electronAPI.dataLocation.move({ targetDir, useExisting });
+      const result = await window.electronAPI.dataLocation.move({
+        targetDir,
+        useExisting,
+        confirmDisconnectSync,
+        confirmAdopt,
+      });
       if (result.ok) {
         setPendingAdoptDir(null);
+        setPendingAdoptReason(null);
+        setPendingSyncDisconnectDir(null);
         return;
       }
       if (result.code === ("TARGET_HAS_DATA" satisfies DataLocationMoveErrorCode)) {
         setPendingAdoptDir(targetDir);
+        setPendingAdoptReason("existing-data");
+      } else if (result.code === ("ADOPT_CONFIRM_REQUIRED" satisfies DataLocationMoveErrorCode)) {
+        // R2-B1: the folder holds another machine's synced history -- adopting it discards this
+        // machine's own working set, so the folder picker alone must never be enough to trigger
+        // that. Drives the same confirmation block as TARGET_HAS_DATA, with different copy.
+        setPendingAdoptDir(targetDir);
+        setPendingAdoptReason("sync-peer");
+      } else if (result.code === ("SYNC_ENABLED_CONFIRM_REQUIRED" satisfies DataLocationMoveErrorCode)) {
+        // H-001: this device is already syncing, and the folder it just picked does not hold
+        // its peers' history -- the user must say explicitly that disconnecting is intended.
+        setPendingSyncDisconnectDir(targetDir);
       } else {
         setPendingAdoptDir(null);
+        setPendingAdoptReason(null);
         setDataError(result.message);
       }
       setDataMoving(false);
     } catch (err) {
       setPendingAdoptDir(null);
+      setPendingAdoptReason(null);
       setDataError(err instanceof Error ? err.message : "Failed to move the data folder.");
       setDataMoving(false);
     }
@@ -500,6 +533,8 @@ export function SettingsPage({
   async function handleChooseDataFolder() {
     setDataError(null);
     setPendingAdoptDir(null);
+    setPendingAdoptReason(null);
+    setPendingSyncDisconnectDir(null);
     const target = await window.electronAPI.dataLocation.choose();
     if (target === null) return;
     await runDataMove(target, false);
@@ -509,6 +544,8 @@ export function SettingsPage({
     if (dataLocation === null) return;
     setDataError(null);
     setPendingAdoptDir(null);
+    setPendingAdoptReason(null);
+    setPendingSyncDisconnectDir(null);
     await runDataMove(dataLocation.defaultDataDir, false);
   }
 
@@ -1234,36 +1271,95 @@ export function SettingsPage({
           </div>
 
           <p className={styles.tokenHint}>
-            LizMeter keeps lizmeter.db and the attachments folder here. Choosing a new folder copies both, then restarts
-            the app. The old copy is left where it is — delete it yourself once you have checked the move. Avatars,
-            saved tokens and the music cache do not move.
+            {syncStatus?.enabled === true
+              ? (
+                <>
+                  LizMeter keeps the attachments folder and the shared sync history here. Choosing a new folder copies
+                  the attachments, then restarts the app — the database itself lives privately on this machine and never
+                  moves with it. Avatars, saved tokens and the music cache do not move either.
+                </>
+              )
+              : (
+                <>
+                  LizMeter keeps lizmeter.db and the attachments folder here. Choosing a new folder copies both, then
+                  restarts the app. The old copy is left where it is — delete it yourself once you have checked the
+                  move. Avatars, saved tokens and the music cache do not move.
+                </>
+              )}
           </p>
 
-          {pendingAdoptDir !== null
+          {pendingSyncDisconnectDir !== null
             ? (
               <div className={styles.tokenForm}>
-                <div className={styles.errorMsg}>That folder already holds a LizMeter database.</div>
+                <div className={styles.errorMsg}>This will disconnect this machine from sync.</div>
                 <p className={styles.tokenHint}>
-                  Open the data already in{" "}
-                  {pendingAdoptDir}, or cancel and pick an empty folder. Nothing is copied either way, and the data in
-                  the current folder is left untouched.
-                </p>
-                <p className={styles.tokenHint}>
-                  If that folder holds another machine&rsquo;s synced data, using it here adopts that machine&rsquo;s
-                  todos and sessions as this machine&rsquo;s own working set — this machine will show that data, and
-                  this machine&rsquo;s current database stays on disk, untouched, as a backup.
+                  {pendingSyncDisconnectDir}{" "}
+                  does not hold the other machine&rsquo;s sync history, so this machine will stop seeing its changes
+                  (and vice versa) until both are pointed at the same folder again. This machine&rsquo;s own database is
+                  untouched either way — only the attachments folder moves.
                 </p>
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                   <button
                     className={styles.saveBtn}
-                    onClick={() => void runDataMove(pendingAdoptDir, true)}
+                    onClick={() => void runDataMove(pendingSyncDisconnectDir, false, true)}
+                    disabled={dataMoving}
+                  >
+                    {dataMoving ? "Moving…" : "Move and Disconnect Sync"}
+                  </button>
+                  <button
+                    className={styles.testTokenBtn}
+                    onClick={() => setPendingSyncDisconnectDir(null)}
+                    disabled={dataMoving}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )
+            : pendingAdoptDir !== null
+            ? (
+              <div className={styles.tokenForm}>
+                <div className={styles.errorMsg}>
+                  {pendingAdoptReason === "sync-peer"
+                    ? "That folder holds another machine's synced data."
+                    : "That folder already holds a LizMeter database."}
+                </div>
+                {pendingAdoptReason === "sync-peer"
+                  ? (
+                    <p className={styles.tokenHint}>
+                      Using it here adopts that machine&rsquo;s todos and sessions as this machine&rsquo;s own working
+                      set — this machine will show that data, and this machine&rsquo;s current database stays on disk,
+                      untouched, as a backup. This is one-way: there is no button in LizMeter to switch this machine
+                      back to its own database afterward.
+                    </p>
+                  )
+                  : (
+                    <p className={styles.tokenHint}>
+                      Open the data already in{" "}
+                      {pendingAdoptDir}, or cancel and pick an empty folder. Nothing is copied either way, and the data
+                      in the current folder is left untouched.
+                    </p>
+                  )}
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button
+                    className={styles.saveBtn}
+                    onClick={() =>
+                      void runDataMove(
+                        pendingAdoptDir,
+                        pendingAdoptReason === "existing-data",
+                        false,
+                        pendingAdoptReason === "sync-peer",
+                      )}
                     disabled={dataMoving}
                   >
                     {dataMoving ? "Switching…" : "Use the Data There"}
                   </button>
                   <button
                     className={styles.testTokenBtn}
-                    onClick={() => setPendingAdoptDir(null)}
+                    onClick={() => {
+                      setPendingAdoptDir(null);
+                      setPendingAdoptReason(null);
+                    }}
                     disabled={dataMoving}
                   >
                     Cancel

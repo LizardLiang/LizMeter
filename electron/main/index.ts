@@ -2,7 +2,7 @@ import { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol } from "electr
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { closeDatabase, getSettingValue, initDatabase } from "./database.ts";
+import { closeDatabase, getDb, getSettingValue, initDatabase } from "./database.ts";
 import { getAttachmentsDir, sweepOrphanBlobs } from "./attachment-store.ts";
 import { ATTACHMENT_SCHEME_NAME, resolveAttachmentPath } from "./attachment-url.ts";
 import { clearCustomDataDir, getDataDirStatus, invalidateDataDirCache } from "./data-location.ts";
@@ -15,8 +15,11 @@ import {
   setTodosChangedCallback,
   startSyncManager,
   stopSyncManager,
+  writePendingSyncAction,
 } from "./sync/sync-manager.ts";
-import { markDeviceAsAdopted } from "./data-location.ts";
+import { addSyncNotice } from "./sync/notices.ts";
+import { isSyncEnabled } from "./sync/sync-writer.ts";
+import { backupExistingPrivateDbBeforeAdopt, markDeviceAsAdopted, markPrivateDb } from "./data-location.ts";
 import {
   initJiraProviderFromDisk,
   initLinearProviderFromDisk,
@@ -188,12 +191,22 @@ app.whenReady().then(() => {
     return;
   }
 
-  // Must run before initDatabase(): consuming an "adopt" action marks this device's *working*
-  // database as private (userData), never the shared data folder -- see getDbDir() in
-  // data-location.ts and implementation-notes.md's Milestone 6 correction for why.
+  // Must run before initDatabase(): marking this device's *working* database as private
+  // (userData), never the shared data folder, before the very first initDatabase() call is what
+  // makes getDbDir() in data-location.ts resolve there for that call -- see
+  // implementation-notes.md's Fix Round for why every device that turns sync on, not just an
+  // adopter, needs this.
   const pendingSyncAction = consumePendingSyncActionBeforeInit();
+  let adoptBackupPath: string | null = null;
   if (pendingSyncAction?.action === "adopt") {
     markDeviceAsAdopted();
+    // A device that used LizMeter standalone before ever touching sync already has a real
+    // database sitting at this same private location -- rename it out of the way so the
+    // adoption below opens (and rebuildFromSnapshot then repopulates) a genuinely fresh file,
+    // never that device's own pre-existing history (FR-017's "rebuild a fresh local database").
+    adoptBackupPath = backupExistingPrivateDbBeforeAdopt();
+  } else if (pendingSyncAction?.action === "enable") {
+    markPrivateDb();
   }
 
   try {
@@ -221,10 +234,47 @@ app.whenReady().then(() => {
     return net.fetch(pathToFileURL(file).toString());
   });
 
-  applyPendingSyncActionAfterInit(pendingSyncAction);
+  // R2-B2: this can throw -- most commonly NotFullyHydratedError (FR-014), an unhydrated cloud
+  // placeholder in a folder this device was just pointed at, which is the *expected* state right
+  // after an adopt or enable, not an exotic one. By this point consumePendingSyncActionBeforeInit
+  // has already deleted the marker and initDatabase() above has already opened (for "adopt", a
+  // freshly-emptied; for "enable", the relocated real) database -- an uncaught throw here used to
+  // leave both of those committed with no window ever created (app.whenReady().then(...) had no
+  // .catch, and the uncaughtException handler above deliberately does not quit), producing a
+  // silent, windowless, non-quitting process. Wrapping this alone is not enough on its own to
+  // undo what already committed, so on failure the marker is rewritten: the whole action retries
+  // from the top on the next launch instead of being silently dropped, and every step it retries
+  // is safe to re-enter (markDeviceAsAdopted/markPrivateDb are no-ops once already marked;
+  // backupExistingPrivateDbBeforeAdopt renames aside whatever now sits at the private path,
+  // including this attempt's own emptied-out database, never touching the original backup again).
+  try {
+    applyPendingSyncActionAfterInit(pendingSyncAction);
+  } catch (err) {
+    console.warn("[startup] pending sync action failed, will retry on next launch:", err);
+    if (pendingSyncAction !== null) {
+      writePendingSyncAction(pendingSyncAction);
+    }
+  }
 
-  // Collects blobs left behind by a crash between the file write and the row insert.
-  sweepOrphanBlobs();
+  if (adoptBackupPath !== null) {
+    // FR-017: the old database is never deleted, and its location must be surfaced, not just
+    // left silently on disk for the user to stumble across.
+    addSyncNotice(
+      getDb(),
+      "adopted-backup",
+      "This machine's previous database was kept as a backup before adopting the shared data.",
+      adoptBackupPath,
+    );
+  }
+
+  // Collects blobs left behind by a crash between the file write and the row insert. Skipped
+  // while sync is on: this device's local todo_attachments rows only reflect what has merged in
+  // so far, so a purely local refcount cannot tell "orphaned" apart from "a peer's attachment
+  // that has not synced to this device yet" -- deleting the latter destroys it for every device,
+  // since attachments are content-addressed and this is the one copy on disk.
+  if (!isSyncEnabled(getDb())) {
+    sweepOrphanBlobs();
+  }
 
   registerIpcHandlers();
   registerWindowControlHandlers();
@@ -236,8 +286,12 @@ app.whenReady().then(() => {
     const win = getMainWindow();
     if (win && !win.isDestroyed()) win.webContents.send("todo:changed");
   });
-  startSyncManager();
   createWindow();
+  // startSyncManager's first pass runs a synchronous merge (potentially many oplog entries) --
+  // scheduled on the next tick, after the window already exists, rather than blocking it. This
+  // does not change what happens, only when: the window was created above and starts loading
+  // immediately either way, but deferring the merge keeps that load from ever waiting behind it.
+  setImmediate(() => startSyncManager());
 
   // Create widget if enabled in settings
   const widgetEnabled = getSettingValue(WIDGET_SETTINGS_KEYS.ENABLED);

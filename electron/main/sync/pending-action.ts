@@ -30,6 +30,8 @@ export function consumePendingSyncAction(): PendingSyncAction | null {
   try {
     raw = fs.readFileSync(file, "utf8");
   } catch {
+    // No marker file -- the ordinary case on every launch that isn't the one right after a
+    // move. Not an error worth logging.
     return null;
   }
 
@@ -43,4 +45,14 @@ export function consumePendingSyncAction(): PendingSyncAction | null {
     console.warn("[sync] ignoring unreadable pending-sync-action.json:", err);
     return null;
   }
+}
+
+/**
+ * Discards the marker without acting on it (H-004). Used by the `data-location:move` handler
+ * when a marker was written in anticipation of a move that then failed -- the action it
+ * authorizes has nothing to act on (the folder was never actually repointed), so leaving the
+ * marker in place would make the next launch retry a move that was refused, not interrupted.
+ */
+export function clearPendingSyncAction(): void {
+  fs.rmSync(markerPath(), { force: true });
 }

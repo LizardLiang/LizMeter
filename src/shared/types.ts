@@ -754,12 +754,18 @@ export interface DataLocationInfo {
   available: boolean;
 }
 
-/** Why a move was refused. `TARGET_HAS_DATA` is the one the UI can recover from, by retrying with `useExisting`. */
+/**
+ * Why a move was refused. `TARGET_HAS_DATA`, `SYNC_ENABLED_CONFIRM_REQUIRED` and
+ * `ADOPT_CONFIRM_REQUIRED` are the three the UI can recover from, by retrying with
+ * `useExisting` / `confirmDisconnectSync` / `confirmAdopt` respectively.
+ */
 export type DataLocationMoveErrorCode =
   | "SAME_DIR"
   | "NESTED"
   | "NOT_WRITABLE"
   | "TARGET_HAS_DATA"
+  | "SYNC_ENABLED_CONFIRM_REQUIRED"
+  | "ADOPT_CONFIRM_REQUIRED"
   | "COPY_FAILED";
 
 export type DataLocationMoveResult =
@@ -770,6 +776,20 @@ export interface DataLocationMoveInput {
   targetDir: string;
   /** Adopt a database already sitting in the target instead of copying over it. */
   useExisting?: boolean;
+  /**
+   * Required (and must be `true`) to proceed with an ordinary relocate while sync is already
+   * enabled on this device -- the new folder does not hold any peer's oplog history, so an
+   * unconfirmed move would silently disconnect this device from sync. Ignored for a move that
+   * itself turns sync on or adopts a shared folder.
+   */
+  confirmDisconnectSync?: boolean;
+  /**
+   * Required (and must be `true`) to proceed when the chosen folder holds another machine's
+   * synced history (FR-017's adoption path). Adopting discards this device's own working set in
+   * favor of the peer's -- the folder picker alone must never be enough to trigger that (R2-B1).
+   * Ignored for every other kind of move.
+   */
+  confirmAdopt?: boolean;
 }
 
 // --- Multi-writer sync ---
@@ -795,7 +815,8 @@ export type SyncNoticeKind =
   | "clock-drift"
   | "placeholder-blocked"
   | "stray-file"
-  | "stale-machine-rebuild";
+  | "stale-machine-rebuild"
+  | "adopted-backup";
 
 export interface SyncNotice {
   id: number;
