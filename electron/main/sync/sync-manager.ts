@@ -9,7 +9,7 @@ import { Notification } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { getCurrentDbPath, getDb } from "../database.ts";
-import { getDataDir } from "../data-location.ts";
+import { DB_FILE_NAME, getDataDir } from "../data-location.ts";
 import { getDeviceId, getOrAssignDeviceNumber, registerDevice } from "./device-identity.ts";
 import { NotFullyHydratedError } from "./hydration-guard.ts";
 import { runMergePass } from "./merge-pass.ts";
@@ -237,6 +237,35 @@ export function requiresAdoptConfirmation(
   confirmAdopt: boolean,
 ): boolean {
   return pendingSyncAction?.action === "adopt" && confirmAdopt !== true;
+}
+
+/** True when `targetDir` already holds a `lizmeter.db` file -- checked only for the "enable"
+ *  action, where {@link moveDataTo} is always called with `copyDb: false` and so never reads or
+ *  overwrites it. That db has no sync history of its own (a target with a peer's oplog takes the
+ *  "adopt" branch above, not "enable"), so once sync turns on here nothing will ever read it
+ *  again -- see moveDataTo's own doc comment: a synced folder's db file belongs to no device. */
+function targetHasUnsyncedDb(targetDir: string): boolean {
+  return fs.existsSync(path.join(targetDir, DB_FILE_NAME));
+}
+
+/**
+ * Post-merge fix: the sibling of {@link requiresAdoptConfirmation}'s R2-B1 guard. Enabling sync
+ * into a folder that already holds a real, populated `lizmeter.db` silently orphans that
+ * database -- moveDataTo is called with `copyDb: false` on this path (this device's own database
+ * has already been relocated to private storage by then), so its internal `TARGET_HAS_DATA`
+ * check never fires, and the folder's existing db is simply left behind while this device
+ * publishes its own state as the sync stream instead. The user must say so explicitly first, the
+ * same "refuse once, retry once told" pattern `TARGET_HAS_DATA`/`ADOPT_CONFIRM_REQUIRED` already
+ * use. Extracted as its own pure function for the same reason `requiresAdoptConfirmation` is: the
+ * `data-location:move` IPC handler has no test file in this codebase.
+ */
+export function requiresUnsyncedDbConfirmation(
+  pendingSyncAction: PendingSyncAction | null,
+  targetDir: string,
+  confirmUnsyncedDb: boolean,
+): boolean {
+  if (pendingSyncAction?.action !== "enable" || confirmUnsyncedDb) return false;
+  return targetHasUnsyncedDb(targetDir);
 }
 
 /**

@@ -53,6 +53,7 @@ import {
   clearPendingSyncAction,
   decidePendingSyncAction,
   requiresAdoptConfirmation,
+  requiresUnsyncedDbConfirmation,
   writePendingSyncAction,
 } from "./sync/sync-manager.ts";
 import { isSyncEnabled } from "./sync/sync-writer.ts";
@@ -688,6 +689,20 @@ export function registerIpcHandlers(): void {
           code: "ADOPT_CONFIRM_REQUIRED",
           message:
             "That folder holds another machine's synced data. Using it here discards this machine's own working set and adopts the other machine's todos and sessions instead — this machine's current database is kept as a backup, but there is no way back to it from inside LizMeter.",
+        };
+      }
+
+      // Post-merge fix, the sibling of R2-B1 above: enabling sync copies nothing into targetDir
+      // (moveDataTo runs with copyDb: false on this path, since this device's own database has
+      // already been relocated to private storage), so a lizmeter.db already sitting there is
+      // never overwritten -- but it is also never read again once sync is on. Silently orphaning
+      // a real database with no warning is exactly the bug this gate exists to close.
+      if (requiresUnsyncedDbConfirmation(pendingSyncAction, input.targetDir, input.confirmUnsyncedDb === true)) {
+        return {
+          ok: false,
+          code: "TARGET_HAS_UNSYNCED_DB_CONFIRM_REQUIRED",
+          message:
+            "That folder already holds a LizMeter database, but no other machine has synced through it yet. Enabling sync here will publish this machine's own data instead — the database already in that folder will not be read by sync and is left behind, unused but untouched.",
         };
       }
 

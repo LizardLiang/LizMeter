@@ -139,11 +139,14 @@ export function SettingsPage({
   const [dataError, setDataError] = useState<string | null>(null);
   /** Set when the chosen folder already holds a database, so the user can adopt it instead. */
   const [pendingAdoptDir, setPendingAdoptDir] = useState<string | null>(null);
-  /** Which refusal set pendingAdoptDir (R2-B1): a foreign LizMeter db file (TARGET_HAS_DATA) reads
-   *  differently from a peer's synced history (ADOPT_CONFIRM_REQUIRED) -- the two can no longer
-   *  coincide now that a synced folder never holds a db file, but the copy and the confirm
-   *  arguments each need to know which one this is. */
-  const [pendingAdoptReason, setPendingAdoptReason] = useState<"existing-data" | "sync-peer" | null>(null);
+  /** Which refusal set pendingAdoptDir (R2-B1, plus its post-merge sibling): a foreign LizMeter
+   *  db file with no sync history (TARGET_HAS_DATA) reads differently from a peer's synced
+   *  history (ADOPT_CONFIRM_REQUIRED) and from a foreign db file that sync is about to orphan
+   *  (TARGET_HAS_UNSYNCED_DB_CONFIRM_REQUIRED) -- the copy and the confirm arguments each need to
+   *  know which one this is. */
+  const [pendingAdoptReason, setPendingAdoptReason] = useState<"existing-data" | "sync-peer" | "unsynced-db" | null>(
+    null,
+  );
   /** Set when a move was refused because it would disconnect this device from sync, so the user
    *  can confirm and retry (H-001). Holds the folder the user picked, awaiting confirmation. */
   const [pendingSyncDisconnectDir, setPendingSyncDisconnectDir] = useState<string | null>(null);
@@ -487,6 +490,7 @@ export function SettingsPage({
     useExisting: boolean,
     confirmDisconnectSync = false,
     confirmAdopt = false,
+    confirmUnsyncedDb = false,
   ) {
     setDataMoving(true);
     setDataError(null);
@@ -496,6 +500,7 @@ export function SettingsPage({
         useExisting,
         confirmDisconnectSync,
         confirmAdopt,
+        confirmUnsyncedDb,
       });
       if (result.ok) {
         setPendingAdoptDir(null);
@@ -512,6 +517,12 @@ export function SettingsPage({
         // that. Drives the same confirmation block as TARGET_HAS_DATA, with different copy.
         setPendingAdoptDir(targetDir);
         setPendingAdoptReason("sync-peer");
+      } else if (result.code === ("TARGET_HAS_UNSYNCED_DB_CONFIRM_REQUIRED" satisfies DataLocationMoveErrorCode)) {
+        // Post-merge fix, R2-B1's sibling: the folder holds a real LizMeter database that no
+        // device has synced through -- enabling sync here would orphan it silently, so the
+        // folder picker alone must never be enough to trigger that either.
+        setPendingAdoptDir(targetDir);
+        setPendingAdoptReason("unsynced-db");
       } else if (result.code === ("SYNC_ENABLED_CONFIRM_REQUIRED" satisfies DataLocationMoveErrorCode)) {
         // H-001: this device is already syncing, and the folder it just picked does not hold
         // its peers' history -- the user must say explicitly that disconnecting is intended.
@@ -1322,6 +1333,8 @@ export function SettingsPage({
                 <div className={styles.errorMsg}>
                   {pendingAdoptReason === "sync-peer"
                     ? "That folder holds another machine's synced data."
+                    : pendingAdoptReason === "unsynced-db"
+                    ? "That folder already holds a LizMeter database, but no other machine has synced through it yet."
                     : "That folder already holds a LizMeter database."}
                 </div>
                 {pendingAdoptReason === "sync-peer"
@@ -1331,6 +1344,15 @@ export function SettingsPage({
                       set — this machine will show that data, and this machine&rsquo;s current database stays on disk,
                       untouched, as a backup. This is one-way: there is no button in LizMeter to switch this machine
                       back to its own database afterward.
+                    </p>
+                  )
+                  : pendingAdoptReason === "unsynced-db"
+                  ? (
+                    <p className={styles.tokenHint}>
+                      Continuing turns sync on and publishes this machine&rsquo;s own data instead — the database
+                      already in {pendingAdoptDir}{" "}
+                      will not be read by sync and is left on disk, unused but untouched. Cancel and pick an empty
+                      folder instead if you meant to keep using the data already there.
                     </p>
                   )
                   : (
@@ -1349,10 +1371,13 @@ export function SettingsPage({
                         pendingAdoptReason === "existing-data",
                         false,
                         pendingAdoptReason === "sync-peer",
+                        pendingAdoptReason === "unsynced-db",
                       )}
                     disabled={dataMoving}
                   >
-                    {dataMoving ? "Switching…" : "Use the Data There"}
+                    {dataMoving
+                      ? (pendingAdoptReason === "unsynced-db" ? "Enabling…" : "Switching…")
+                      : (pendingAdoptReason === "unsynced-db" ? "Enable Sync Anyway" : "Use the Data There")}
                   </button>
                   <button
                     className={styles.testTokenBtn}

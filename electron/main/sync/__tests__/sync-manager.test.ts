@@ -26,6 +26,7 @@ vi.mock("electron", () => ({
 }));
 
 import {
+  DB_FILE_NAME,
   getDataDir,
   getDbDir,
   isAdoptedDevice,
@@ -42,6 +43,7 @@ import {
   getSyncStatus,
   listNotices,
   requiresAdoptConfirmation,
+  requiresUnsyncedDbConfirmation,
   runMergePassSafely,
 } from "../sync-manager.ts";
 import { isSyncEnabled, setSyncEnabled } from "../sync-writer.ts";
@@ -117,6 +119,57 @@ describe("requiresAdoptConfirmation (R2-B1)", () => {
 
   it("never requires confirmation for an ordinary relocate (no pending sync action at all)", () => {
     expect(requiresAdoptConfirmation(null, false)).toBe(false);
+  });
+});
+
+describe("requiresUnsyncedDbConfirmation (post-merge fix: enabling sync into a folder with a real, never-synced lizmeter.db orphans it)", () => {
+  // R2-B1's lesson: moveDataTo's own TARGET_HAS_DATA guard reads `copyDb && fs.existsSync(...)`,
+  // and copyDb is statically false on every sync enable/adopt call, so that guard is dead code
+  // for exactly the paths that need it. To not repeat that, this first test feeds the guard the
+  // *real* output of decidePendingSyncAction for the user's actual scenario (this device has
+  // local data, the target holds a populated but never-synced db) rather than a hand-built
+  // { action: "enable" } literal -- if decidePendingSyncAction stopped producing "enable" here,
+  // or if the wiring were ever satisfied with a value the real entry point cannot produce, this
+  // test would catch it instead of passing on a guard nothing can reach.
+  it("fires when fed decidePendingSyncAction's real 'enable' output for a target holding a populated db", () => {
+    createTodo({ title: "local work" });
+    fs.writeFileSync(path.join(sharedDir, DB_FILE_NAME), "not a real sqlite file, just needs to exist");
+
+    const pendingSyncAction = decidePendingSyncAction(sharedDir);
+    expect(pendingSyncAction).toEqual({ action: "enable" });
+    expect(requiresUnsyncedDbConfirmation(pendingSyncAction, sharedDir, false)).toBe(true);
+  });
+
+  it("does not require confirmation once the caller has explicitly confirmed", () => {
+    createTodo({ title: "local work" });
+    fs.writeFileSync(path.join(sharedDir, DB_FILE_NAME), "x");
+
+    const pendingSyncAction = decidePendingSyncAction(sharedDir);
+    expect(requiresUnsyncedDbConfirmation(pendingSyncAction, sharedDir, true)).toBe(false);
+  });
+
+  it("does not fire for an 'enable' action into a genuinely empty target", () => {
+    createTodo({ title: "local work" });
+
+    const pendingSyncAction = decidePendingSyncAction(sharedDir);
+    expect(pendingSyncAction).toEqual({ action: "enable" });
+    expect(requiresUnsyncedDbConfirmation(pendingSyncAction, sharedDir, false)).toBe(false);
+  });
+
+  it("does not fire for an 'adopt' action, even if a stray lizmeter.db also sits in the target -- ADOPT_CONFIRM_REQUIRED already covers that folder", () => {
+    const peerDir = getSyncDevicesDir(sharedDir);
+    fs.mkdirSync(peerDir, { recursive: true });
+    fs.writeFileSync(path.join(peerDir, "33333333-3333-3333-3333-333333333333.oplog.jsonl"), "");
+    fs.writeFileSync(path.join(sharedDir, DB_FILE_NAME), "x");
+
+    const pendingSyncAction = decidePendingSyncAction(sharedDir);
+    expect(pendingSyncAction).toEqual({ action: "adopt", targetDir: sharedDir });
+    expect(requiresUnsyncedDbConfirmation(pendingSyncAction, sharedDir, false)).toBe(false);
+  });
+
+  it("never fires for an ordinary relocate (no pending sync action at all)", () => {
+    fs.writeFileSync(path.join(sharedDir, DB_FILE_NAME), "x");
+    expect(requiresUnsyncedDbConfirmation(null, sharedDir, false)).toBe(false);
   });
 });
 

@@ -755,9 +755,10 @@ export interface DataLocationInfo {
 }
 
 /**
- * Why a move was refused. `TARGET_HAS_DATA`, `SYNC_ENABLED_CONFIRM_REQUIRED` and
- * `ADOPT_CONFIRM_REQUIRED` are the three the UI can recover from, by retrying with
- * `useExisting` / `confirmDisconnectSync` / `confirmAdopt` respectively.
+ * Why a move was refused. `TARGET_HAS_DATA`, `SYNC_ENABLED_CONFIRM_REQUIRED`,
+ * `ADOPT_CONFIRM_REQUIRED` and `TARGET_HAS_UNSYNCED_DB_CONFIRM_REQUIRED` are the four the UI can
+ * recover from, by retrying with `useExisting` / `confirmDisconnectSync` / `confirmAdopt` /
+ * `confirmUnsyncedDb` respectively.
  */
 export type DataLocationMoveErrorCode =
   | "SAME_DIR"
@@ -766,6 +767,7 @@ export type DataLocationMoveErrorCode =
   | "TARGET_HAS_DATA"
   | "SYNC_ENABLED_CONFIRM_REQUIRED"
   | "ADOPT_CONFIRM_REQUIRED"
+  | "TARGET_HAS_UNSYNCED_DB_CONFIRM_REQUIRED"
   | "COPY_FAILED";
 
 export type DataLocationMoveResult =
@@ -790,6 +792,15 @@ export interface DataLocationMoveInput {
    * Ignored for every other kind of move.
    */
   confirmAdopt?: boolean;
+  /**
+   * Required (and must be `true`) to proceed when the chosen folder is about to turn sync on
+   * (FR-017's onboarding path) and already holds a `lizmeter.db` with no sync history of its
+   * own. That database is never read again once sync is on -- this device publishes its own
+   * data instead -- so the folder picker alone must never be enough to orphan it silently
+   * (post-merge fix, the sibling of R2-B1's `confirmAdopt` gate). Ignored for every other kind
+   * of move.
+   */
+  confirmUnsyncedDb?: boolean;
 }
 
 // --- Multi-writer sync ---
