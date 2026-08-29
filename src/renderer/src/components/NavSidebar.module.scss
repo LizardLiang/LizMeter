@@ -4,11 +4,25 @@
   0%,
   100% {
     opacity: 1;
-    box-shadow: 0 0 0 0 #9ece6a50;
   }
   50% {
     opacity: 0.8;
-    box-shadow: 0 0 0 4px #9ece6a00;
+  }
+}
+
+// Expanding ping ring, formerly a growing box-shadow spread on .runningDot.
+// box-shadow is not compositor-animatable, so that version repainted the dot —
+// and re-rastered the blur(28px) sidebar layer behind it — on every frame.
+// scale(2.333) reaches the same 14px outer diameter the 4px spread did.
+@keyframes pulseDotRing {
+  0%,
+  100% {
+    opacity: 0.314;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0;
+    transform: scale(2.333);
   }
 }
 
@@ -145,6 +159,19 @@
   background-color: #9ece6a;
   border: 1.5px solid #0f0f1a;
   animation: pulseDot 2.4s ease-in-out infinite;
+  // Contain the ring's negative z-index so it cannot slip behind the sidebar.
+  isolation: isolate;
+
+  &::after {
+    content: "";
+    position: absolute;
+    inset: -1.5px; // cover the dot's 6px border box, not its 3px padding box
+    z-index: -1; // paint behind the dot, where the box-shadow used to sit
+    border-radius: 50%;
+    background-color: #9ece6a;
+    animation: pulseDotRing 2.4s ease-in-out infinite;
+    pointer-events: none;
+  }
 }
 
 .pausedDot {
@@ -152,4 +179,10 @@
   background-color: #e0af68;
   animation: none;
   box-shadow: none;
+
+  // `animation: none` above only stops the dot itself — the ring is a separate
+  // rule and would keep pinging while paused.
+  &::after {
+    content: none;
+  }
 }
