@@ -1,4 +1,32 @@
-## ADDED Requirements
+---
+created: 2026-08-29T23:27:44+08:00
+updated: 2026-08-29T23:27:44+08:00
+author: athena
+git_hash: 4d36aec
+capability: todo-sync
+---
+
+# Todo Sync
+
+## Purpose
+
+Keeps todos consistent across a person's machines, which share state through a cloud-drive folder
+rather than a server. Each machine writes only its own append-only oplog file; no machine ever sees
+a peer's write synchronously, so nothing can be locked, reserved, or agreed upon in advance.
+
+This capability covers the part of that problem where a todo's **number** is user-facing. Unlike
+every other synced table, whose local ids are device-private, a todo's id is the handle people
+reference it by — in notes, and through the MCP tools — so it must be small, sequential, and mean
+the same thing on every machine. Those goals conflict: two machines working apart will inevitably
+issue the same number, and a number already referenced must not silently come to mean a different
+todo.
+
+The resolution is to derive rather than negotiate. Machines publish only the number they issued;
+each machine computes the resolved assignment itself from the complete set of claims. Identical
+inputs give identical output, so agreement needs no exchange — which matters because the transport
+cannot support one.
+
+## Requirements
 
 ### Requirement: Dense sequential todo id allocation
 
@@ -25,26 +53,38 @@ The system SHALL raise this device's todo id high-water mark past the highest to
 
 ### Requirement: Todo id collision resolution at merge
 
-The system SHALL resolve a todo id claimed by two different rows by keeping the number for the row created earlier by hybrid-logical-clock order and reassigning the later row to an unused number, so that two machines creating todos while apart converge without either row being lost.
+The system SHALL derive every todo's visible id from the complete set of claims, giving each number to its earliest-created claimant and placing any later claimant of an already-taken number after the highest claim, so that two machines creating todos while apart converge without either row being lost. Claimants are ordered by creation time, with the row uuid as a tie-break.
 
 #### Scenario: Concurrent creation on two machines
 
-- **WHEN** machine A and machine B each create a todo claiming id 43 while unable to see each other, and A's todo has the earlier creation clock
-- **THEN** A's todo keeps id 43 and B's todo is reassigned to an unused number on both machines
+- **WHEN** machine A and machine B each create a todo claiming id 43 while unable to see each other, and A's todo was created first
+- **THEN** A's todo holds id 43 and B's todo holds an unused number, identically on both machines
 
 #### Scenario: A batch of collisions after a long offline period
 
 - **WHEN** a machine that created 5 todos offline merges with a peer that used all 5 of those numbers
-- **THEN** all 5 local todos are reassigned to unused numbers and no todo is dropped or merged into another
+- **THEN** all 5 todos hold unused numbers and no todo is dropped or merged into another
 
-### Requirement: Todo id reassignment is published
+#### Scenario: An uncontested number never moves
 
-The system SHALL record a todo id reassignment as a synced field change, so that the device that originally issued the number learns the todo has moved instead of permanently disagreeing with its peer.
+- **WHEN** a todo's claimed number is claimed by no other todo, across any number of merge passes
+- **THEN** it keeps that number permanently
 
-#### Scenario: The losing device learns its todo moved
+### Requirement: Todo numbers converge without negotiation
 
-- **WHEN** one machine reassigns a todo's id during a merge and later syncs with the machine that created it
-- **THEN** both machines report the same id for that todo
+The system SHALL publish only the number a machine issued for a todo, never the resolved id, and SHALL treat that claim as immutable. Each machine derives the resolved assignment independently, so machines holding the same todos agree without exchanging anything about the resolution.
+
+Deriving rather than negotiating is load-bearing, not stylistic: an earlier design had each machine pick a replacement number from its own counter and publish it as a last-write-wins field, which never converged, because a machine's own write always carries a newer clock than its peer's and each side therefore permanently rejected the other's answer.
+
+#### Scenario: Both machines reach the same assignment
+
+- **WHEN** two machines that created todos while apart have each merged the other's changes
+- **THEN** both report the same number for every todo
+
+#### Scenario: The assignment is stable once reached
+
+- **WHEN** further merge passes run after both machines agree
+- **THEN** no todo's number changes
 
 ### Requirement: Referential integrity across a todo id change
 
