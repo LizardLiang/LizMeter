@@ -3,13 +3,14 @@
 // Supports both GitHub Issues and Linear Issues via provider tabs
 
 import { useEffect, useRef, useState } from "react";
-import type { Issue, IssueRef, JiraIssue, LinearIssue } from "../../../shared/types.ts";
+import type { Issue, IssueRef, JiraIssue, LinearIssue, Todo } from "../../../shared/types.ts";
 import { useIssues } from "../hooks/useIssues.ts";
 import { useJiraIssues } from "../hooks/useJiraIssues.ts";
 import { useLinearIssues } from "../hooks/useLinearIssues.ts";
 import styles from "./IssuePickerDropdown.module.scss";
 import { ProviderTabs } from "./ProviderTabs.tsx";
 import type { ProviderTabId } from "./ProviderTabs.tsx";
+import { TodoIssuePicker } from "./TodoIssuePicker.tsx";
 
 interface Props {
   selectedIssue: IssueRef | null;
@@ -31,16 +32,20 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
   const linearConfigured = status.linearConfigured && status.linearTeamSelected;
   const jiraConfigured = status.jiraConfigured && status.jiraDomainSet;
 
-  const availableProviders: ProviderTabId[] = [];
-  if (githubConfigured) availableProviders.push("github");
-  if (linearConfigured) availableProviders.push("linear");
-  if (jiraConfigured) availableProviders.push("jira");
+  // The Todo tab is never gated by configuration -- it is always available, unlike
+  // github/linear/jira which each require setup in Settings first.
+  const externalProviders: ProviderTabId[] = [];
+  if (githubConfigured) externalProviders.push("github");
+  if (linearConfigured) externalProviders.push("linear");
+  if (jiraConfigured) externalProviders.push("jira");
+  const availableProviders: ProviderTabId[] = [...externalProviders, "todo"];
 
   const showTabs = availableProviders.length > 1;
 
+  // When nothing external is configured, Todo is the only tab and becomes the default.
   const effectiveTab = availableProviders.length === 1
     ? availableProviders[0]!
-    : (availableProviders.includes(activeTab) ? activeTab : availableProviders[0]!);
+    : (availableProviders.includes(activeTab) ? activeTab : externalProviders[0]!);
 
   // Close on outside click
   useEffect(() => {
@@ -62,10 +67,14 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
     }
   }, [open]);
 
-  // Don't render anything if no providers configured
-  if (availableProviders.length === 0) return null;
-
-  const isLoading = effectiveTab === "github" ? githubLoading : effectiveTab === "linear" ? linearLoading : jiraLoading;
+  // The Todo tab always renders (it needs no configuration), so this list is never empty.
+  const isLoading = effectiveTab === "github"
+    ? githubLoading
+    : effectiveTab === "linear"
+    ? linearLoading
+    : effectiveTab === "jira"
+    ? jiraLoading
+    : false;
 
   // Filter GitHub issues
   const filteredGitHub = githubIssues.filter((issue) => {
@@ -106,16 +115,28 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
     setSearch("");
   }
 
+  function handleSelectTodo(todo: Todo) {
+    onSelect({ provider: "todo", id: todo.id, title: todo.title });
+    setOpen(false);
+    setSearch("");
+  }
+
   function handleKeyDown(e: React.KeyboardEvent) {
+    if (e.key === "Escape") {
+      setOpen(false);
+      setSearch("");
+      return;
+    }
+    // TodoIssuePicker manages its own arrow-key/Enter navigation and stops propagation for the
+    // keys it handles, so this dropdown-level list navigation only applies to the other tabs.
+    if (effectiveTab === "todo") return;
+
     const activeList = effectiveTab === "github"
       ? filteredGitHub
       : effectiveTab === "linear"
       ? filteredLinear
       : filteredJira;
-    if (e.key === "Escape") {
-      setOpen(false);
-      setSearch("");
-    } else if (e.key === "ArrowDown") {
+    if (e.key === "ArrowDown") {
       e.preventDefault();
       setFocusedIndex((i) => Math.min(i + 1, activeList.length - 1));
     } else if (e.key === "ArrowUp") {
@@ -141,6 +162,8 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
       ? selectedIssue.identifier
       : selectedIssue.provider === "jira"
       ? selectedIssue.key
+      : selectedIssue.provider === "todo"
+      ? `#${selectedIssue.id}`
       : `#${selectedIssue.number}`;
     return (
       <div className={styles.selected}>
@@ -179,17 +202,19 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
 
       {open && (
         <div className={styles.dropdown} onKeyDown={handleKeyDown}>
-          <input
-            ref={searchRef}
-            className={styles.search}
-            type="text"
-            placeholder="Search issues…"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setFocusedIndex(-1);
-            }}
-          />
+          {effectiveTab !== "todo" && (
+            <input
+              ref={searchRef}
+              className={styles.search}
+              type="text"
+              placeholder="Search issues…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setFocusedIndex(-1);
+              }}
+            />
+          )}
 
           {showTabs && (
             <div className={styles.tabsInDropdown}>
@@ -204,69 +229,73 @@ export function IssuePickerDropdown({ selectedIssue, onSelect }: Props) {
             </div>
           )}
 
-          <div className={styles.list}>
-            {isLoading && <div className={styles.hint}>Loading…</div>}
+          {effectiveTab === "todo" && <TodoIssuePicker onSelect={handleSelectTodo} />}
 
-            {effectiveTab === "github" && !githubLoading && (
-              <>
-                {filteredGitHub.length === 0 && (
-                  <div className={styles.hint}>{search ? "No matching issues" : "No open issues"}</div>
-                )}
-                {filteredGitHub.map((issue, i) => (
-                  <button
-                    key={issue.number}
-                    className={i === focusedIndex ? styles.itemFocused : styles.item}
-                    onClick={() => handleSelectGitHub(issue)}
-                    onMouseEnter={() => setFocusedIndex(i)}
-                  >
-                    <span className={styles.itemNum}>#{issue.number}</span>
-                    <span className={styles.itemTitle}>{issue.title}</span>
-                    <span className={styles.itemRepo}>{issue.repo}</span>
-                  </button>
-                ))}
-              </>
-            )}
+          {effectiveTab !== "todo" && (
+            <div className={styles.list}>
+              {isLoading && <div className={styles.hint}>Loading…</div>}
 
-            {effectiveTab === "linear" && !linearLoading && (
-              <>
-                {filteredLinear.length === 0 && (
-                  <div className={styles.hint}>{search ? "No matching issues" : "No open issues"}</div>
-                )}
-                {filteredLinear.map((issue, i) => (
-                  <button
-                    key={issue.id}
-                    className={i === focusedIndex ? styles.itemFocused : styles.item}
-                    onClick={() => handleSelectLinear(issue)}
-                    onMouseEnter={() => setFocusedIndex(i)}
-                  >
-                    <span className={styles.itemNum}>{issue.identifier}</span>
-                    <span className={styles.itemTitle}>{issue.title}</span>
-                    <span className={styles.itemRepo}>{issue.state.name}</span>
-                  </button>
-                ))}
-              </>
-            )}
+              {effectiveTab === "github" && !githubLoading && (
+                <>
+                  {filteredGitHub.length === 0 && (
+                    <div className={styles.hint}>{search ? "No matching issues" : "No open issues"}</div>
+                  )}
+                  {filteredGitHub.map((issue, i) => (
+                    <button
+                      key={issue.number}
+                      className={i === focusedIndex ? styles.itemFocused : styles.item}
+                      onClick={() => handleSelectGitHub(issue)}
+                      onMouseEnter={() => setFocusedIndex(i)}
+                    >
+                      <span className={styles.itemNum}>#{issue.number}</span>
+                      <span className={styles.itemTitle}>{issue.title}</span>
+                      <span className={styles.itemRepo}>{issue.repo}</span>
+                    </button>
+                  ))}
+                </>
+              )}
 
-            {effectiveTab === "jira" && !jiraLoading && (
-              <>
-                {filteredJira.length === 0 && (
-                  <div className={styles.hint}>{search ? "No matching issues" : "No issues found"}</div>
-                )}
-                {filteredJira.map((issue, i) => (
-                  <button
-                    key={issue.id}
-                    className={i === focusedIndex ? styles.itemFocused : styles.item}
-                    onClick={() => handleSelectJira(issue)}
-                    onMouseEnter={() => setFocusedIndex(i)}
-                  >
-                    <span className={styles.itemNum}>{issue.key}</span>
-                    <span className={styles.itemTitle}>{issue.title}</span>
-                    <span className={styles.itemRepo}>{issue.status}</span>
-                  </button>
-                ))}
-              </>
-            )}
-          </div>
+              {effectiveTab === "linear" && !linearLoading && (
+                <>
+                  {filteredLinear.length === 0 && (
+                    <div className={styles.hint}>{search ? "No matching issues" : "No open issues"}</div>
+                  )}
+                  {filteredLinear.map((issue, i) => (
+                    <button
+                      key={issue.id}
+                      className={i === focusedIndex ? styles.itemFocused : styles.item}
+                      onClick={() => handleSelectLinear(issue)}
+                      onMouseEnter={() => setFocusedIndex(i)}
+                    >
+                      <span className={styles.itemNum}>{issue.identifier}</span>
+                      <span className={styles.itemTitle}>{issue.title}</span>
+                      <span className={styles.itemRepo}>{issue.state.name}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+
+              {effectiveTab === "jira" && !jiraLoading && (
+                <>
+                  {filteredJira.length === 0 && (
+                    <div className={styles.hint}>{search ? "No matching issues" : "No issues found"}</div>
+                  )}
+                  {filteredJira.map((issue, i) => (
+                    <button
+                      key={issue.id}
+                      className={i === focusedIndex ? styles.itemFocused : styles.item}
+                      onClick={() => handleSelectJira(issue)}
+                      onMouseEnter={() => setFocusedIndex(i)}
+                    >
+                      <span className={styles.itemNum}>{issue.key}</span>
+                      <span className={styles.itemTitle}>{issue.title}</span>
+                      <span className={styles.itemRepo}>{issue.status}</span>
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

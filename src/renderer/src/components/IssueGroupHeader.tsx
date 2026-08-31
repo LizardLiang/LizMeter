@@ -1,4 +1,5 @@
 import type React from "react";
+import { useTodoLiveInfo } from "../hooks/useTodoLiveInfo.ts";
 import { formatDuration } from "../utils/format.ts";
 import type { IssueGroup } from "../utils/groupSessions.ts";
 import styles from "./IssueGroupHeader.module.scss";
@@ -23,6 +24,23 @@ export function IssueGroupHeader(
 ) {
   const { issueKey, totalSeconds, sessionCount } = group;
 
+  // Todo groups live-join the linked Todo's current title instead of the frozen snapshot every
+  // other provider uses, falling back to the snapshot only when the lookup fails.
+  // `key` is the parseable "provider:issueId" composite (see IssueGroupKey) -- reading the raw id
+  // from it, rather than reversing the "#"-prefixed displayId, doesn't depend on display formatting.
+  const liveTodo = useTodoLiveInfo(
+    issueKey.provider === "todo" ? issueKey.key.split(":")[1]! : null,
+    issueKey.provider,
+  );
+  // The fallback to the stored snapshot is reached from two distinct branches on purpose: while
+  // "loading" it is a provisional placeholder (the live title hasn't arrived yet), while "missing"
+  // it is the genuine answer (the lookup found nothing). Only "found" ever shows the live title.
+  const displayTitle = issueKey.provider !== "todo"
+    ? issueKey.title
+    : liveTodo.status === "found"
+    ? liveTodo.info.title
+    : issueKey.title;
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
@@ -45,9 +63,9 @@ export function IssueGroupHeader(
         <span className={compact ? styles.displayIdCompact : styles.displayIdNormal}>
           {issueKey.displayId}
         </span>
-        {issueKey.title && (
-          <span className={compact ? styles.titleCompact : styles.titleNormal} title={issueKey.title}>
-            {issueKey.title}
+        {displayTitle && (
+          <span className={compact ? styles.titleCompact : styles.titleNormal} title={displayTitle}>
+            {displayTitle}
           </span>
         )}
         <span className={compact ? styles.metaCompact : styles.metaNormal}>

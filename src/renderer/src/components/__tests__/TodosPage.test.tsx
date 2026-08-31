@@ -1057,3 +1057,58 @@ describe("the Manage dialog", () => {
     await waitFor(() => expect(mockTodoLabelAPI.update).toHaveBeenCalledWith({ id: bugLabel.id, color: "#9ece6a" }));
   });
 });
+
+describe("TodosPage highlight-on-navigate", () => {
+  it("flashes the highlighted row and clears it once the flash animation ends, not via a timer", async () => {
+    const onHighlightConsumed = vi.fn();
+    render(<TodosPage highlightTodoId={100} onHighlightConsumed={onHighlightConsumed} />);
+    await screen.findByText("Fix misc code quality issues");
+
+    await waitFor(() => expect(onHighlightConsumed).toHaveBeenCalledTimes(1));
+
+    const row = document.querySelector(`[data-todo-row="100"]`) as HTMLElement;
+    expect(row.className).toContain(styles.rowFlashed);
+
+    // React resolves the native animation-end event name via CSS feature detection, which lands
+    // on the unprefixed "animationend" in a real browser but on a vendor-prefixed variant in this
+    // jsdom test environment -- firing both keeps the test correct regardless of which one React
+    // is actually listening for here; `onFlashEnd` is idempotent, so the redundant one is a no-op.
+    fireEvent.animationEnd(row);
+    fireEvent(row, new Event("webkitAnimationEnd", { bubbles: true }));
+
+    expect(row.className).not.toContain(styles.rowFlashed);
+  });
+
+  it("consumes a highlight for a todo that cannot be found, without expanding or persisting a collapsed group", async () => {
+    // Group 1 ("Todo") starts collapsed -- a not-found lookup must never force it open or save
+    // that as if the user had asked for it.
+    localStorage.setItem("lizmeter.todos.collapsedStates", JSON.stringify([1]));
+    const onHighlightConsumed = vi.fn();
+
+    render(<TodosPage highlightTodoId={9999} onHighlightConsumed={onHighlightConsumed} />);
+    await screen.findByText("Server-side PDF optimization");
+
+    await waitFor(() => expect(onHighlightConsumed).toHaveBeenCalledTimes(1));
+
+    expect(screen.queryByText("Old prod to new prod migration")).not.toBeInTheDocument();
+    expect(JSON.parse(localStorage.getItem("lizmeter.todos.collapsedStates") ?? "[]")).toEqual([1]);
+  });
+
+  it("waits for the todo list to finish loading before deciding a highlighted id is missing", async () => {
+    let resolveList: (todos: Todo[]) => void = () => {};
+    mockTodoAPI.list.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      }),
+    );
+    const onHighlightConsumed = vi.fn();
+
+    render(<TodosPage highlightTodoId={9999} onHighlightConsumed={onHighlightConsumed} />);
+
+    // Still loading -- must not be mistaken for "not found" yet.
+    expect(onHighlightConsumed).not.toHaveBeenCalled();
+
+    resolveList(sampleTodos);
+    await waitFor(() => expect(onHighlightConsumed).toHaveBeenCalledTimes(1));
+  });
+});

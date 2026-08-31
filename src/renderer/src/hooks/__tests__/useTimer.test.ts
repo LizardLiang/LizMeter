@@ -1,6 +1,6 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { TimerSettings } from "../../../../shared/types.ts";
+import type { IssueRef, TimerSettings } from "../../../../shared/types.ts";
 import { useTimer } from "../useTimer.ts";
 
 const defaultSettings: TimerSettings = {
@@ -145,6 +145,38 @@ describe("TC-504: useTimer triggers session save on completion", () => {
     expect(callArg.timerType).toBe("work");
     expect(callArg.plannedDurationSeconds).toBe(3);
     expect(callArg.actualDurationSeconds).toBeGreaterThanOrEqual(0);
+  }, 15000);
+});
+
+describe("TC-506: useTimer maps a linked Todo to the correct SaveSessionInput fields", () => {
+  it("saves issueProvider 'todo', issueId as a string, no issueUrl", async () => {
+    const pendingIssue: IssueRef = { provider: "todo", id: 7, title: "Buy milk" };
+
+    const { result } = renderHook(() => useTimer(shortSettings, undefined, pendingIssue));
+
+    act(() => result.current.setTitle("Complete Me"));
+    act(() => result.current.start());
+
+    await waitFor(
+      () => expect(result.current.state.status).toBe("completed"),
+      { timeout: 8000 },
+    );
+
+    await waitFor(
+      () => expect(mockElectronAPI.session.save).toHaveBeenCalledOnce(),
+      { timeout: 2000 },
+    );
+
+    const callArg = mockElectronAPI.session.save.mock.calls[0]![0] as {
+      issueProvider?: string;
+      issueId?: string;
+      issueTitle?: string;
+      issueUrl?: string;
+    };
+    expect(callArg.issueProvider).toBe("todo");
+    expect(callArg.issueId).toBe("7");
+    expect(callArg.issueTitle).toBe("Buy milk");
+    expect(callArg.issueUrl).toBeUndefined();
   }, 15000);
 });
 

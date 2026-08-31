@@ -72,6 +72,11 @@ function reconstructIssueRef(session: Session): IssueRef | null {
     if (!num || isNaN(num)) return null;
     return { provider: "github", number: num, title: session.issueTitle ?? "", url: session.issueUrl ?? "" };
   }
+  if (session.issueProvider === "todo") {
+    const id = parseInt(session.issueId, 10);
+    if (isNaN(id)) return null;
+    return { provider: "todo", id, title: session.issueTitle ?? "" };
+  }
   return null;
 }
 
@@ -100,6 +105,9 @@ export function TomatoClock() {
   const [activePage, setActivePage] = useState<NavPage>("timer");
   const [pendingTagIds, setPendingTagIds] = useState<number[]>([]);
   const [pendingIssue, setPendingIssue] = useState<IssueRef | null>(null);
+  // Which Todo row to scroll to and flash when the Todos page next mounts, set by clicking a
+  // Todo-linked IssueBadge in History.
+  const [highlightTodoId, setHighlightTodoId] = useState<number | null>(null);
 
   // Claude Code settings
   const [claudeProjectDirName, setClaudeProjectDirName] = useState<string | null>(null);
@@ -460,6 +468,15 @@ export function TomatoClock() {
     [],
   );
 
+  const handleNavigateToTodo = useCallback((todoId: number) => {
+    setHighlightTodoId(todoId);
+    setActivePage("todos");
+  }, []);
+
+  const handleHighlightConsumed = useCallback(() => {
+    setHighlightTodoId(null);
+  }, []);
+
   const handlePendingTagAdd = useCallback((tagId: number) => {
     setPendingTagIds((prev) => (prev.includes(tagId) ? prev : [...prev, tagId]));
   }, []);
@@ -599,6 +616,9 @@ export function TomatoClock() {
         setStopwatchSettings={setStopwatchSettings}
         soundEnabled={soundEnabled}
         onSoundEnabledChange={setSoundEnabled}
+        highlightTodoId={highlightTodoId}
+        onNavigateToTodo={handleNavigateToTodo}
+        onHighlightConsumed={handleHighlightConsumed}
       />
     </MusicPlayerProvider>
   );
@@ -672,6 +692,9 @@ interface TomatoClockInnerProps {
   setStopwatchSettings: (settings: import("../../../shared/types.ts").StopwatchSettings) => void;
   soundEnabled: boolean;
   onSoundEnabledChange: (enabled: boolean) => void;
+  highlightTodoId: number | null;
+  onNavigateToTodo: (todoId: number) => void;
+  onHighlightConsumed: () => void;
 }
 
 function TomatoClockInner(props: TomatoClockInnerProps) {
@@ -738,6 +761,9 @@ function TomatoClockInner(props: TomatoClockInnerProps) {
     setStopwatchSettings,
     soundEnabled,
     onSoundEnabledChange,
+    highlightTodoId,
+    onNavigateToTodo,
+    onHighlightConsumed,
   } = props;
 
   return (
@@ -868,10 +894,13 @@ function TomatoClockInner(props: TomatoClockInnerProps) {
               worklogLoading={worklogLoading}
               onResumeSession={handleResumeSession}
               timerStatus={state.status}
+              onNavigateToTodo={onNavigateToTodo}
             />
           )}
 
-          {activePage === "todos" && <TodosPage />}
+          {activePage === "todos" && (
+            <TodosPage highlightTodoId={highlightTodoId} onHighlightConsumed={onHighlightConsumed} />
+          )}
           {activePage === "stats" && <StatsPage />}
 
           {activePage === "tags" && (

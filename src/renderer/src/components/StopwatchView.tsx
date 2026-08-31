@@ -81,6 +81,8 @@ export function StopwatchView(
               ? `#${state.linkedIssue.number}`
               : state.linkedIssue.provider === "linear"
               ? state.linkedIssue.identifier
+              : state.linkedIssue.provider === "todo"
+              ? `#${state.linkedIssue.id}`
               : state.linkedIssue.key}
           </span>
           <span className={styles.issueTitle}>{state.linkedIssue.title}</span>

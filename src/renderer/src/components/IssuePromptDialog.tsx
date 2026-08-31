@@ -2,8 +2,9 @@
 // Modal dialog for selecting an issue when starting a stopwatch session
 
 import { useEffect, useState } from "react";
-import type { IssueRef, JiraIssue, LinearIssue } from "../../../shared/types.ts";
+import type { IssueRef, JiraIssue, LinearIssue, Todo } from "../../../shared/types.ts";
 import styles from "./IssuePromptDialog.module.scss";
+import { TodoIssuePicker } from "./TodoIssuePicker.tsx";
 
 interface IssuePromptDialogProps {
   onSelect: (issue: IssueRef) => void;
@@ -81,6 +82,12 @@ export function IssuePromptDialog({ onSelect, onSkip }: IssuePromptDialogProps) 
     });
   };
 
+  const handleTodoSelect = (todo: Todo) => {
+    onSelect({ provider: "todo", id: todo.id, title: todo.title });
+  };
+
+  // The Todo section is always available (no config needed), so this only gates the
+  // external-tracker section below it -- GitHub stays excluded here, pre-existing and unrelated.
   const noProviders = !hasLinear && !hasJira;
 
   return (
@@ -91,42 +98,52 @@ export function IssuePromptDialog({ onSelect, onSkip }: IssuePromptDialogProps) 
           <button className={styles.skipBtn} onClick={onSkip}>Skip</button>
         </div>
 
-        {loading && <div className={styles.status}>Loading issues...</div>}
         {error && <div className={styles.error}>{error}</div>}
 
-        {!loading && noProviders && (
-          <div className={styles.status}>
-            No issue providers configured. Set up Linear or Jira in Settings.
-          </div>
-        )}
+        {/* Todos are always available (no config needed) -- never gated on the Linear/Jira fetches below, which have no timeout. */}
+        <div className={styles.issueList}>
+          <div className={styles.sectionLabel}>Todos</div>
+          <TodoIssuePicker onSelect={handleTodoSelect} />
 
-        {!loading && !noProviders && (
-          <div className={styles.issueList}>
-            {linearIssues.map((issue) => (
-              <button
-                key={issue.id}
-                className={styles.issueRow}
-                onClick={() => handleLinearSelect(issue)}
-              >
-                <span className={styles.issueKey}>{issue.identifier}</span>
-                <span className={styles.issueRowTitle}>{issue.title}</span>
-              </button>
-            ))}
-            {jiraIssues.map((issue) => (
-              <button
-                key={issue.id}
-                className={styles.issueRow}
-                onClick={() => handleJiraSelect(issue)}
-              >
-                <span className={styles.issueKey}>{issue.key}</span>
-                <span className={styles.issueRowTitle}>{issue.title}</span>
-              </button>
-            ))}
-            {linearIssues.length === 0 && jiraIssues.length === 0 && (
-              <div className={styles.status}>No issues found.</div>
-            )}
-          </div>
-        )}
+          {loading && <div className={styles.status}>Loading issues...</div>}
+          {!loading && (
+            <>
+              <div className={styles.sectionLabel}>Issue trackers</div>
+              {noProviders && (
+                <div className={styles.status}>
+                  No issue providers configured. Set up Linear or Jira in Settings.
+                </div>
+              )}
+              {!noProviders && (
+                <>
+                  {linearIssues.map((issue) => (
+                    <button
+                      key={issue.id}
+                      className={styles.issueRow}
+                      onClick={() => handleLinearSelect(issue)}
+                    >
+                      <span className={styles.issueKey}>{issue.identifier}</span>
+                      <span className={styles.issueRowTitle}>{issue.title}</span>
+                    </button>
+                  ))}
+                  {jiraIssues.map((issue) => (
+                    <button
+                      key={issue.id}
+                      className={styles.issueRow}
+                      onClick={() => handleJiraSelect(issue)}
+                    >
+                      <span className={styles.issueKey}>{issue.key}</span>
+                      <span className={styles.issueRowTitle}>{issue.title}</span>
+                    </button>
+                  ))}
+                  {linearIssues.length === 0 && jiraIssues.length === 0 && (
+                    <div className={styles.status}>No issues found.</div>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
       </div>
     </div>
   );

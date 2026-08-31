@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Issue, IssueProviderStatus, IssueRef, JiraIssue, LinearIssue } from "../../../../shared/types.ts";
 import type { UseIssuesReturn } from "../../hooks/useIssues.ts";
@@ -86,6 +86,29 @@ function makeJiraIssue(key: string, title = `Jira ${key}`): JiraIssue {
   };
 }
 
+function makeTodo(id: number, title = `Todo ${id}`) {
+  return {
+    id,
+    title,
+    notes: null,
+    state: { id: 1, label: "Todo", color: "#7aa2f7", position: 0, isCompleted: false, isDefault: true, createdAt: "" },
+    project: null,
+    labels: [],
+    milestone: null,
+    priority: 0,
+    startDate: null,
+    dueDate: null,
+    source: "user" as const,
+    sourceLabel: null,
+    parentId: null,
+    parentTitle: null,
+    childCount: 0,
+    completedChildCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    completedAt: null,
+  };
+}
+
 function makeGitHubHookReturn(overrides: Partial<UseIssuesReturn> = {}): UseIssuesReturn {
   return {
     issues: [],
@@ -144,18 +167,69 @@ function setupLinearOnly(issues: LinearIssue[] = []) {
   mockedUseJiraIssues.mockReturnValue(makeJiraHookReturn());
 }
 
+function stubTodoApi(todos: ReturnType<typeof makeTodo>[] = []) {
+  vi.stubGlobal("electronAPI", {
+    todo: { list: vi.fn().mockResolvedValue(todos) },
+    todoProject: { list: vi.fn().mockResolvedValue([]) },
+    todoState: { list: vi.fn().mockResolvedValue([]) },
+    todoLabel: { list: vi.fn().mockResolvedValue([]) },
+    shell: { openExternal: vi.fn().mockResolvedValue(undefined) },
+  });
+}
+
 beforeEach(() => {
   setupNoProviders();
+  stubTodoApi();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 // ── Tests ──
 
-describe("IssuePickerDropdown — no providers configured", () => {
-  it("renders nothing when no providers are configured", () => {
-    const { container } = render(
-      <IssuePickerDropdown selectedIssue={null} onSelect={vi.fn()} />,
-    );
-    expect(container.firstChild).toBeNull();
+describe("IssuePickerDropdown — Todo tab always available", () => {
+  it("still renders the Link issue button when no external provider is configured", () => {
+    render(<IssuePickerDropdown selectedIssue={null} onSelect={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /link issue/i })).toBeInTheDocument();
+  });
+
+  it("opens directly to the Todo tab (no tab switcher) when nothing else is configured", () => {
+    render(<IssuePickerDropdown selectedIssue={null} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /link issue/i }));
+
+    expect(screen.queryByTestId("provider-tabs")).toBeNull();
+    expect(screen.getByPlaceholderText(/search by title or #id/i)).toBeInTheDocument();
+  });
+
+  it("shows a Todo tab alongside a configured provider", () => {
+    setupGitHubOnly([makeGitHubIssue(1)]);
+    render(<IssuePickerDropdown selectedIssue={null} onSelect={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /link issue/i }));
+
+    expect(screen.getByTestId("provider-tabs")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "todo" })).toBeInTheDocument();
+  });
+
+  it("clicking a todo in the Todo tab calls onSelect with a todo IssueRef", async () => {
+    stubTodoApi([makeTodo(7, "Buy milk")]);
+    const onSelect = vi.fn();
+    render(<IssuePickerDropdown selectedIssue={null} onSelect={onSelect} />);
+    fireEvent.click(screen.getByRole("button", { name: /link issue/i }));
+
+    await waitFor(() => expect(screen.getByText("Buy milk")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Buy milk"));
+
+    expect(onSelect).toHaveBeenCalledWith({ provider: "todo", id: 7, title: "Buy milk" });
+  });
+
+  it("shows the todo's #id as the selected-issue display", () => {
+    setupNoProviders();
+    const selectedIssue: IssueRef = { provider: "todo", id: 12, title: "Ship the release" };
+    render(<IssuePickerDropdown selectedIssue={selectedIssue} onSelect={vi.fn()} />);
+
+    expect(screen.getByText("#12")).toBeInTheDocument();
+    expect(screen.getByText("Ship the release")).toBeInTheDocument();
   });
 });
 

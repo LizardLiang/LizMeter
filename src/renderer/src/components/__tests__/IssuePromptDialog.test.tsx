@@ -67,6 +67,19 @@ function buildElectronAPI(overrides: {
         ? vi.fn().mockRejectedValue(new Error("Jira fetch failed"))
         : vi.fn().mockResolvedValue(jiraIssues),
     },
+    ...emptyTodoApi(),
+  };
+}
+
+// TodoIssuePicker (the always-present Todo section) fetches these on mount regardless of
+// linear/jira configuration -- every electronAPI stub in this file needs them, even the ones
+// that construct a raw object instead of going through buildElectronAPI().
+function emptyTodoApi() {
+  return {
+    todo: { list: vi.fn().mockResolvedValue([]) },
+    todoProject: { list: vi.fn().mockResolvedValue([]) },
+    todoState: { list: vi.fn().mockResolvedValue([]) },
+    todoLabel: { list: vi.fn().mockResolvedValue([]) },
   };
 }
 
@@ -94,6 +107,7 @@ describe("IssuePromptDialog: loading state", () => {
         providerStatus: vi.fn().mockReturnValue(new Promise(() => {})),
         fetchIssues: vi.fn().mockReturnValue(new Promise(() => {})),
       },
+      ...emptyTodoApi(),
     });
 
     const { container } = render(<IssuePromptDialog onSelect={vi.fn()} onSkip={vi.fn()} />);
@@ -113,6 +127,62 @@ describe("IssuePromptDialog: no providers configured", () => {
     expect(
       within(container).getByText("No issue providers configured. Set up Linear or Jira in Settings."),
     ).toBeInTheDocument();
+  });
+});
+
+describe("IssuePromptDialog: Todo section is always offered", () => {
+  it("shows the Todo picker even when no external provider is configured", async () => {
+    vi.stubGlobal("electronAPI", buildElectronAPI());
+    const { container } = render(<IssuePromptDialog onSelect={vi.fn()} onSkip={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(within(container).queryByText("Loading issues...")).toBeNull();
+    });
+
+    expect(within(container).getByPlaceholderText(/search by title or #id/i)).toBeInTheDocument();
+  });
+
+  it("calls onSelect with a todo IssueRef when a todo is picked from the pre-start prompt", async () => {
+    const api = buildElectronAPI();
+    api.todo.list = vi.fn().mockResolvedValue([{
+      id: 3,
+      title: "Write the report",
+      notes: null,
+      state: {
+        id: 1,
+        label: "Todo",
+        color: "#7aa2f7",
+        position: 0,
+        isCompleted: false,
+        isDefault: true,
+        createdAt: "",
+      },
+      project: null,
+      labels: [],
+      milestone: null,
+      priority: 0,
+      startDate: null,
+      dueDate: null,
+      source: "user",
+      sourceLabel: null,
+      parentId: null,
+      parentTitle: null,
+      childCount: 0,
+      completedChildCount: 0,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      completedAt: null,
+    }]);
+    vi.stubGlobal("electronAPI", api);
+    const onSelect = vi.fn();
+
+    const { container } = render(<IssuePromptDialog onSelect={onSelect} onSkip={vi.fn()} />);
+
+    await waitFor(() => {
+      expect(within(container).getByText("Write the report")).toBeInTheDocument();
+    });
+    fireEvent.click(within(container).getByText("Write the report"));
+
+    expect(onSelect).toHaveBeenCalledWith({ provider: "todo", id: 3, title: "Write the report" });
   });
 });
 
@@ -256,6 +326,7 @@ describe("IssuePromptDialog: error state", () => {
         providerStatus: vi.fn().mockRejectedValue(new Error("Network error")),
         fetchIssues: vi.fn().mockResolvedValue([]),
       },
+      ...emptyTodoApi(),
     });
 
     const { container } = render(<IssuePromptDialog onSelect={vi.fn()} onSkip={vi.fn()} />);

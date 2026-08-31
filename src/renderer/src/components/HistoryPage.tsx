@@ -41,6 +41,7 @@ interface Props {
   worklogLoading?: Record<string, boolean>;
   onResumeSession?: (session: Session) => void;
   timerStatus?: TimerStatus;
+  onNavigateToTodo?: (todoId: number) => void;
 }
 
 function formatDate(iso: string): string {
@@ -66,6 +67,7 @@ interface SessionCardProps {
   timerStatus?: TimerStatus;
   /** When true, omits the date portion of the meta timestamp (time-only). Use inside day groups where the date header already shows the date. */
   hideDate?: boolean;
+  onNavigateToTodo?: (todoId: number) => void;
 }
 
 function SessionCard(
@@ -81,6 +83,7 @@ function SessionCard(
     onResumeSession,
     timerStatus,
     hideDate,
+    onNavigateToTodo,
   }: SessionCardProps,
 ) {
   const assignedTagIds = session.tags.map((t) => t.id);
@@ -190,7 +193,7 @@ function SessionCard(
           : <div className={styles.cardTitle}>{session.title}</div>
       )}
       <div className={styles.cardTags}>
-        <IssueBadge session={session} />
+        <IssueBadge session={session} onNavigateToTodo={onNavigateToTodo} />
         {session.tags.map((t) => <TagBadge key={t.id} tag={t} onRemove={(id) => void onUnassign(session.id, id)} />)}
         <TagPicker
           allTags={allTags}
@@ -222,6 +225,7 @@ export function HistoryPage({
   worklogLoading,
   onResumeSession,
   timerStatus,
+  onNavigateToTodo,
 }: Props) {
   const activeFilterTag = allTags.find((t) => t.id === activeTagFilter);
   const {
@@ -460,6 +464,7 @@ export function HistoryPage({
                         worklogLoading={worklogLoading?.[session.id] ?? false}
                         onResumeSession={onResumeSession}
                         timerStatus={timerStatus}
+                        onNavigateToTodo={onNavigateToTodo}
                       />
                     ))}
                   </DateSubGroupHeader>
@@ -508,6 +513,7 @@ export function HistoryPage({
                     onResumeSession={onResumeSession}
                     timerStatus={timerStatus}
                     hideDate
+                    onNavigateToTodo={onNavigateToTodo}
                   />
                 ))}
               </div>

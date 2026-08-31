@@ -305,6 +305,10 @@ interface RowProps {
   focused: boolean;
   /** Dimmed while this row is one of the rows in flight. */
   dragging: boolean;
+  /** Briefly true right after this row is scrolled to from a Todo-linked badge click elsewhere. */
+  flashed: boolean;
+  /** Called when the flash's CSS animation finishes playing, so the caller can clear `flashed`. */
+  onFlashEnd: (id: number) => void;
   onToggleSelect: (id: number, shiftKey: boolean) => void;
   onEdit: (todo: Todo) => void;
   onOpenMenu: (todo: Todo, anchor: MenuAnchor) => void;
@@ -313,7 +317,18 @@ interface RowProps {
 }
 
 function TodoRow(props: RowProps) {
-  const { todo, selected, focused, dragging, onToggleSelect, onEdit, onOpenMenu, wasJustDragged } = props;
+  const {
+    todo,
+    selected,
+    focused,
+    dragging,
+    flashed,
+    onFlashEnd,
+    onToggleSelect,
+    onEdit,
+    onOpenMenu,
+    wasJustDragged,
+  } = props;
   const { attributes, listeners, setNodeRef } = useDraggable({ id: todo.id });
 
   const overdue = todo.dueDate !== null && !todo.state.isCompleted && todo.dueDate < todayIso();
@@ -324,6 +339,7 @@ function TodoRow(props: RowProps) {
   else if (selected) rowClass = styles.rowSelected;
   // Appended rather than swapped in: a row can be both selected and under the cursor.
   if (focused) rowClass = `${rowClass} ${styles.rowFocused}`;
+  if (flashed) rowClass = `${rowClass} ${styles.rowFlashed}`;
 
   return (
     // The page reads this back to scroll the cursor into view and to anchor its quick menus,
@@ -338,6 +354,11 @@ function TodoRow(props: RowProps) {
         // cursor, or flips up off the same point when there is no room below.
         onOpenMenu(todo, { top: e.clientY, bottom: e.clientY, left: e.clientX });
       }}
+      // Clears the flash off the CSS animation actually finishing (2s, defined by `.rowFlashed`'s
+      // `todoRowFlash` keyframes) rather than a `setTimeout` racing the parent's own state update
+      // -- see the effect that sets `flashedTodoId` for why that raced. `.rowFlashed` is the only
+      // animation ever applied to this element, so any `animationend` here is that one finishing.
+      onAnimationEnd={() => onFlashEnd(todo.id)}
     >
       <input
         type="checkbox"
@@ -435,11 +456,14 @@ interface GroupProps {
   selected: Set<number>;
   /** The one row carrying the keyboard cursor, if it falls inside this group. */
   focusedId: number | null;
+  /** The one row showing the brief highlight flash, if it falls inside this group. */
+  flashedId: number | null;
   onToggleCollapsed: (stateId: number) => void;
   onAdd: (stateId: number) => void;
   onToggleSelect: (id: number, shiftKey: boolean) => void;
   onEdit: (todo: Todo) => void;
   onOpenMenu: (todo: Todo, anchor: MenuAnchor) => void;
+  onFlashEnd: (id: number) => void;
   wasJustDragged: () => boolean;
 }
 
@@ -452,11 +476,13 @@ function TodoGroup(props: GroupProps) {
     draggingIds,
     selected,
     focusedId,
+    flashedId,
     onToggleCollapsed,
     onAdd,
     onToggleSelect,
     onEdit,
     onOpenMenu,
+    onFlashEnd,
     wasJustDragged,
   } = props;
 
@@ -496,6 +522,8 @@ function TodoGroup(props: GroupProps) {
               selected={selected.has(todo.id)}
               focused={focusedId === todo.id}
               dragging={draggingIds.has(todo.id)}
+              flashed={flashedId === todo.id}
+              onFlashEnd={onFlashEnd}
               onToggleSelect={onToggleSelect}
               onEdit={onEdit}
               onOpenMenu={onOpenMenu}
@@ -513,7 +541,14 @@ function TodoGroup(props: GroupProps) {
 
 // ---- Page ----
 
-export function TodosPage() {
+interface TodosPageProps {
+  /** Set by a Todo-linked IssueBadge click elsewhere in the app -- scroll to and flash this row. */
+  highlightTodoId?: number | null;
+  /** Called once the highlight has been applied, so the caller can clear it. */
+  onHighlightConsumed?: () => void;
+}
+
+export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: TodosPageProps = {}) {
   const {
     todos,
     states,
@@ -665,6 +700,54 @@ export function TodosPage() {
     // scrollIntoView undefined, and keeping the cursor visible must never break moving it.
     document.querySelector(`[data-todo-row="${focusedId}"]`)?.scrollIntoView?.({ block: "nearest" });
   }, [focusedId]);
+
+  /** The row currently showing the brief highlight flash after a Todo-linked badge click. */
+  const [flashedTodoId, setFlashedTodoId] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (highlightTodoId === null) return;
+    // The list is still on its first fetch -- wait for it rather than treating "not loaded yet"
+    // as "not found". `loading` only ever goes true -> false once (see useTodos), so this cannot
+    // get stuck.
+    if (loading) return;
+
+    const target = todos.find((t) => t.id === highlightTodoId);
+    if (target === undefined) {
+      // Genuinely not found (deleted, or not yet synced to this machine). Consume the request
+      // here too -- otherwise `highlightTodoId` stays stuck in the parent's state, and a later,
+      // unrelated Todos visit (e.g. once sync eventually pulls the todo in) would silently flash
+      // and auto-expand a group the user never asked for on that visit.
+      onHighlightConsumed?.();
+      return;
+    }
+
+    // The row cannot be found or scrolled to while its state group is collapsed.
+    setCollapsed((prev) => {
+      if (!prev.has(target.state.id)) return prev;
+      const next = new Set(prev);
+      next.delete(target.state.id);
+      saveCollapsed(next);
+      return next;
+    });
+
+    setFlashedTodoId(highlightTodoId);
+    onHighlightConsumed?.();
+    // The flash itself is cleared by the row's `onAnimationEnd` (the `todoRowFlash` CSS
+    // animation below), not by a timer here -- a timer racing this effect's own cleanup against
+    // `onHighlightConsumed` flipping `highlightTodoId` back to null on the very next render would
+    // get cancelled before it ever fires.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightTodoId, todos, loading]);
+
+  /** Clears the flash once its CSS animation has actually finished playing. */
+  const handleFlashEnd = useCallback((id: number) => {
+    setFlashedTodoId((current) => (current === id ? null : current));
+  }, []);
+
+  useEffect(() => {
+    if (flashedTodoId === null) return;
+    document.querySelector(`[data-todo-row="${flashedTodoId}"]`)?.scrollIntoView?.({ block: "center" });
+  }, [flashedTodoId]);
 
   /** Where a quick menu hangs: under the cursor's row, indented past the checkbox and "..." . */
   const rowAnchor = useCallback((id: number) => {
@@ -1124,11 +1207,13 @@ export function TodosPage() {
                   draggingIds={draggingIds}
                   selected={selected}
                   focusedId={focusedId}
+                  flashedId={flashedTodoId}
                   onToggleCollapsed={toggleCollapsed}
                   onAdd={handleAdd}
                   onToggleSelect={toggleSelect}
                   onEdit={setEditing}
                   onOpenMenu={handleOpenMenu}
+                  onFlashEnd={handleFlashEnd}
                   wasJustDragged={wasJustDragged}
                 />
               ))}

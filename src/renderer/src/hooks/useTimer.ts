@@ -324,6 +324,13 @@ export function useTimer(
             issueId: issue.key,
           };
           break;
+        case "todo":
+          issueFields = {
+            issueTitle: issue.title,
+            issueProvider: "todo",
+            issueId: String(issue.id),
+          };
+          break;
       }
     }
     const saveInput: SaveSessionInput = {

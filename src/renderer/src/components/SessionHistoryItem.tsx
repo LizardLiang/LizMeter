@@ -15,9 +15,12 @@ interface SessionHistoryItemProps {
   onDelete: (id: string) => void;
   onLogWork?: (sessionId: string, issueKey: string) => void;
   worklogLoading?: boolean;
+  onNavigateToTodo?: (todoId: number) => void;
 }
 
-export function SessionHistoryItem({ session, onDelete, onLogWork, worklogLoading }: SessionHistoryItemProps) {
+export function SessionHistoryItem(
+  { session, onDelete, onLogWork, worklogLoading, onNavigateToTodo }: SessionHistoryItemProps,
+) {
   const typeAccent = timerTypeColor(session.timerType);
 
   const hasTitle = Boolean(session.title);
@@ -50,7 +53,7 @@ export function SessionHistoryItem({ session, onDelete, onLogWork, worklogLoadin
             {displayTitle}
           </span>
         )}
-      <IssueBadge session={session} />
+      <IssueBadge session={session} onNavigateToTodo={onNavigateToTodo} />
       {showWorklogUi && (
         <>
           {session.worklogStatus === "logged" && (

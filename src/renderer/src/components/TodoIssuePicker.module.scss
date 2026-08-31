@@ -1,0 +1,108 @@
+.wrap {
+  display: flex;
+  flex-direction: column;
+}
+
+.search {
+  width: 100%;
+  padding: 10px 12px;
+  border: none;
+  border-bottom: 1px solid rgba(41, 46, 66, 0.8);
+  background: transparent;
+  color: #c0caf5;
+  font-size: 13px;
+  outline: none;
+  box-sizing: border-box;
+
+  &::placeholder {
+    color: #7a8194;
+  }
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid rgba(41, 46, 66, 0.8);
+  max-height: 72px;
+  overflow-y: auto;
+}
+
+.chip {
+  padding: 2px 8px;
+  border-radius: 9999px;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  background: rgba(16, 18, 36, 0.4);
+  color: #a9b1d6;
+  white-space: nowrap;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+
+  &:hover {
+    background: rgba(41, 46, 66, 0.65);
+  }
+}
+
+.chipActive {
+  composes: chip;
+  background: rgba(122, 162, 247, 0.14);
+}
+
+.list {
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.hint {
+  padding: 12px;
+  font-size: 12px;
+  color: #a9b1d6;
+  text-align: center;
+}
+
+.item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s ease;
+
+  &:hover {
+    background: rgba(41, 46, 66, 0.65);
+  }
+}
+
+.itemFocused {
+  composes: item;
+  background: rgba(41, 46, 66, 0.65);
+}
+
+.itemNum {
+  color: #7aa2f7;
+  font-size: 11px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.itemTitle {
+  color: #c0caf5;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.itemMeta {
+  color: #a9b1d6;
+  font-size: 11px;
+  flex-shrink: 0;
+}

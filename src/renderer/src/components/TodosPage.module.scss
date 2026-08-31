@@ -281,6 +281,23 @@
   }
 }
 
+// Brief flash after navigating here from a Todo-linked IssueBadge click in History, so the row
+// that scrolled into view is unambiguous even in a long list.
+.rowFlashed {
+  animation: todoRowFlash 2s ease-out;
+}
+
+@keyframes todoRowFlash {
+  0%, 30% {
+    background: rgba(122, 162, 247, 0.28);
+    box-shadow: inset 2px 0 0 #7aa2f7;
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
 // Fully custom: the native control paints a white box when unchecked, which reads as a
 // hole punched in the dark row.
 .check {

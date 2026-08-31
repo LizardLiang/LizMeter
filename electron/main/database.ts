@@ -68,7 +68,7 @@ import { toRendererTrack } from "./music/internal-types.ts";
 let db: Database.Database | null = null;
 
 const VALID_TIMER_TYPES: readonly TimerType[] = ["work", "short_break", "long_break", "stopwatch"];
-const VALID_ISSUE_PROVIDERS = new Set(["github", "linear", "jira"]);
+const VALID_ISSUE_PROVIDERS = new Set(["github", "linear", "jira", "todo"]);
 
 const DEFAULT_SETTINGS: TimerSettings = {
   workDuration: 1500,
@@ -925,7 +925,7 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
     issueNumber: row.issueNumber ?? null,
     issueTitle: row.issueTitle ?? null,
     issueUrl: row.issueUrl ?? null,
-    issueProvider: (row.issueProvider as "github" | "linear" | "jira" | null) ?? null,
+    issueProvider: (row.issueProvider as "github" | "linear" | "jira" | "todo" | null) ?? null,
     issueId: row.issueId ?? null,
     worklogStatus: (row.worklogStatus ?? "not_logged") as WorklogStatus,
     worklogId: row.worklogId ?? null,
@@ -1141,7 +1141,7 @@ export function getSessionById(id: string): Session | null {
     issueNumber: row.issueNumber ?? null,
     issueTitle: row.issueTitle ?? null,
     issueUrl: row.issueUrl ?? null,
-    issueProvider: (row.issueProvider as "github" | "linear" | "jira" | null) ?? null,
+    issueProvider: (row.issueProvider as "github" | "linear" | "jira" | "todo" | null) ?? null,
     issueId: row.issueId ?? null,
     worklogStatus: (row.worklogStatus ?? "not_logged") as WorklogStatus,
     worklogId: row.worklogId ?? null,

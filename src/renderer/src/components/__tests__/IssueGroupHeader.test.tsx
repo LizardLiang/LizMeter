@@ -1,5 +1,5 @@
-import { fireEvent, render, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IssueGroup } from "../../utils/groupSessions.ts";
 import { IssueGroupHeader } from "../IssueGroupHeader.tsx";
 
@@ -19,6 +19,44 @@ function makeIssueGroup(overrides: Partial<IssueGroup> = {}): IssueGroup {
     ...overrides,
   };
 }
+
+function makeTodoFixture(id: number, title: string) {
+  return {
+    id,
+    title,
+    notes: null,
+    state: { id: 1, label: "Done", color: "#9ece6a", position: 0, isCompleted: true, isDefault: false, createdAt: "" },
+    project: null,
+    labels: [],
+    milestone: null,
+    priority: 0,
+    startDate: null,
+    dueDate: null,
+    source: "user" as const,
+    sourceLabel: null,
+    parentId: null,
+    parentTitle: null,
+    childCount: 0,
+    completedChildCount: 0,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    completedAt: null,
+  };
+}
+
+const mockElectronAPI = {
+  todo: {
+    list: vi.fn().mockResolvedValue([]),
+  },
+};
+
+beforeEach(() => {
+  vi.stubGlobal("electronAPI", mockElectronAPI);
+  vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("IssueGroupHeader", () => {
   it("renders display ID and title", () => {
@@ -120,5 +158,30 @@ describe("IssueGroupHeader", () => {
     expect(within(container).getByText("#42")).toBeInTheDocument();
     // No title text
     expect(container.textContent).not.toContain("Fix");
+  });
+
+  it("renders the linked todo's live current title instead of the stored snapshot when the lookup succeeds", async () => {
+    mockElectronAPI.todo.list.mockResolvedValueOnce([makeTodoFixture(42, "Buy oat milk (current)")]);
+    const group = makeIssueGroup({
+      issueKey: { key: "todo:42", provider: "todo", displayId: "#42", title: "Buy milk (stale snapshot)", url: null },
+    });
+    const { container } = render(
+      <IssueGroupHeader group={group} isExpanded={false} onToggle={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(within(container).getByText("Buy oat milk (current)")).toBeInTheDocument());
+    expect(within(container).queryByText("Buy milk (stale snapshot)")).not.toBeInTheDocument();
+  });
+
+  it("falls back to the stored snapshot title when the linked todo's live lookup finds nothing", async () => {
+    mockElectronAPI.todo.list.mockResolvedValueOnce([makeTodoFixture(1, "Some other todo")]);
+    const group = makeIssueGroup({
+      issueKey: { key: "todo:999", provider: "todo", displayId: "#999", title: "Deleted todo snapshot", url: null },
+    });
+    const { container } = render(
+      <IssueGroupHeader group={group} isExpanded={false} onToggle={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(within(container).getByText("Deleted todo snapshot")).toBeInTheDocument());
   });
 });

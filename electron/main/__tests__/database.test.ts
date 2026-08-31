@@ -366,6 +366,28 @@ describe("TC-153: saveSession rejects invalid issueProvider values", () => {
   });
 });
 
+describe("TC-156: saveSession accepts 'todo' as a valid issueProvider", () => {
+  it("stores and returns issueProvider 'todo' with the linked todo's id", () => {
+    const session = saveSession({
+      title: "Linked to a todo",
+      timerType: "work",
+      plannedDurationSeconds: 1500,
+      actualDurationSeconds: 1498,
+      issueProvider: "todo",
+      issueId: "42",
+      issueTitle: "Buy milk",
+    });
+    expect(session.issueProvider).toBe("todo");
+    expect(session.issueId).toBe("42");
+    expect(session.issueTitle).toBe("Buy milk");
+    expect(session.issueUrl).toBeNull();
+
+    const list = listSessions({});
+    expect(list.sessions[0]?.issueProvider).toBe("todo");
+    expect(list.sessions[0]?.issueId).toBe("42");
+  });
+});
+
 describe("TC-154: listSessions returns issueProvider and issueId for new sessions", () => {
   it("maps snake_case columns to camelCase fields", () => {
     saveSession({

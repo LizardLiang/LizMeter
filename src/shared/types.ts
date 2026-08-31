@@ -26,7 +26,7 @@ export interface Session {
   issueTitle: string | null;
   issueUrl: string | null;
   // New generic provider fields
-  issueProvider: "github" | "linear" | "jira" | null;
+  issueProvider: "github" | "linear" | "jira" | "todo" | null;
   issueId: string | null;
   // Worklog tracking fields (Jira only)
   worklogStatus: WorklogStatus;
@@ -56,7 +56,7 @@ export interface SaveSessionInput {
   issueTitle?: string;
   issueUrl?: string;
   // New generic provider fields
-  issueProvider?: "github" | "linear" | "jira";
+  issueProvider?: "github" | "linear" | "jira" | "todo";
   issueId?: string;
 }
 
@@ -461,7 +461,9 @@ export interface IssueComment {
 export type IssueRef =
   | { provider: "github"; number: number; title: string; url: string; }
   | { provider: "linear"; identifier: string; title: string; url: string; }
-  | { provider: "jira"; key: string; title: string; url: string; };
+  | { provider: "jira"; key: string; title: string; url: string; }
+  /** No `url` -- Todos have none. */
+  | { provider: "todo"; id: number; title: string; };
 
 export interface IssuesListInput {
   repo?: string; // optional "owner/repo" filter
@@ -575,7 +577,7 @@ export interface SaveSessionWithTrackingInput {
   issueNumber?: number;
   issueTitle?: string;
   issueUrl?: string;
-  issueProvider?: "github" | "linear" | "jira";
+  issueProvider?: "github" | "linear" | "jira" | "todo";
   issueId?: string;
   // Claude Code tracking data (optional)
   claudeCodeSessions?: ClaudeCodeSessionData[];

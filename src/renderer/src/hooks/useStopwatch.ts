@@ -225,6 +225,12 @@ export function useStopwatch(
           issueProvider: "linear" as const,
           issueId: issue.identifier,
         }
+        : issue.provider === "todo"
+        ? {
+          issueTitle: issue.title,
+          issueProvider: "todo" as const,
+          issueId: String(issue.id),
+        }
         : {
           issueTitle: issue.title,
           issueUrl: issue.url,

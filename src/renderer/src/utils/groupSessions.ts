@@ -4,7 +4,7 @@ import type { Session } from "../../../shared/types.ts";
 export interface IssueGroupKey {
   /** Composite string key: "provider:issueId" or "legacy-github:issueNumber" or "legacy-github-url:issueUrl" */
   key: string;
-  provider: "github" | "linear" | "jira" | "legacy-github";
+  provider: "github" | "linear" | "jira" | "todo" | "legacy-github";
   /** Display identifier: "#42", "LIN-42", "PROJ-123", etc. */
   displayId: string;
   /** Issue title (from issueTitle field, may be null) */
@@ -66,7 +66,7 @@ export function getIssueGroupKey(session: Session): IssueGroupKey {
 
   // Modern providers: github, linear, jira
   if (issueProvider !== null && issueId !== null) {
-    const displayId = issueProvider === "github" ? `#${issueId}` : issueId;
+    const displayId = issueProvider === "github" || issueProvider === "todo" ? `#${issueId}` : issueId;
     return {
       key: `${issueProvider}:${issueId}`,
       provider: issueProvider,
