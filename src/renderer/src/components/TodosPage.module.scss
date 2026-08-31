@@ -502,21 +502,50 @@
   color: #7aa2f7;
 }
 
-.aiBadge {
+// Which hand wrote the row -- an icon rather than a text pill, so a user-created todo (which used
+// to show nothing) reads the same at-a-glance way an AI-created one always did.
+.sourceIcon {
   flex-shrink: 0;
-  padding: 1px 7px;
-  border-radius: 9999px;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+
+  svg {
+    width: 12px;
+    height: 12px;
+    display: block;
+  }
+}
+
+.sourceIconAi {
+  composes: sourceIcon;
   color: #bb9af7;
-  background: rgba(187, 154, 247, 0.14);
-  border: 1px solid rgba(187, 154, 247, 0.3);
-  max-width: 8rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+// Claude uses its own coral brand colour (not the app's purple) since this is the mascot's
+// actual identity colour, more recognizable than forcing it into the Tokyo Night palette. The
+// glyph's viewBox (47x38) is wider than the other icons' square viewBoxes, so it gets a wider
+// fixed width instead of the shared 12px square -- scaling to the same height keeps the
+// pixel-grid octopus from looking squashed next to the other row icons.
+.sourceIconClaude {
+  composes: sourceIcon;
+  color: #d97757;
+
+  svg {
+    width: 14.84px;
+    height: 12px;
+  }
+}
+
+// A different accent from Claude's purple and from the blue used everywhere else on the row
+// (priority icon, project chip), so the two brand glyphs don't blend at a glance.
+.sourceIconCodex {
+  composes: sourceIcon;
+  color: #9ece6a;
+}
+
+.sourceIconUser {
+  composes: sourceIcon;
+  color: #565f89;
 }
 
 .date {

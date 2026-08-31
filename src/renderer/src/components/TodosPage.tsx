@@ -14,7 +14,7 @@ import {
 } from "@dnd-kit/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Todo, TodoFilter, TodoState } from "../../../shared/types.ts";
+import type { Todo, TodoFilter, TodoSource, TodoState } from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS, todoPriorityLabel } from "../../../shared/types.ts";
 import { useTodos } from "../hooks/useTodos.ts";
 import { toPlainSummary } from "../utils/markdownPlain.ts";
@@ -190,6 +190,102 @@ function PriorityIcon({ priority }: { priority: number; }) {
   );
 }
 
+/**
+ * A four-point sparkle for "an agent wrote this". The fallback when `sourceLabel` names no
+ * agent this file recognizes -- an unfamiliar agent still gets *a* mark, just not a branded one.
+ */
+function AiSourceGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <path d="M8 1 9.5 6.5 15 8 9.5 9.5 8 15 6.5 9.5 1 8 6.5 6.5Z" />
+    </svg>
+  );
+}
+
+/**
+ * Claude Code's own mascot ("Clawd" the octopus), reused verbatim from the official asset
+ * shipped inside the Claude Code VS Code extension -- not Anthropic's corporate "A" mark, since
+ * a Claude-sourced todo comes specifically from the Claude Code CLI agent.
+ */
+function ClaudeSourceGlyph() {
+  return (
+    <svg viewBox="0 0 47 38" fill="currentColor" aria-hidden="true">
+      <path d="M5.08191 10.0769V0.938461H9.37422V10.0769H5.08191ZM9.23305 10.0769V0.938461H13.5254V10.0769H9.23305ZM13.3842 10.0769V0.938461H17.6765V10.0769H13.3842ZM17.5353 10.0769V0.938461H21.8276V10.0769H17.5353ZM21.6865 10.0769V0.938461H25.9788V10.0769H21.6865ZM25.8376 10.0769V0.938461H30.1299V10.0769H25.8376ZM29.9888 10.0769V0.938461H34.2811V10.0769H29.9888ZM34.1399 10.0769V0.938461H38.4322V10.0769H34.1399ZM38.291 10.0769V0.938461H42.5834V10.0769H38.291ZM0.930769 19.0769V9.93846H5.22308V19.0769H0.930769ZM5.08191 19.0769V9.93846H9.37422V19.0769H5.08191ZM9.23305 19.0769V14.5077H13.5254V19.0769H9.23305ZM13.3842 19.0769V9.93846H17.6765V19.0769H13.3842ZM17.5353 19.0769V9.93846H21.8276V19.0769H17.5353ZM21.6865 19.0769V9.93846H25.9788V19.0769H21.6865ZM25.8376 19.0769V9.93846H30.1299V19.0769H25.8376ZM29.9888 19.0769V9.93846H34.2811V19.0769H29.9888ZM34.1399 19.0769V14.5077H38.4322V19.0769H34.1399ZM38.291 19.0769V9.93846H42.5834V19.0769H38.291ZM42.4422 19.0769V9.93846H46.7345V19.0769H42.4422ZM5.08191 28.0769V18.9385H9.37422V28.0769H5.08191ZM9.23305 28.0769V18.9385H13.5254V28.0769H9.23305ZM13.3842 28.0769V18.9385H17.6765V28.0769H13.3842ZM17.5353 28.0769V18.9385H21.8276V28.0769H17.5353ZM21.6865 28.0769V18.9385H25.9788V28.0769H21.6865ZM25.8376 28.0769V18.9385H30.1299V28.0769H25.8376ZM29.9888 28.0769V18.9385H34.2811V28.0769H29.9888ZM34.1399 28.0769V18.9385H38.4322V28.0769H34.1399ZM38.291 28.0769V18.9385H42.5834V28.0769H38.291ZM5.08191 37.0769V27.9385H9.37422V37.0769H5.08191ZM13.3842 37.0769V27.9385H17.6765V37.0769H13.3842ZM29.9888 37.0769V27.9385H34.2811V37.0769H29.9888ZM38.291 37.0769V27.9385H42.5834V37.0769H38.291Z" />
+    </svg>
+  );
+}
+
+/**
+ * OpenAI's official brand mark, reused verbatim (path data from simple-icons, MIT-licensed) for
+ * Codex-labeled todos -- Codex is OpenAI's product and simple-icons has no separate Codex mark.
+ */
+function CodexSourceGlyph() {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M22.2819 9.8211a5.9847 5.9847 0 0 0-.5157-4.9108 6.0462 6.0462 0 0 0-6.5098-2.9A6.0651 6.0651 0 0 0 4.9807 4.1818a5.9847 5.9847 0 0 0-3.9977 2.9 6.0462 6.0462 0 0 0 .7427 7.0966 5.98 5.98 0 0 0 .511 4.9107 6.051 6.051 0 0 0 6.5146 2.9001A5.9847 5.9847 0 0 0 13.2599 24a6.0557 6.0557 0 0 0 5.7718-4.2058 5.9894 5.9894 0 0 0 3.9977-2.9001 6.0557 6.0557 0 0 0-.7475-7.0729zm-9.022 12.6081a4.4755 4.4755 0 0 1-2.8764-1.0408l.1419-.0804 4.7783-2.7582a.7948.7948 0 0 0 .3927-.6813v-6.7369l2.02 1.1686a.071.071 0 0 1 .038.052v5.5826a4.504 4.504 0 0 1-4.4945 4.4944zm-9.6607-4.1254a4.4708 4.4708 0 0 1-.5346-3.0137l.142.0852 4.783 2.7582a.7712.7712 0 0 0 .7806 0l5.8428-3.3685v2.3324a.0804.0804 0 0 1-.0332.0615L9.74 19.9502a4.4992 4.4992 0 0 1-6.1408-1.6464zM2.3408 7.8956a4.485 4.485 0 0 1 2.3655-1.9728V11.6a.7664.7664 0 0 0 .3879.6765l5.8144 3.3543-2.0201 1.1685a.0757.0757 0 0 1-.071 0l-4.8303-2.7865A4.504 4.504 0 0 1 2.3408 7.872zm16.5963 3.8558L13.1038 8.364 15.1192 7.2a.0757.0757 0 0 1 .071 0l4.8303 2.7913a4.4944 4.4944 0 0 1-.6765 8.1042v-5.6772a.79.79 0 0 0-.407-.667zm2.0107-3.0231l-.142-.0852-4.7735-2.7818a.7759.7759 0 0 0-.7854 0L9.409 9.2297V6.8974a.0662.0662 0 0 1 .0284-.0615l4.8303-2.7866a4.4992 4.4992 0 0 1 6.6802 4.66zM8.3065 12.863l-2.02-1.1638a.0804.0804 0 0 1-.038-.0567V6.0742a4.4992 4.4992 0 0 1 7.3757-3.4537l-.142.0805L8.704 5.459a.7948.7948 0 0 0-.3927.6813zm1.0976-2.3654l2.602-1.4998 2.6069 1.4998v2.9994l-2.5974 1.4997-2.6067-1.4997Z" />
+    </svg>
+  );
+}
+
+/** A plain person glyph for a todo someone typed in themselves. */
+function UserSourceGlyph() {
+  return (
+    <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+      <circle cx="8" cy="5" r="2.6" />
+      <path d="M2.6 13C2.6 10 4.9 7.8 8 7.8 11.1 7.8 13.4 10 13.4 13 13.4 13.6 12.9 14 12.4 14L3.6 14C3.1 14 2.6 13.6 2.6 13Z" />
+    </svg>
+  );
+}
+
+type AiGlyphKind = "claude" | "codex" | "generic";
+
+/**
+ * Maps the free-text `sourceLabel` an agent sets for itself (e.g. `claude-code`, `codex` -- see
+ * `CreateTodoInput.sourceLabel`) to a recognizable mark. Substring match, case-insensitive: the
+ * label is whatever string the calling agent happened to pass, not a fixed enum, so
+ * "claude-code" and "claude" both have to land on the same glyph. Anything unrecognized,
+ * including a null label, falls back to the generic sparkle.
+ */
+function resolveAiGlyphKind(sourceLabel: string | null): AiGlyphKind {
+  if (sourceLabel === null) return "generic";
+  const normalized = sourceLabel.toLowerCase();
+  if (normalized.includes("claude")) return "claude";
+  if (normalized.includes("codex") || normalized.includes("openai") || normalized.includes("gpt")) return "codex";
+  return "generic";
+}
+
+const AI_GLYPHS: Record<AiGlyphKind, { Glyph: () => React.JSX.Element; className: string; }> = {
+  claude: { Glyph: ClaudeSourceGlyph, className: styles.sourceIconClaude },
+  codex: { Glyph: CodexSourceGlyph, className: styles.sourceIconCodex },
+  generic: { Glyph: AiSourceGlyph, className: styles.sourceIconAi },
+};
+
+/**
+ * Who added the row, as an icon rather than a text pill -- so a user-created todo, which used to
+ * show nothing at all, gets the same at-a-glance treatment as an AI-created one. The specific
+ * detail (which agent, or "you") lives in the tooltip/aria-label, not on the glyph itself; the
+ * glyph's shape (and, for recognized agents, its colour) carries the "which agent" distinction
+ * that used to be squashed into one generic sparkle for every AI source.
+ */
+function SourceIcon({ source, sourceLabel }: { source: TodoSource; sourceLabel: string | null; }) {
+  const label = source === "ai" ? `Added by ${sourceLabel ?? "AI"}` : "Added by you";
+
+  if (source === "user") {
+    return (
+      <span className={styles.sourceIconUser} title={label} aria-label={label}>
+        <UserSourceGlyph />
+      </span>
+    );
+  }
+
+  const { Glyph, className } = AI_GLYPHS[resolveAiGlyphKind(sourceLabel)];
+  return (
+    <span className={className} title={label} aria-label={label}>
+      <Glyph />
+    </span>
+  );
+}
+
 function StateDot({ state }: { state: TodoState; }) {
   return (
     <span
@@ -309,11 +405,7 @@ function TodoRow(props: RowProps) {
             {todo.project.name}
           </span>
         )}
-        {todo.source === "ai" && (
-          <span className={styles.aiBadge} title={todo.sourceLabel ?? "Added by AI"}>
-            {todo.sourceLabel ?? "AI"}
-          </span>
-        )}
+        <SourceIcon source={todo.source} sourceLabel={todo.sourceLabel} />
         <span className={overdue ? styles.dateOverdue : styles.date}>{formatDay(dateIso)}</span>
       </button>
     </li>

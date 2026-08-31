@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Todo, TodoLabel, TodoProject, TodoState } from "../../../../shared/types.ts";
+import styles from "../TodosPage.module.scss";
 import { TodosPage } from "../TodosPage.tsx";
 
 const todoState: TodoState = {
@@ -738,6 +739,74 @@ describe("TodosPage priority", () => {
 
     expect(screen.getByLabelText("Urgent")).toBeInTheDocument();
     expect(screen.getByLabelText("No priority")).toBeInTheDocument();
+  });
+});
+
+describe("TodosPage source icon", () => {
+  it("marks a user-created todo as added by you", async () => {
+    // makeTodo defaults to source: "user", sourceLabel: null.
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState),
+    ]);
+    await renderPage();
+
+    expect(screen.getByLabelText("Added by you")).toBeInTheDocument();
+  });
+
+  it("names the specific agent for an AI-created todo that carries a source label", async () => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState, { source: "ai", sourceLabel: "claude-code" }),
+    ]);
+    await renderPage();
+
+    expect(screen.getByLabelText("Added by claude-code")).toBeInTheDocument();
+  });
+
+  it("falls back to a generic AI label when no source label was recorded", async () => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState, { source: "ai", sourceLabel: null }),
+    ]);
+    await renderPage();
+
+    expect(screen.getByLabelText("Added by AI")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["claude-code", styles.sourceIconClaude],
+    ["claude", styles.sourceIconClaude],
+    ["Claude", styles.sourceIconClaude],
+    ["codex", styles.sourceIconCodex],
+    ["openai", styles.sourceIconCodex],
+    ["gpt-5", styles.sourceIconCodex],
+  ])("resolves sourceLabel %s to its brand glyph, not the generic one", async (sourceLabel, expectedClass) => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState, { source: "ai", sourceLabel }),
+    ]);
+    await renderPage();
+
+    const icon = screen.getByLabelText(`Added by ${sourceLabel}`);
+    expect(icon.className).toBe(expectedClass);
+    expect(icon.className).not.toBe(styles.sourceIconAi);
+  });
+
+  it("falls back to the generic AI glyph for an unrecognized source label", async () => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState, { source: "ai", sourceLabel: "some-other-bot" }),
+    ]);
+    await renderPage();
+
+    const icon = screen.getByLabelText("Added by some-other-bot");
+    expect(icon.className).toBe(styles.sourceIconAi);
+  });
+
+  it("leaves the user glyph untouched by brand resolution", async () => {
+    mockTodoAPI.list.mockResolvedValue([
+      makeTodo(152, "Old prod to new prod migration", todoState),
+    ]);
+    await renderPage();
+
+    const icon = screen.getByLabelText("Added by you");
+    expect(icon.className).toBe(styles.sourceIconUser);
   });
 });
 
