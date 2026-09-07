@@ -57,14 +57,27 @@ export class TaskCheckboxWidget extends WidgetType {
   }
 }
 
-/** Flips `[ ]` to `[x]` or `[x]`/`[X]` back to `[ ]`, in a single dispatch. */
+/**
+ * Flips `[ ]` to `[x]` or `[x]`/`[X]` back to `[ ]`, in a single dispatch.
+ *
+ * The toggle itself lives on `click`, not `mousedown`: the checkbox is a real, tabbable
+ * `<input>`, so Tab then Space activates it -- a native keyboard interaction that fires `click`
+ * (and `change`) with no `mousedown` at all. Wiring the toggle only to `mousedown` left that path
+ * flipping the DOM checkbox's own `checked` property without ever touching the document, out of
+ * sync until the next unrelated rebuild.
+ *
+ * `mousedown` keeps its own listener for exactly one job: `preventDefault` so a mouse click does
+ * not move focus or disturb the editor's selection. It does not also toggle -- `click` still
+ * fires after a `mousedown`/`mouseup` pair regardless of `preventDefault` there, and toggling in
+ * both would flip the marker twice on an ordinary mouse click, undoing itself.
+ */
 function wireToggle(input: HTMLInputElement, view: EditorView): void {
   input.addEventListener("mousedown", (event) => {
     if (event.button !== 0) return;
-    // Owning the event stops the checkbox from flipping on its own and keeps focus, and the
-    // selection, exactly where they already were.
     event.preventDefault();
+  });
 
+  input.addEventListener("click", () => {
     const pos = view.posAtDOM(input);
     if (!Number.isInteger(pos) || pos < 0 || pos + MARKER_LENGTH > view.state.doc.length) return;
 

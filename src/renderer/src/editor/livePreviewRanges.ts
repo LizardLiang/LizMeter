@@ -407,11 +407,11 @@ function table(ctx: WalkContext, node: SyntaxNode): void {
 
   const rows: string[][] = [];
   for (let child = delimiterNode?.nextSibling ?? null; child !== null; child = child.nextSibling) {
-    if (child.name === "TableRow") rows.push(cellsOf(ctx.state, child));
+    if (child.name === "TableRow") rows.push(normalizeRow(cellsOf(ctx.state, child), align.length));
   }
 
   push(ctx, {
-    from: node.from,
+    from: tableRangeFrom(ctx.state, node),
     to: node.to,
     kind: "widget",
     markClass: "cm-md-table",
@@ -419,9 +419,62 @@ function table(ctx: WalkContext, node: SyntaxNode): void {
   });
 }
 
-/** The raw, trimmed text of every `TableCell` directly under a `TableHeader` or `TableRow`. */
+/**
+ * `Table.from` starts right after any leading indentation, which otherwise leaves an orphan raw
+ * line above the rendered table -- the line's own whitespace with nothing visibly attached to
+ * it. Only widen when that gap is pure whitespace: a blockquoted table's gap is `"> "`, already
+ * hidden by `quoteMark()`'s own range, and widening here too would start at the same position
+ * and collide with it.
+ */
+function tableRangeFrom(state: EditorState, node: SyntaxNode): number {
+  const line = state.doc.lineAt(node.from);
+  if (line.from === node.from) return node.from;
+  const prefix = state.doc.sliceString(line.from, node.from);
+  return /^\s*$/.test(prefix) ? line.from : node.from;
+}
+
+/**
+ * The text of every column in a `TableHeader` or `TableRow`, rebuilt positionally.
+ *
+ * lezer emits no `TableCell` node for an empty cell -- two adjacent `TableDelimiter` nodes with
+ * nothing between them -- so collecting only `TableCell` children (as a plain `childrenNamed`
+ * call would) silently drops it and every later column shifts one to the left of where
+ * `tableAlignment` puts it. Walking the row's own children in document order and emitting `""`
+ * whenever a delimiter directly follows another delimiter -- which also catches a leading or a
+ * trailing gap, not just one in the middle -- keeps the cell count in agreement with the
+ * alignment row's. Verified against the real parser output before writing this, not assumed.
+ */
 function cellsOf(state: EditorState, row: SyntaxNode): string[] {
-  return childrenNamed(row, "TableCell").map((cell) => state.doc.sliceString(cell.from, cell.to).trim());
+  const cells: string[] = [];
+  let previousWasDelimiter = false;
+  for (let child = row.firstChild; child !== null; child = child.nextSibling) {
+    if (child.name === "TableDelimiter") {
+      if (previousWasDelimiter) cells.push("");
+      previousWasDelimiter = true;
+      continue;
+    }
+    if (child.name === "TableCell") {
+      cells.push(unescapePipe(state.doc.sliceString(child.from, child.to).trim()));
+      previousWasDelimiter = false;
+    }
+  }
+  return cells;
+}
+
+/**
+ * `x \| y` -- GFM lets a pipe be escaped so it does not end the cell there; the backslash itself
+ * is never part of the rendered text.
+ */
+function unescapePipe(text: string): string {
+  return text.replace(/\\\|/g, "|");
+}
+
+/** Pads a short body row with empty cells, or drops a long row's extra ones -- the GFM rule for
+ * a row whose column count does not match the header's. */
+function normalizeRow(cells: string[], length: number): string[] {
+  if (cells.length === length) return cells;
+  if (cells.length > length) return cells.slice(0, length);
+  return cells.concat(new Array<string>(length - cells.length).fill(""));
 }
 
 /**
@@ -653,8 +706,12 @@ function clamp(value: number, low: number, high: number): number {
   return Math.max(low, Math.min(value, high));
 }
 
-/** Two overlapping visible windows visit a straddling node twice. Sorted, the copies adjoin. */
-function dropRepeats(ranges: PreviewRange[]): PreviewRange[] {
+/**
+ * Two overlapping visible windows visit a straddling node twice. Sorted, the copies adjoin.
+ * Exported for direct testing of `isSameRange`'s field coverage, which is otherwise only
+ * reachable by engineering a real overlapping-window walk.
+ */
+export function dropRepeats(ranges: PreviewRange[]): PreviewRange[] {
   const unique: PreviewRange[] = [];
   for (const range of ranges) {
     const previous = unique[unique.length - 1];
@@ -670,5 +727,25 @@ function isSameRange(a: PreviewRange, b: PreviewRange): boolean {
     && a.kind === b.kind
     && a.markClass === b.markClass
     && a.widgetText === b.widgetText
-    && a.widgetSrc === b.widgetSrc;
+    && a.widgetSrc === b.widgetSrc
+    && a.widgetChecked === b.widgetChecked
+    && sameTable(a.widgetTable, b.widgetTable);
+}
+
+/**
+ * Structural comparison, not `===` -- two straddling visible windows build two distinct
+ * `PreviewTable` objects for the same table, and without this `dropRepeats` would keep both.
+ * Exported so `TableWidget.eq` shares the one implementation rather than a second copy that
+ * could drift from it.
+ */
+export function sameTable(a: PreviewTable | undefined, b: PreviewTable | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return sameArray(a.header, b.header)
+    && sameArray(a.align, b.align)
+    && a.rows.length === b.rows.length
+    && a.rows.every((row, index) => sameArray(row, b.rows[index] ?? []));
+}
+
+function sameArray<T>(a: readonly T[], b: readonly T[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
 }

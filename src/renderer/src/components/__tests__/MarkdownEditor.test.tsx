@@ -260,7 +260,10 @@ describe("MarkdownEditor", () => {
       const checkbox = container.querySelector<HTMLInputElement>(".cm-md-task");
       if (checkbox === null) throw new Error("the task checkbox widget did not render");
 
+      // A real mouse click fires both events in sequence -- `mousedown` only suppresses focus
+      // and selection now, and the toggle itself lives on `click`.
       fireEvent.mouseDown(checkbox, { button: 0 });
+      fireEvent.click(checkbox);
 
       expect(view.state.doc.toString()).toBe("- [x] todo\n\ntail");
     });
@@ -275,8 +278,46 @@ describe("MarkdownEditor", () => {
       if (checkbox === null) throw new Error("the task checkbox widget did not render");
 
       fireEvent.mouseDown(checkbox, { button: 0 });
+      fireEvent.click(checkbox);
 
       expect(view.state.doc.toString()).toBe("- [ ] done\n\ntail");
+    });
+
+    it("toggles exactly once on a real mouse click, not twice from mousedown and click both firing", () => {
+      // `mousedown` used to both suppress the default action and dispatch the toggle. Moving the
+      // toggle to `click` without also removing it from `mousedown` would flip the marker twice
+      // on an ordinary click -- back to where it started -- since `click` still fires after
+      // `mousedown` regardless of `preventDefault` there.
+      const { container } = render(<MarkdownEditor value={"- [ ] todo\n\ntail"} onChange={vi.fn()} />);
+      const view = editorView(container);
+      act(() => {
+        view.dispatch({ selection: { anchor: view.state.doc.length } });
+      });
+      const checkbox = container.querySelector<HTMLInputElement>(".cm-md-task");
+      if (checkbox === null) throw new Error("the task checkbox widget did not render");
+
+      fireEvent.mouseDown(checkbox, { button: 0 });
+      fireEvent.click(checkbox);
+
+      expect(view.state.doc.toString()).toBe("- [x] todo\n\ntail");
+    });
+
+    it("toggles from a keyboard-activated click with no mousedown, e.g. Tab then Space", () => {
+      // A native `<input type=checkbox>` is tabbable: activating it from the keyboard fires
+      // `click` (and `change`) directly, with no `mousedown` at all. Wiring the toggle only to
+      // `mousedown` left this path flipping the DOM checkbox's own `checked` property without
+      // ever touching the document.
+      const { container } = render(<MarkdownEditor value={"- [ ] todo\n\ntail"} onChange={vi.fn()} />);
+      const view = editorView(container);
+      act(() => {
+        view.dispatch({ selection: { anchor: view.state.doc.length } });
+      });
+      const checkbox = container.querySelector<HTMLInputElement>(".cm-md-task");
+      if (checkbox === null) throw new Error("the task checkbox widget did not render");
+
+      fireEvent.click(checkbox);
+
+      expect(view.state.doc.toString()).toBe("- [x] todo\n\ntail");
     });
 
     it("renders a GFM table as a real table when the cursor is off it", () => {

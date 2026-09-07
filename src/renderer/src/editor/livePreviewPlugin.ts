@@ -4,6 +4,7 @@
 // only be decided against a live `EditorView` -- the visible window, IME composition, and
 // which ranges the cursor must step over.
 
+import { syntaxTree } from "@codemirror/language";
 import type { EditorState, Range, SelectionRange } from "@codemirror/state";
 import { StateField } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType } from "@codemirror/view";
@@ -210,10 +211,17 @@ function tableDecorationsOf(state: EditorState): DecorationSet {
  */
 export const tablePreviewField = StateField.define<DecorationSet>({
   create: (state) => tableDecorationsOf(state),
-  update: (
-    value,
-    tr,
-  ) => (tr.docChanged || !tr.startState.selection.eq(tr.state.selection) ? tableDecorationsOf(tr.state) : value),
+  update: (value, tr) => (
+    // CodeMirror's background parser finishes asynchronously and dispatches an effects-only
+    // transaction when it does -- no doc change, no selection change -- so a table further down
+    // a long note than the ~3000-character initial sync parse would stay raw until an unrelated
+    // edit rebuilt this field. Comparing the tree by reference is the same guard
+    // `@codemirror/language`'s own `treeHighlighter` uses for the identical reason.
+    tr.docChanged || !tr.startState.selection.eq(tr.state.selection)
+      || syntaxTree(tr.startState) !== syntaxTree(tr.state)
+      ? tableDecorationsOf(tr.state)
+      : value
+  ),
   // `.from`, not `.of` -- `.of` sets the facet to the constant `field` value (the `StateField`
   // descriptor itself, not a decoration set), which is what produced
   // `Cannot read properties of undefined (reading 'isEmpty')` deep in `RangeSet.spans` the first

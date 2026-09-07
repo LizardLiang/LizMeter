@@ -268,6 +268,38 @@ describe("table decorations", () => {
 
     expect(built.atomic.size).toBe(1);
   });
+
+  it("rebuilds once the background parser finishes, even though the transaction changes neither the doc nor the selection", () => {
+    // The initial sync parse covers only the first ~3000 characters (`@codemirror/language`'s
+    // own limit), so a table further down a long note starts life unparsed and the field's own
+    // `create` finds no Table node at all. The state field's `update` guard used to check only
+    // `docChanged` and a selection change, so this table stayed raw forever -- CodeMirror's
+    // background parser reports completion by dispatching an effects-only transaction, which
+    // trips neither guard.
+    const filler = "x".repeat(4000);
+    const doc = `${filler}\n\n${TABLE_DOC}`;
+    let state = EditorState.create({
+      doc,
+      extensions: [markdown({ base: markdownLanguage, codeLanguages: [] }), tablePreviewField],
+      selection: EditorSelection.cursor(doc.length),
+    });
+
+    expect(tableWidgetsOf(state)).toEqual([]);
+
+    // Advances the underlying parse context to completion without going through a transaction
+    // (what a real `ensureSyntaxTree` call, or the editor simply sitting idle, would do), then
+    // applies the kind of transaction the background worker itself dispatches once it is done:
+    // no document change, no selection change.
+    ensureSyntaxTree(state, state.doc.length, 5000);
+    const tr = state.update({});
+    expect(tr.docChanged).toBe(false);
+    expect(tr.startState.selection.eq(tr.state.selection)).toBe(true);
+    state = tr.state;
+
+    expect(tableWidgetsOf(state)).toEqual([
+      new TableWidget({ header: ["a", "b"], align: [null, null], rows: [["1", "2"]] }),
+    ]);
+  });
 });
 
 describe("PreviewTextWidget", () => {

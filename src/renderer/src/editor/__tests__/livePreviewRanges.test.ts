@@ -11,7 +11,7 @@ import { ensureSyntaxTree } from "@codemirror/language";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import type { SelectionRange } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { livePreviewRanges, MAX_BLOCK_LINES } from "../livePreviewRanges.ts";
+import { dropRepeats, livePreviewRanges, MAX_BLOCK_LINES } from "../livePreviewRanges.ts";
 import type { DocRange, PreviewRange } from "../livePreviewRanges.ts";
 
 /**
@@ -479,6 +479,105 @@ describe("livePreviewRanges", () => {
       // Cursor on "intro", off every line of the table -- isolates the cap from the cursor rule.
       expect(analyse(doc, cursor(0)).ranges).toEqual([]);
     });
+
+    it("keeps an empty middle cell as its own column instead of shifting later columns left", () => {
+      // lezer emits no TableCell for the gap between two adjacent TableDelimiters. Naively
+      // collecting only TableCell children drops the empty column entirely, so "3" would render
+      // under header "c" instead of under its own blank column.
+      const doc = "| a || c |\n| :- | -: | :-: |\n| 1 |  | 3 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable).toEqual({
+        header: ["a", "", "c"],
+        align: ["left", "right", "center"],
+        rows: [["1", "", "3"]],
+      });
+    });
+
+    it("keeps a leading empty cell as its own column", () => {
+      const doc = "|| b |\n| - | - |\n|  | 2 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable).toEqual({
+        header: ["", "b"],
+        align: [null, null],
+        rows: [["", "2"]],
+      });
+    });
+
+    it("keeps a trailing empty cell as its own column", () => {
+      const doc = "| a ||\n| - | - |\n| 1 |  |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable).toEqual({
+        header: ["a", ""],
+        align: [null, null],
+        rows: [["1", ""]],
+      });
+    });
+
+    it("unescapes a backslash-escaped pipe inside a cell", () => {
+      const doc = "| x \\| y | z |\n| - | - |\n| a | b |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable).toEqual({
+        header: ["x | y", "z"],
+        align: [null, null],
+        rows: [["a", "b"]],
+      });
+    });
+
+    it("pads a short body row with empty cells to match the header's column count", () => {
+      const doc = "| a | b | c |\n| - | - | - |\n| 1 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable?.rows).toEqual([["1", "", ""]]);
+    });
+
+    it("truncates a long body row's extra cells to match the header's column count", () => {
+      const doc = "| a | b |\n| - | - |\n| 1 | 2 | 3 | 4 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable?.rows).toEqual([["1", "2"]]);
+    });
+
+    it("widens the range to the start of the line when the table has pure-whitespace leading indentation", () => {
+      // `Table.from` starts right after the indentation, which otherwise leaves an orphan raw
+      // line above the rendered table.
+      const doc = "   | a |\n   | - |\n   | 1 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges).toEqual([{
+        from: 0,
+        to: doc.indexOf("\n\ntail"),
+        kind: "widget",
+        markClass: "cm-md-table",
+        widgetTable: { header: ["a"], align: [null], rows: [["1"]] },
+      }]);
+    });
+
+    it("does not widen a blockquoted table's range, leaving the quote mark's own hide range intact", () => {
+      // Widening here too would start at the same position as `quoteMark()`'s hide range and
+      // collide with it.
+      const doc = "> | a |\n> | - |\n> | 1 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      const tableRange = out.ranges.find((r) => r.widgetTable !== undefined);
+      expect(tableRange?.from).toBe(doc.indexOf("| a |"));
+    });
+
+    it("replaces a table that ends the document with no trailing newline", () => {
+      const doc = "intro\n\n| a | b |\n| - | - |\n| 1 | 2 |";
+      const out = analyse(doc, cursor(0));
+
+      expect(out.ranges).toEqual([{
+        from: doc.indexOf("| a"),
+        to: doc.length,
+        kind: "widget",
+        markClass: "cm-md-table",
+        widgetTable: { header: ["a", "b"], align: [null, null], rows: [["1", "2"]] },
+      }]);
+    });
   });
 
   describe("nested list indentation", () => {
@@ -752,6 +851,34 @@ describe("livePreviewRanges", () => {
       for (const range of analyse(doc, parked(doc)).ranges) {
         expect(range.to).toBeGreaterThan(range.from);
       }
+    });
+
+    it("does not dedupe two adjacent ranges that differ only in checked state", () => {
+      // `isSameRange` (via `dropRepeats`) previously omitted `widgetChecked` from the
+      // comparison, so two copies of a checkbox range that disagreed only on checked state --
+      // exactly what two overlapping visible windows would produce for a task item toggled
+      // between one window's build and the next -- collapsed into whichever came first.
+      const base = { from: 2, to: 6, kind: "widget" as const, markClass: "cm-md-task" };
+      const unchecked: PreviewRange = { ...base, widgetChecked: false };
+      const checked: PreviewRange = { ...base, widgetChecked: true };
+
+      expect(dropRepeats([unchecked, checked])).toEqual([unchecked, checked]);
+    });
+
+    it("does not dedupe two adjacent table ranges whose parsed models differ", () => {
+      const base = { from: 0, to: 20, kind: "widget" as const, markClass: "cm-md-table" };
+      const a: PreviewRange = { ...base, widgetTable: { header: ["a"], align: [null], rows: [["1"]] } };
+      const b: PreviewRange = { ...base, widgetTable: { header: ["a"], align: [null], rows: [["2"]] } };
+
+      expect(dropRepeats([a, b])).toEqual([a, b]);
+    });
+
+    it("dedupes two adjacent table ranges whose parsed models are structurally identical", () => {
+      const base = { from: 0, to: 20, kind: "widget" as const, markClass: "cm-md-table" };
+      const a: PreviewRange = { ...base, widgetTable: { header: ["a"], align: [null], rows: [["1"]] } };
+      const b: PreviewRange = { ...base, widgetTable: { header: ["a"], align: [null], rows: [["1"]] } };
+
+      expect(dropRepeats([a, b])).toEqual([a]);
     });
   });
 });

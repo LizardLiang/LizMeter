@@ -8,6 +8,7 @@
 // `<table>` even when nothing about this particular one changed.
 
 import { WidgetType } from "@codemirror/view";
+import { sameTable } from "./livePreviewRanges.ts";
 import type { PreviewTable } from "./livePreviewRanges.ts";
 
 export const TABLE_WIDGET_CLASS = "cm-md-table";
@@ -60,15 +61,4 @@ function buildRow(cellTag: "th" | "td", cells: string[], align: PreviewTable["al
     tr.appendChild(cell);
   });
   return tr;
-}
-
-function sameTable(a: PreviewTable, b: PreviewTable): boolean {
-  return sameArray(a.header, b.header)
-    && sameArray(a.align, b.align)
-    && a.rows.length === b.rows.length
-    && a.rows.every((row, index) => sameArray(row, b.rows[index] ?? []));
-}
-
-function sameArray<T>(a: readonly T[], b: readonly T[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
 }
