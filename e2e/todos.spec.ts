@@ -112,6 +112,66 @@ test("notes editor reveals raw markdown on the line the cursor is on", async () 
   await expect(firstLine).toHaveText("**bold**");
 });
 
+// #89: task checkboxes, GFM tables, fence highlighting and autolinks, verified against a real
+// Chromium/Electron render rather than jsdom -- jsdom performs no layout and cannot be trusted
+// for "does this widget actually appear" the way the unit tests elsewhere in this file already
+// note. Each of these avoids CodeMirror's own list-continuation keymap (Enter after a list item
+// auto-inserts the next marker): typing the marker again on top of that auto-insert doubles it,
+// which is a pre-existing default-keymap behavior, not a live-preview bug, and is not what these
+// tests are about.
+test("notes editor renders a task-list checkbox and toggles it on click", async () => {
+  const window = await getWindow(app);
+  await openNewTodoDialog(window);
+
+  await typeNotes(window, "- [ ] todo\n\ntail");
+  const checkbox = window.locator(`${TODO_DIALOG} .cm-content .cm-md-task`);
+  await expect(checkbox).toHaveCount(1);
+
+  await checkbox.click();
+
+  // The click toggled the source, not just the widget: the rendered line still resolves off a
+  // checked marker.
+  await expect(window.locator(`${TODO_DIALOG} .cm-content .cm-md-task-done`)).toHaveCount(1);
+});
+
+test("notes editor renders a GFM table as a real table", async () => {
+  const window = await getWindow(app);
+  await openNewTodoDialog(window);
+
+  // One `typeNotes` call, not several interspersed with `keyboard.press` -- `typeNotes` clicks
+  // the editor before every call, and a second click lands the cursor at the click coordinates,
+  // not at the end of what was just typed. A trailing blank line plus "tail" moves the cursor off
+  // the table afterwards, which is what makes it render instead of staying raw source.
+  await typeNotes(window, "| a | b |\n| - | - |\n| 1 | 2 |\n\ntail");
+
+  const table = window.locator(`${TODO_DIALOG} .cm-content .cm-md-table`);
+  await expect(table).toBeVisible();
+  await expect(table.locator("thead th")).toHaveText(["a", "b"]);
+  await expect(table.locator("tbody td")).toHaveText(["1", "2"]);
+});
+
+test("notes editor syntax-highlights a fenced code block", async () => {
+  const window = await getWindow(app);
+  await openNewTodoDialog(window);
+
+  await typeNotes(window, "```js\nconst a = 1;\n```\n\ntail");
+
+  // The nested language loads lazily, so this waits for the token rather than asserting
+  // immediately after typing.
+  await expect(window.locator(`${TODO_DIALOG} .cm-content .cm-md-fence .tok-keyword`)).toBeVisible();
+});
+
+test("notes editor renders a bare autolink as a link", async () => {
+  const window = await getWindow(app);
+  await openNewTodoDialog(window);
+
+  await typeNotes(window, "Visit https://example.com today\n\ntail");
+
+  const link = window.locator(`${TODO_DIALOG} .cm-content .cm-md-link`);
+  await expect(link).toHaveCount(1);
+  await expect(link).toHaveText("https://example.com");
+});
+
 test("expand button opens the notes modal seeded with the inline text", async () => {
   const window = await getWindow(app);
   await openNewTodoDialog(window);
