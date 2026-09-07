@@ -6,7 +6,7 @@
 
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorView } from "@codemirror/view";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOTES_MAX_LENGTH, type TodoAttachment } from "../../../../shared/types.ts";
 import { livePreviewPlugin } from "../../editor/livePreviewPlugin.ts";
@@ -293,6 +293,17 @@ describe("MarkdownEditor", () => {
       expect(table).not.toBeNull();
       expect(Array.from(table?.querySelectorAll("thead th") ?? []).map((el) => el.textContent)).toEqual(["a", "b"]);
       expect(Array.from(table?.querySelectorAll("tbody td") ?? []).map((el) => el.textContent)).toEqual(["1", "2"]);
+    });
+
+    it("colours a fenced code block once its language resolves", async () => {
+      // `@codemirror/language-data` loads a language lazily, on first paint of a fence using
+      // it -- the first render happens before that promise settles, and must not throw either.
+      const doc = "```js\nconst a = 1;\n```";
+      const { container } = render(<MarkdownEditor value={doc} onChange={vi.fn()} />);
+
+      await waitFor(() => {
+        expect(container.querySelector(".cm-line .tok-keyword")).not.toBeNull();
+      });
     });
   });
 

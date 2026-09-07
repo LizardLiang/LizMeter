@@ -1,5 +1,6 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { syntaxHighlighting } from "@codemirror/language";
+import { languages } from "@codemirror/language-data";
 import { EditorState, Facet, Prec, StateEffect, StateField } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 import { classHighlighter } from "@lezer/highlight";
@@ -555,8 +556,11 @@ export function MarkdownEditor(
 
   const extensions = useMemo(() => [
     // `base: markdownLanguage` is GFM. The commonmark default has no Strikethrough node at
-    // all, so `~~gone~~` would never reach the live-preview walker.
-    markdown({ base: markdownLanguage, codeLanguages: [] }),
+    // all, so `~~gone~~` would never reach the live-preview walker. `codeLanguages: languages`
+    // is what lets a fenced ```ts / ```json / ```bash block get its own nested parser --
+    // lazily, on first paint of that block, from `@codemirror/language-data` -- so its tokens
+    // reach `syntaxHighlighting(classHighlighter)` below instead of rendering as plain text.
+    markdown({ base: markdownLanguage, codeLanguages: languages }),
     syntaxHighlighting(classHighlighter),
     EditorView.lineWrapping,
     EditorView.contentAttributes.of(ariaLabelledBy === undefined ? {} : { "aria-labelledby": ariaLabelledBy }),

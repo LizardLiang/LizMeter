@@ -255,6 +255,16 @@ bun run rebuild          # Recompile better-sqlite3 for Electron ABI
 - Use `app.firstWindow()` to get the renderer window
 - Config: `playwright.config.ts` (testDir: `./e2e`, timeout: 30s, retries: 0)
 
+## CodeMirror 6 Decoration Conventions (`src/renderer/src/editor/`)
+
+Discovered implementing GFM table live preview (#89); both are non-obvious and easy to hit again.
+
+- **A block decoration (`Decoration.replace({ block: true })` or `Decoration.widget({ block: true })`) cannot come from a `ViewPlugin`.** CodeMirror throws `RangeError: Block decorations may not be specified via plugins` at render time -- confirmed at runtime, not documented prominently. Any construct that needs a block-shaped decoration (spans multiple lines, e.g. a table) needs its own `StateField`, wired in as a sibling extension alongside the `ViewPlugin` (see `tablePreviewField` next to `livePreviewPlugin` in `livePreviewPlugin.ts`).
+- **A `StateField<DecorationSet>` must provide decorations via `EditorView.decorations.from(field)`, never `.of(field)`.** `Facet.of(value)` sets the facet to the constant `value` -- passing the field itself makes the facet's value the `StateField` descriptor, not a `RangeSet<Decoration>`, and CodeMirror fails deep inside `RangeSet.spans`/`HeapCursor.from` with `Cannot read properties of undefined (reading 'isEmpty')` on the very first `EditorView` construction. `.from(field)` is the method that derives the facet's value from the field on every read.
+- A `StateField` never sees an `EditorView`, so it cannot use `view.visibleRanges` the way `livePreviewPlugin`'s main `ViewPlugin` does to avoid re-walking a large document on every keystroke. Accept a whole-document walk only for constructs that are rare and short in the field they render (tables in a notes field capped at `NOTES_MAX_LENGTH`); do not extend this to anything that could appear on every line.
+- If `EditorState.create` throws `Unrecognized extension value in extension set ([object Object])... multiple instances of @codemirror/state are loaded`, or `new EditorView(...)` throws `Cannot read properties of undefined` from deep CodeMirror internals on code that looks correct, suspect a stale Vite/Vitest dependency cache or a duplicate nested `@codemirror/state`/`@codemirror/view` under `node_modules/@uiw/react-codemirror/node_modules/` before assuming an application-code bug. `rm -rf node_modules/.vite` (or a full `rm -rf node_modules && bun install`) has resolved both in practice.
+
 ## Update History
 
 - **2026-02-26 03:44** (Metis): Added frontmatter, corrected styling section (SCSS Modules not inline styles), added SessionTitleInput conventions, added E2E testing conventions, added test:e2e to package manager scripts.
+- **2026-09-07 21:24** (Ares): Added CodeMirror 6 decoration conventions (block decorations from a StateField only, `.from()` vs `.of()` for state-field-provided decorations, and the node_modules/.vite cache gotcha) discovered implementing GFM table live preview (#89).
