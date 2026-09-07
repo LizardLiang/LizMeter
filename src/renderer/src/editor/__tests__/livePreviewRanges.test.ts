@@ -359,6 +359,56 @@ describe("livePreviewRanges", () => {
     });
   });
 
+  describe("task list checkboxes", () => {
+    it("replaces an unchecked task marker with an unchecked checkbox widget", () => {
+      const doc = "- [ ] todo\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges).toEqual([
+        { from: 0, to: 1, kind: "widget", markClass: "cm-md-bullet", widgetText: "•" },
+        { from: 2, to: 6, kind: "widget", markClass: "cm-md-task", widgetChecked: false },
+      ]);
+    });
+
+    it("replaces a checked task marker with a checked checkbox and dims the item text", () => {
+      const doc = "- [x] done\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges).toEqual([
+        { from: 0, to: 1, kind: "widget", markClass: "cm-md-bullet", widgetText: "•" },
+        { from: 2, to: 6, kind: "widget", markClass: "cm-md-task", widgetChecked: true },
+        { from: 6, to: 10, kind: "mark", markClass: "cm-md-task-done" },
+      ]);
+    });
+
+    it("treats an uppercase X as checked too", () => {
+      const doc = "- [X] done\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges.find((r) => r.kind === "widget" && r.widgetChecked !== undefined)).toEqual({
+        from: 2,
+        to: 6,
+        kind: "widget",
+        markClass: "cm-md-task",
+        widgetChecked: true,
+      });
+    });
+
+    it("still decorates markdown nested inside a task item's text", () => {
+      const doc = "- [ ] **bold** thing\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.hidden).toEqual(["**", "**"]);
+      expect(out.marked).toEqual(["cm-md-strong:bold"]);
+    });
+
+    it("reveals raw source when the cursor is on the task item's line", () => {
+      const doc = "- [ ] todo\n\ntail";
+
+      expect(analyse(doc, cursor(3)).ranges).toEqual([]);
+    });
+  });
+
   describe("constructs deferred to a later phase", () => {
     it("leaves a GFM table as raw source", () => {
       const doc = "| a | b |\n| - | - |\n| 1 | 2 |\n\ntail";

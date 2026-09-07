@@ -248,6 +248,36 @@ describe("MarkdownEditor", () => {
 
       expect(editorView(modalCard()).plugin(livePreviewPlugin)).not.toBeNull();
     });
+
+    it("toggles a task checkbox's source text on click", () => {
+      const { container } = render(<MarkdownEditor value={"- [ ] todo\n\ntail"} onChange={vi.fn()} />);
+      const view = editorView(container);
+      // The default selection sits at 0, on the task item's own line, which reveals its raw
+      // source and renders no checkbox at all. Moving off it is what makes the widget appear.
+      act(() => {
+        view.dispatch({ selection: { anchor: view.state.doc.length } });
+      });
+      const checkbox = container.querySelector<HTMLInputElement>(".cm-md-task");
+      if (checkbox === null) throw new Error("the task checkbox widget did not render");
+
+      fireEvent.mouseDown(checkbox, { button: 0 });
+
+      expect(view.state.doc.toString()).toBe("- [x] todo\n\ntail");
+    });
+
+    it("toggles a checked task checkbox back to unchecked", () => {
+      const { container } = render(<MarkdownEditor value={"- [x] done\n\ntail"} onChange={vi.fn()} />);
+      const view = editorView(container);
+      act(() => {
+        view.dispatch({ selection: { anchor: view.state.doc.length } });
+      });
+      const checkbox = container.querySelector<HTMLInputElement>(".cm-md-task");
+      if (checkbox === null) throw new Error("the task checkbox widget did not render");
+
+      fireEvent.mouseDown(checkbox, { button: 0 });
+
+      expect(view.state.doc.toString()).toBe("- [ ] done\n\ntail");
+    });
   });
 
   describe("expand-to-modal surface", () => {

@@ -10,6 +10,7 @@ import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { ImageWidget } from "./ImageWidget.ts";
 import { livePreviewRanges } from "./livePreviewRanges.ts";
 import type { DocRange, PreviewRange } from "./livePreviewRanges.ts";
+import { TaskCheckboxWidget } from "./TaskCheckboxWidget.ts";
 
 /**
  * Replaces a range with a short piece of text (a list bullet) or with nothing at all (a
@@ -94,11 +95,13 @@ export function previewDecorations(
 }
 
 /**
- * A destination is the only thing that separates the two widgets, and `livePreviewRanges` sets
- * one only after the URL has passed the scheme allowlist. Nothing here re-checks it, and
- * nothing here may construct an `ImageWidget` from any other source.
+ * Which field is set decides which widget gets built. A destination (`widgetSrc`) is set only
+ * after the URL has passed the scheme allowlist -- nothing here re-checks it, and nothing here
+ * may construct an `ImageWidget` from any other source. A checked state (`widgetChecked`) means
+ * a task-list marker, checked either way.
  */
 function widgetFor(preview: PreviewRange): WidgetType {
+  if (preview.widgetChecked !== undefined) return new TaskCheckboxWidget(preview.widgetChecked);
   if (preview.widgetSrc !== undefined) return new ImageWidget(preview.widgetSrc, preview.widgetText ?? "");
   return new PreviewTextWidget(preview.widgetText ?? "", preview.markClass ?? "");
 }

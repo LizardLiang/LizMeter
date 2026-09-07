@@ -15,8 +15,8 @@ import { isAllowedUrl } from "./urlSchemes.ts";
 /**
  * - `hide` collapses the range to nothing (`Decoration.replace({})`).
  * - `mark` wraps the range in a span carrying `markClass` (`Decoration.mark`).
- * - `widget` swaps the range for `widgetText` inside a span carrying `markClass`, or for an
- *   image when `widgetSrc` is set.
+ * - `widget` swaps the range for `widgetText` inside a span carrying `markClass`, for an image
+ *   when `widgetSrc` is set, or for a checkbox when `widgetChecked` is set.
  */
 export type PreviewRangeKind = "hide" | "mark" | "widget";
 
@@ -35,6 +35,11 @@ export interface PreviewRange {
    * `atomicRanges`. The URL has passed `isAllowedUrl` before it is set here.
    */
   widgetSrc?: string;
+  /**
+   * Set only for a task-list checkbox `widget`, carrying its checked state. The plugin builds
+   * the one widget in this feature that edits the document from this field.
+   */
+  widgetChecked?: boolean;
 }
 
 /** A half-open document window. Matches the shape of `EditorView.visibleRanges` entries. */
@@ -141,6 +146,16 @@ function enterNode(ctx: WalkContext, ref: SyntaxNodeRef): boolean {
   }
   if (name === "ListMark") {
     listMark(ctx, ref.node);
+    return false;
+  }
+  if (name === "Task") {
+    task(ctx, ref.node);
+    // Continues descending: the GFM parser hands the item's remaining text back through the
+    // normal inline parsers, so `**bold**` after a checkbox still needs its own pass here.
+    return true;
+  }
+  if (name === "TaskMarker") {
+    // Already consumed by `task()`, as part of its parent -- it has no children of its own.
     return false;
   }
   if (name === "Link") {
@@ -314,6 +329,34 @@ function listMark(ctx: WalkContext, node: SyntaxNode): void {
   }
   // An ordered marker is data the user typed. Styling it is the most that may be done to it.
   push(ctx, { from: node.from, to: node.to, kind: "mark", markClass: "cm-md-list-mark" });
+}
+
+/**
+ * A GFM task-list item: `- [ ] text` or `- [x] text`.
+ *
+ * The marker itself becomes a real `<input type="checkbox">` -- the one widget in this feature
+ * that edits the document, wired up in `TaskCheckboxWidget`. A checked item's remaining text
+ * gets `cm-md-task-done` so it reads as struck through; this module only decides that it should,
+ * never how it looks.
+ */
+function task(ctx: WalkContext, node: SyntaxNode): void {
+  const owner = ancestorNamed(node, "ListItem") ?? node;
+  if (ownedByCursor(ctx, owner.from, owner.to)) return;
+
+  const marker = childrenNamed(node, "TaskMarker")[0];
+  if (marker === undefined) return;
+
+  const markerText = ctx.state.doc.sliceString(marker.from, marker.to);
+  const checked = markerText === "[x]" || markerText === "[X]";
+
+  // The space after the marker goes with it, or the item text renders with a leading indent --
+  // the same rule `heading()` follows for the space after `#`.
+  const contentFrom = withTrailingSpace(ctx.state, marker.to);
+  push(ctx, { from: marker.from, to: contentFrom, kind: "widget", markClass: "cm-md-task", widgetChecked: checked });
+
+  if (checked && contentFrom < node.to) {
+    push(ctx, { from: contentFrom, to: node.to, kind: "mark", markClass: "cm-md-task-done" });
+  }
 }
 
 function horizontalRule(ctx: WalkContext, ref: SyntaxNodeRef): void {

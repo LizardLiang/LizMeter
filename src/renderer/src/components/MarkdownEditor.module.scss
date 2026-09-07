@@ -208,6 +208,21 @@
     font-weight: 600;
   }
 
+  // A real checkbox, not a glyph -- it is the one live-preview widget that edits the source.
+  :global(.cm-md-task) {
+    margin: 0 0.4em 0 0;
+    vertical-align: middle;
+    accent-color: var(--tn-blue, #7aa2f7);
+    cursor: pointer;
+  }
+
+  // Subtle on purpose: this is a note, not a strikethrough celebration.
+  :global(.cm-md-task-done) {
+    color: var(--tn-muted, #565f89);
+    text-decoration: line-through;
+    text-decoration-color: rgba(86, 95, 137, 0.6);
+  }
+
   // A widget with no text. It has to claim the line's width itself, since the `---` it
   // replaced was only three characters wide.
   :global(.cm-md-hr) {

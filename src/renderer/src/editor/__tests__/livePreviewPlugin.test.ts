@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 import { ImageWidget } from "../ImageWidget.ts";
 import { previewDecorations, PreviewTextWidget } from "../livePreviewPlugin.ts";
 import { livePreviewRanges } from "../livePreviewRanges.ts";
+import { TaskCheckboxWidget } from "../TaskCheckboxWidget.ts";
 
 /** One of every construct the walker handles, nested where nesting is possible. */
 const KITCHEN_SINK = [
@@ -142,6 +143,33 @@ describe("image decorations", () => {
     const state = stateOf("[![shot](app-media://attachments/a.png)](https://example.com)\n\ntail");
 
     expect(() => previewDecorations(state, [EditorSelection.cursor(state.doc.length)])).not.toThrow();
+  });
+});
+
+describe("task checkbox decorations", () => {
+  it("builds an unchecked checkbox widget for an open task item", () => {
+    const state = stateOf("- [ ] todo\n\ntail");
+
+    const checkboxes = widgetsOf(state).filter((widget) => widget instanceof TaskCheckboxWidget);
+
+    expect(checkboxes).toEqual([new TaskCheckboxWidget(false)]);
+  });
+
+  it("builds a checked checkbox widget for a closed task item", () => {
+    const state = stateOf("- [x] done\n\ntail");
+
+    const checkboxes = widgetsOf(state).filter((widget) => widget instanceof TaskCheckboxWidget);
+
+    expect(checkboxes).toEqual([new TaskCheckboxWidget(true)]);
+  });
+
+  it("puts the checkbox widget in the atomic set so an arrow key steps over it", () => {
+    const state = stateOf("- [ ] todo\n\ntail");
+
+    const built = previewDecorations(state, [EditorSelection.cursor(state.doc.length)]);
+
+    // One atomic range for the bullet, one for the checkbox.
+    expect(built.atomic.size).toBe(2);
   });
 });
 
