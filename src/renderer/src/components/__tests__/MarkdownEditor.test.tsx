@@ -278,6 +278,22 @@ describe("MarkdownEditor", () => {
 
       expect(view.state.doc.toString()).toBe("- [ ] done\n\ntail");
     });
+
+    it("renders a GFM table as a real table when the cursor is off it", () => {
+      const doc = "before\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\ntail";
+      const { container } = render(<MarkdownEditor value={doc} onChange={vi.fn()} />);
+      const view = editorView(container);
+      // Default selection sits at 0, inside "before" -- already off the table -- but move to
+      // the very end for symmetry with the other widget tests here.
+      act(() => {
+        view.dispatch({ selection: { anchor: view.state.doc.length } });
+      });
+
+      const table = container.querySelector(".cm-md-table");
+      expect(table).not.toBeNull();
+      expect(Array.from(table?.querySelectorAll("thead th") ?? []).map((el) => el.textContent)).toEqual(["a", "b"]);
+      expect(Array.from(table?.querySelectorAll("tbody td") ?? []).map((el) => el.textContent)).toEqual(["1", "2"]);
+    });
   });
 
   describe("expand-to-modal surface", () => {

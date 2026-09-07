@@ -13,8 +13,9 @@ import { EditorSelection, EditorState } from "@codemirror/state";
 import type { Decoration } from "@codemirror/view";
 import { describe, expect, it } from "vitest";
 import { ImageWidget } from "../ImageWidget.ts";
-import { previewDecorations, PreviewTextWidget } from "../livePreviewPlugin.ts";
+import { previewDecorations, PreviewTextWidget, tablePreviewField } from "../livePreviewPlugin.ts";
 import { livePreviewRanges } from "../livePreviewRanges.ts";
+import { TableWidget } from "../TableWidget.ts";
 import { TaskCheckboxWidget } from "../TaskCheckboxWidget.ts";
 
 /** One of every construct the walker handles, nested where nesting is possible. */
@@ -81,7 +82,11 @@ describe("previewDecorations", () => {
     const collapsed = previews.filter((range) => range.kind !== "mark").length;
     expect(collapsed).toBeGreaterThan(0);
     expect(built.atomic.size).toBe(collapsed);
-    expect(built.decorations.size).toBe(previews.length);
+    // Every non-mark preview becomes a `decorations` entry except a table's, which
+    // `tablePreviewField` renders instead -- CodeMirror disallows a block decoration from this
+    // `ViewPlugin`. `previewDecorations` still reserves the table's span in `atomic`.
+    const tables = previews.filter((range) => range.widgetTable !== undefined).length;
+    expect(built.decorations.size).toBe(previews.length - tables);
   });
 
   it("builds an empty set for an empty document", () => {
@@ -170,6 +175,76 @@ describe("task checkbox decorations", () => {
 
     // One atomic range for the bullet, one for the checkbox.
     expect(built.atomic.size).toBe(2);
+  });
+});
+
+describe("table decorations", () => {
+  const TABLE_DOC = "| a | b |\n| - | - |\n| 1 | 2 |\n\ntail";
+
+  /** `tablePreviewField` needs the extension present to have a value at all. */
+  function stateWithTableField(doc: string): EditorState {
+    const state = EditorState.create({
+      doc,
+      extensions: [markdown({ base: markdownLanguage, codeLanguages: [] }), tablePreviewField],
+      selection: EditorSelection.cursor(doc.length),
+    });
+    ensureSyntaxTree(state, state.doc.length, 5000);
+    return state;
+  }
+
+  /** Every widget instance `tablePreviewField` carries, in document order. */
+  function tableWidgetsOf(state: EditorState): TableWidget[] {
+    const found: TableWidget[] = [];
+    state.field(tablePreviewField).between(0, state.doc.length, (_from, _to, value: Decoration) => {
+      const widget = (value.spec as { widget?: unknown; }).widget;
+      if (widget instanceof TableWidget) found.push(widget);
+    });
+    return found;
+  }
+
+  it("builds a table widget carrying the parsed model", () => {
+    const state = stateWithTableField(TABLE_DOC);
+
+    expect(tableWidgetsOf(state)).toEqual([
+      new TableWidget({ header: ["a", "b"], align: [null, null], rows: [["1", "2"]] }),
+    ]);
+  });
+
+  it("replaces the table with a block-shaped decoration", () => {
+    // Only a block replace may span the table's several lines; the inline shape every other
+    // widget uses would throw the moment CodeMirror tried to render it.
+    const state = stateWithTableField(TABLE_DOC);
+
+    const blocks: boolean[] = [];
+    state.field(tablePreviewField).between(0, state.doc.length, (_from, _to, value: Decoration) => {
+      const widget = (value.spec as { widget?: unknown; }).widget;
+      if (widget instanceof TableWidget) blocks.push((value.spec as { block?: boolean; }).block === true);
+    });
+
+    expect(blocks).toEqual([true]);
+  });
+
+  it("builds no table decoration while the cursor is on one of its lines", () => {
+    const state = stateWithTableField(TABLE_DOC);
+    const onLine = state.update({ selection: { anchor: 2 } }).state;
+
+    expect(tableWidgetsOf(onLine)).toEqual([]);
+  });
+
+  it("does not render the table itself as an inline decoration or an atomic-only widget", () => {
+    // `previewDecorations` routes tables to `tablePreviewField` instead of building a widget
+    // here -- CodeMirror throws on a block decoration from a `ViewPlugin`.
+    const state = stateOf(TABLE_DOC);
+
+    expect(widgetsOf(state).filter((widget) => widget instanceof TableWidget)).toEqual([]);
+  });
+
+  it("still puts the table's span in the atomic set, so an arrow key steps over it", () => {
+    const state = stateOf(TABLE_DOC);
+
+    const built = previewDecorations(state, [EditorSelection.cursor(state.doc.length)]);
+
+    expect(built.atomic.size).toBe(1);
   });
 });
 

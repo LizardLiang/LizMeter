@@ -409,11 +409,63 @@ describe("livePreviewRanges", () => {
     });
   });
 
-  describe("constructs deferred to a later phase", () => {
-    it("leaves a GFM table as raw source", () => {
+  describe("GFM tables", () => {
+    it("replaces the whole table with a table widget when the cursor is off every line", () => {
+      const doc = "| a | b |\n| - | - |\n| 1 | 2 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges).toEqual([{
+        from: 0,
+        to: doc.indexOf("\n\ntail"),
+        kind: "widget",
+        markClass: "cm-md-table",
+        widgetTable: {
+          header: ["a", "b"],
+          align: [null, null],
+          rows: [["1", "2"]],
+        },
+      }]);
+    });
+
+    it("parses left, right and center alignment from the delimiter row", () => {
+      const doc = "| a | b | c |\n| :- | -: | :-: |\n| 1 | 2 | 3 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable?.align).toEqual(["left", "right", "center"]);
+    });
+
+    it("carries several data rows in document order", () => {
+      const doc = "| a |\n| - |\n| 1 |\n| 2 |\n| 3 |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable?.rows).toEqual([["1"], ["2"], ["3"]]);
+    });
+
+    it("trims cell text", () => {
+      const doc = "|  a  |\n| - |\n|  1  |\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.ranges[0]?.widgetTable).toEqual({ header: ["a"], align: [null], rows: [["1"]] });
+    });
+
+    it("reveals raw source when the cursor is on any line of the table", () => {
       const doc = "| a | b |\n| - | - |\n| 1 | 2 |\n\ntail";
 
-      expect(analyse(doc, parked(doc)).ranges).toEqual([]);
+      expect(analyse(doc, cursor(doc.indexOf("| 1"))).ranges).toEqual([]);
+    });
+
+    it("reveals raw source when the cursor is on the header line", () => {
+      const doc = "| a | b |\n| - | - |\n| 1 | 2 |\n\ntail";
+
+      expect(analyse(doc, cursor(2)).ranges).toEqual([]);
+    });
+
+    it("leaves an oversized table as raw source once it swallows more than the line cap", () => {
+      const rows = "| x |\n".repeat(MAX_BLOCK_LINES + 10);
+      const doc = `intro\n\n| a |\n| - |\n${rows}`;
+
+      // Cursor on "intro", off every line of the table -- isolates the cap from the cursor rule.
+      expect(analyse(doc, cursor(0)).ranges).toEqual([]);
     });
   });
 

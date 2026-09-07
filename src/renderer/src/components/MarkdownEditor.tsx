@@ -7,7 +7,7 @@ import CodeMirror from "@uiw/react-codemirror";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { NOTES_MAX_LENGTH, type TodoAttachment } from "../../../shared/types.ts";
-import { livePreviewPlugin } from "../editor/livePreviewPlugin.ts";
+import { livePreviewPlugin, tablePreviewField } from "../editor/livePreviewPlugin.ts";
 import styles from "./MarkdownEditor.module.scss";
 
 interface MarkdownEditorProps {
@@ -566,8 +566,12 @@ export function MarkdownEditor(
     attachmentConfig.of({ todoId, disabled, notify: showHint }),
     attachmentHandlers,
     // Highlighting stays underneath: it still colours the revealed line, and the constructs
-    // live preview leaves alone (tables, setext headings) keep their token colours.
-    ...(livePreview ? [livePreviewPlugin] : []),
+    // live preview leaves alone (setext headings) keep their token colours.
+    //
+    // `tablePreviewField` rides alongside `livePreviewPlugin` rather than inside it: CodeMirror
+    // refuses a block decoration from a `ViewPlugin`, and a table is the one construct that
+    // needs one.
+    ...(livePreview ? [livePreviewPlugin, tablePreviewField] : []),
   ], [ariaLabelledBy, livePreview, todoId, disabled, showHint]);
 
   // The modal cannot silence the dialog's own native Escape listener from inside itself, so

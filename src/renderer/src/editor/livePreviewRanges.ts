@@ -16,7 +16,8 @@ import { isAllowedUrl } from "./urlSchemes.ts";
  * - `hide` collapses the range to nothing (`Decoration.replace({})`).
  * - `mark` wraps the range in a span carrying `markClass` (`Decoration.mark`).
  * - `widget` swaps the range for `widgetText` inside a span carrying `markClass`, for an image
- *   when `widgetSrc` is set, or for a checkbox when `widgetChecked` is set.
+ *   when `widgetSrc` is set, for a checkbox when `widgetChecked` is set, or for a whole table
+ *   when `widgetTable` is set.
  */
 export type PreviewRangeKind = "hide" | "mark" | "widget";
 
@@ -40,6 +41,22 @@ export interface PreviewRange {
    * the one widget in this feature that edits the document from this field.
    */
   widgetChecked?: boolean;
+  /**
+   * Set only for a table `widget`, replacing the whole `Table` node. Parsed from lezer's own
+   * `TableHeader` / `TableDelimiter` / `TableRow` / `TableCell` nodes, never by regex over the
+   * raw text -- the one exception is the alignment delimiter row, which lezer hands back as a
+   * single opaque node with no per-cell breakdown, so splitting that one row's own text is the
+   * only lezer-respecting option there is. Its presence is also what tells the plugin to use a
+   * block-shaped replace decoration, since a table may span several lines.
+   */
+  widgetTable?: PreviewTable;
+}
+
+/** The parsed shape of a GFM table, ready for `TableWidget` to render as a real `<table>`. */
+export interface PreviewTable {
+  header: string[];
+  align: Array<"left" | "center" | "right" | null>;
+  rows: string[][];
 }
 
 /** A half-open document window. Matches the shape of `EditorView.visibleRanges` entries. */
@@ -49,7 +66,8 @@ export interface DocRange {
 }
 
 /**
- * Longest block a construct may span and still be replaced.
+ * Longest block a construct may span and still be replaced. Applies to fenced code and to
+ * tables.
  *
  * An unterminated ``` makes lezer treat everything after it as one `FencedCode` node. Without
  * this cap, typing three backticks would visibly swallow the rest of the note into a code
@@ -117,8 +135,12 @@ export function livePreviewRanges(
 function enterNode(ctx: WalkContext, ref: SyntaxNodeRef): boolean {
   const name = ref.name;
 
-  // GFM tables are cut from v1 and stay as raw source.
-  if (name === "Table") return false;
+  if (name === "Table") {
+    table(ctx, ref.node);
+    // Never descend: a table's cells are rendered as plain text by `TableWidget`, not
+    // re-decorated inline, and there is no half-rendered table the way a link keeps its label.
+    return false;
+  }
 
   // Never descend into an image. Its alt text is about to be replaced wholesale, so decorating
   // emphasis inside it is wasted, and the link handler would otherwise treat the image's own
@@ -305,6 +327,71 @@ function fencedCode(ctx: WalkContext, node: SyntaxNode): void {
   push(ctx, { from: node.from, to: node.to, kind: "mark", markClass: "cm-md-fence" });
 }
 
+/**
+ * A GFM table, replaced whole by `TableWidget` when the cursor is off every one of its lines.
+ *
+ * The shape lezer hands back: a `TableHeader` (per-cell `TableDelimiter`/`TableCell` pairs), one
+ * raw `TableDelimiter` node carrying the entire alignment row as opaque text, then zero or more
+ * `TableRow` nodes shaped like the header. Verified against the real parser output before
+ * writing this, not assumed.
+ */
+function table(ctx: WalkContext, node: SyntaxNode): void {
+  const span = lineSpanOf(ctx.state, node.from, node.to);
+  if (span.last - span.first + 1 > MAX_BLOCK_LINES) return;
+  if (touchesRevealed(ctx, span)) return;
+
+  const headerNode = node.firstChild;
+  if (headerNode === null || headerNode.name !== "TableHeader") return;
+  const header = cellsOf(ctx.state, headerNode);
+
+  const delimiterNode = headerNode.nextSibling;
+  const align = delimiterNode !== null && delimiterNode.name === "TableDelimiter"
+    ? tableAlignment(ctx.state.doc.sliceString(delimiterNode.from, delimiterNode.to))
+    : header.map(() => null);
+
+  const rows: string[][] = [];
+  for (let child = delimiterNode?.nextSibling ?? null; child !== null; child = child.nextSibling) {
+    if (child.name === "TableRow") rows.push(cellsOf(ctx.state, child));
+  }
+
+  push(ctx, {
+    from: node.from,
+    to: node.to,
+    kind: "widget",
+    markClass: "cm-md-table",
+    widgetTable: { header, align, rows },
+  });
+}
+
+/** The raw, trimmed text of every `TableCell` directly under a `TableHeader` or `TableRow`. */
+function cellsOf(state: EditorState, row: SyntaxNode): string[] {
+  return childrenNamed(row, "TableCell").map((cell) => state.doc.sliceString(cell.from, cell.to).trim());
+}
+
+/**
+ * Column alignment from the raw text of the delimiter row (`| :- | :-: | -: |`).
+ *
+ * lezer hands this row back as one opaque node with no per-cell children, unlike every other
+ * table row -- splitting its own text by `|` is the only option that respects lezer's own node
+ * boundaries rather than re-parsing markdown by hand. The syntax has no escaping to worry about:
+ * a delimiter cell is only ever `-`, `:` and whitespace.
+ */
+function tableAlignment(raw: string): Array<"left" | "center" | "right" | null> {
+  const trimmed = raw.trim();
+  const body = trimmed.startsWith("|") ? trimmed.slice(1) : trimmed;
+  const withoutTrailingPipe = body.endsWith("|") ? body.slice(0, -1) : body;
+
+  return withoutTrailingPipe.split("|").map((cell) => {
+    const value = cell.trim();
+    const left = value.startsWith(":");
+    const right = value.endsWith(":");
+    if (left && right) return "center";
+    if (right) return "right";
+    if (left) return "left";
+    return null;
+  });
+}
+
 function blockquote(ctx: WalkContext, ref: SyntaxNodeRef): void {
   if (ownedByCursor(ctx, ref.from, ref.to)) return;
   push(ctx, { from: ref.from, to: ref.to, kind: "mark", markClass: "cm-md-quote" });
@@ -434,10 +521,12 @@ function withTrailingSpace(state: EditorState, pos: number): number {
 
 function push(ctx: WalkContext, range: PreviewRange): void {
   if (range.to <= range.from) return;
-  // CodeMirror refuses a replace decoration that spans a line break when it comes from a view
-  // plugin, and throws rather than dropping it. `mark` has no such restriction, which is what
-  // lets a fence or a blockquote carry one span across its whole block.
-  if (range.kind !== "mark" && !onOneLine(ctx.state, range.from, range.to)) return;
+  // CodeMirror refuses an INLINE replace decoration that spans a line break, and throws rather
+  // than dropping it. `mark` has no such restriction, which is what lets a fence or a
+  // blockquote carry one span across its whole block -- and neither does a BLOCK replace, which
+  // is what a table becomes in the plugin precisely so it can cross one here.
+  const crossesLinesOk = range.kind === "mark" || range.widgetTable !== undefined;
+  if (!crossesLinesOk && !onOneLine(ctx.state, range.from, range.to)) return;
   ctx.out.push(range);
 }
 

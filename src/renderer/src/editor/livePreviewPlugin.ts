@@ -5,11 +5,13 @@
 // which ranges the cursor must step over.
 
 import type { EditorState, Range, SelectionRange } from "@codemirror/state";
+import { StateField } from "@codemirror/state";
 import { Decoration, EditorView, ViewPlugin, WidgetType } from "@codemirror/view";
 import type { DecorationSet, ViewUpdate } from "@codemirror/view";
 import { ImageWidget } from "./ImageWidget.ts";
 import { livePreviewRanges } from "./livePreviewRanges.ts";
 import type { DocRange, PreviewRange } from "./livePreviewRanges.ts";
+import { TableWidget } from "./TableWidget.ts";
 import { TaskCheckboxWidget } from "./TaskCheckboxWidget.ts";
 
 /**
@@ -78,8 +80,19 @@ export function previewDecorations(
       continue;
     }
 
-    // `block: false` keeps an image inline with the text around it. A block widget would take
-    // the whole line, so `text ![a](x) tail` would break into three.
+    if (preview.widgetTable !== undefined) {
+      // A table is rendered by `tablePreviewField` below, not here -- CodeMirror throws
+      // `RangeError: Block decorations may not be specified via plugins`, verified at runtime,
+      // for exactly the block-shaped replace a multi-line table needs. This still needs the
+      // span in `atomic`, so an arrow key steps over the whole table rather than landing inside
+      // text that is no longer on screen; an empty, non-block replace is enough for that,
+      // because `atomicRanges` only reads range boundaries and never renders this decoration.
+      atomic.push(Decoration.replace({}).range(preview.from, preview.to));
+      continue;
+    }
+
+    // `block: false` keeps an image or a checkbox inline with the text around it -- a block
+    // widget would take the whole line, so `text ![a](x) tail` would break into three.
     const decoration = preview.kind === "widget"
       ? Decoration.replace({ widget: widgetFor(preview), block: false })
       : Decoration.replace({});
@@ -98,7 +111,8 @@ export function previewDecorations(
  * Which field is set decides which widget gets built. A destination (`widgetSrc`) is set only
  * after the URL has passed the scheme allowlist -- nothing here re-checks it, and nothing here
  * may construct an `ImageWidget` from any other source. A checked state (`widgetChecked`) means
- * a task-list marker, checked either way.
+ * a task-list marker, checked either way. `widgetTable` never reaches here -- `previewDecorations`
+ * routes it to `tablePreviewField` before this function is called.
  */
 function widgetFor(preview: PreviewRange): WidgetType {
   if (preview.widgetChecked !== undefined) return new TaskCheckboxWidget(preview.widgetChecked);
@@ -160,3 +174,40 @@ export const livePreviewPlugin = ViewPlugin.fromClass(
     provide: (plugin) => EditorView.atomicRanges.of((view) => view.plugin(plugin)?.atomic ?? Decoration.none),
   },
 );
+
+function tableDecorationsOf(state: EditorState): DecorationSet {
+  const ranges: Range<Decoration>[] = [];
+  for (const preview of livePreviewRanges(state, state.selection.ranges)) {
+    if (preview.widgetTable === undefined) continue;
+    const widget = new TableWidget(preview.widgetTable);
+    ranges.push(Decoration.replace({ widget, block: true }).range(preview.from, preview.to));
+  }
+  return Decoration.set(ranges, true);
+}
+
+/**
+ * Renders GFM tables, replacing the whole `Table` node with `TableWidget` when the cursor is off
+ * every one of its lines.
+ *
+ * A `StateField`, not part of `livePreviewPlugin` above, because CodeMirror hard-disallows a
+ * block decoration from a `ViewPlugin`'s `decorations` provider -- confirmed at runtime by
+ * `RangeError: Block decorations may not be specified via plugins`, not assumed from the docs.
+ * A `StateField` never sees an `EditorView`, so this recomputes over the whole document rather
+ * than `view.visibleRanges`, the one place this feature does not follow the "never re-walk the
+ * whole note" rule the inline plugin above exists to uphold. Accepted here because a GFM table
+ * is rare and short in a notes field capped at `NOTES_MAX_LENGTH`, unlike the inline constructs
+ * that rule protects, which are everywhere.
+ */
+export const tablePreviewField = StateField.define<DecorationSet>({
+  create: (state) => tableDecorationsOf(state),
+  update: (
+    value,
+    tr,
+  ) => (tr.docChanged || !tr.startState.selection.eq(tr.state.selection) ? tableDecorationsOf(tr.state) : value),
+  // `.from`, not `.of` -- `.of` sets the facet to the constant `field` value (the `StateField`
+  // descriptor itself, not a decoration set), which is what produced
+  // `Cannot read properties of undefined (reading 'isEmpty')` deep in `RangeSet.spans` the first
+  // time this was written. `.from` is the method that derives the facet's value from the field
+  // on every state read.
+  provide: (field) => EditorView.decorations.from(field),
+});
