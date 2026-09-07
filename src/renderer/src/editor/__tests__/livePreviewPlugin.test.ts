@@ -72,19 +72,20 @@ describe("previewDecorations", () => {
 
   it("keeps mark decorations out of the atomic set", () => {
     // Atomic ranges are what a cursor steps over. Feeding it the marks as well would make an
-    // arrow key jump the whole heading text, not just the hidden hashes.
+    // arrow key jump the whole heading text, not just the hidden hashes. A `line` decoration
+    // (list-item indentation) carries no width either, so it stays out for the same reason.
     const state = stateOf(KITCHEN_SINK);
     const selection = [EditorSelection.cursor(state.doc.length)];
     const previews = livePreviewRanges(state, selection);
 
     const built = previewDecorations(state, selection);
 
-    const collapsed = previews.filter((range) => range.kind !== "mark").length;
+    const collapsed = previews.filter((range) => range.kind === "hide" || range.kind === "widget").length;
     expect(collapsed).toBeGreaterThan(0);
     expect(built.atomic.size).toBe(collapsed);
-    // Every non-mark preview becomes a `decorations` entry except a table's, which
-    // `tablePreviewField` renders instead -- CodeMirror disallows a block decoration from this
-    // `ViewPlugin`. `previewDecorations` still reserves the table's span in `atomic`.
+    // Every preview becomes a `decorations` entry except a table's, which `tablePreviewField`
+    // renders instead -- CodeMirror disallows a block decoration from this `ViewPlugin`.
+    // `previewDecorations` still reserves the table's span in `atomic`.
     const tables = previews.filter((range) => range.widgetTable !== undefined).length;
     expect(built.decorations.size).toBe(previews.length - tables);
   });
@@ -148,6 +149,27 @@ describe("image decorations", () => {
     const state = stateOf("[![shot](app-media://attachments/a.png)](https://example.com)\n\ntail");
 
     expect(() => previewDecorations(state, [EditorSelection.cursor(state.doc.length)])).not.toThrow();
+  });
+});
+
+describe("list indentation decorations", () => {
+  it("builds a line decoration carrying the depth class, not an atomic one", () => {
+    const state = stateOf("- one\n  - nested\n\ntail");
+    const selection = [EditorSelection.cursor(state.doc.length)];
+
+    const built = previewDecorations(state, selection);
+
+    const classes: string[] = [];
+    built.decorations.between(0, state.doc.length, (from, to, value: Decoration) => {
+      const spec = value.spec as { class?: string; };
+      if (spec.class?.startsWith("cm-md-li-depth-") === true) {
+        expect(from).toBe(to); // A line decoration is a zero-width point at the line's start.
+        classes.push(spec.class);
+      }
+    });
+
+    expect(classes).toEqual(["cm-md-li-depth-1", "cm-md-li-depth-2"]);
+    expect(built.atomic.size).toBe(2); // The two bullets only -- indentation never blocks a cursor.
   });
 });
 

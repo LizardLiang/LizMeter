@@ -15,17 +15,20 @@ import { isAllowedUrl } from "./urlSchemes.ts";
 /**
  * - `hide` collapses the range to nothing (`Decoration.replace({})`).
  * - `mark` wraps the range in a span carrying `markClass` (`Decoration.mark`).
+ * - `line` attaches `markClass` to the whole line at `from` (`Decoration.line`). Layout only --
+ *   nothing about it is hidden syntax, so unlike every other kind it applies regardless of
+ *   cursor ownership, and its `to` carries no meaning (always equal to `from`).
  * - `widget` swaps the range for `widgetText` inside a span carrying `markClass`, for an image
  *   when `widgetSrc` is set, for a checkbox when `widgetChecked` is set, or for a whole table
  *   when `widgetTable` is set.
  */
-export type PreviewRangeKind = "hide" | "mark" | "widget";
+export type PreviewRangeKind = "hide" | "mark" | "line" | "widget";
 
 export interface PreviewRange {
   from: number;
   to: number;
   kind: PreviewRangeKind;
-  /** Set for `mark` and `widget`. */
+  /** Set for `mark`, `line` and `widget`. */
   markClass?: string;
   /** Set for `widget`. Empty means the widget is drawn purely by CSS, as the rule is. */
   widgetText?: string;
@@ -170,6 +173,10 @@ function enterNode(ctx: WalkContext, ref: SyntaxNodeRef): boolean {
     listMark(ctx, ref.node);
     return false;
   }
+  if (name === "ListItem") {
+    listItemIndent(ctx, ref.node);
+    return true;
+  }
   if (name === "Task") {
     task(ctx, ref.node);
     // Continues descending: the GFM parser hands the item's remaining text back through the
@@ -183,6 +190,24 @@ function enterNode(ctx: WalkContext, ref: SyntaxNodeRef): boolean {
   if (name === "Link") {
     link(ctx, ref.node);
     return true;
+  }
+  if (name === "Autolink") {
+    // `<https://x.com>` -- GFM's bracketed autolink, which (unlike the bare form below) is a
+    // real node of its own, sharing its shape with the generic HTML-tag parser: LinkMark, URL,
+    // LinkMark. Verified against the real parser output before writing this, not assumed.
+    bracketedAutolink(ctx, ref.node);
+    return false;
+  }
+  if (name === "URL") {
+    // The bare form (`https://x.com`, `www.x.com`) parses as a lone URL node with no wrapping
+    // "Autolink" node at all -- confirmed by reading `@lezer/markdown`'s GFM Autolink extension,
+    // which only ever calls `cx.addElement(elt("URL", ...))`. A URL that is a direct child of
+    // Link or Image is a different thing entirely (the destination of `[text](url)`), already
+    // fully handled by `link()`/`image()`, and must not be touched again here.
+    const parent = ref.node.parent;
+    if (parent !== null && (parent.name === "Link" || parent.name === "Image")) return true;
+    bareAutolink(ctx, ref.node);
+    return false;
   }
   if (name.startsWith(HEADING_PREFIX)) {
     heading(ctx, ref.node, name);
@@ -258,6 +283,37 @@ function link(ctx: WalkContext, node: SyntaxNode): void {
   push(ctx, { from: open.from, to: open.to, kind: "hide" });
   push(ctx, { from: open.to, to: close.from, kind: "mark", markClass: "cm-md-link" });
   push(ctx, { from: close.from, to: node.to, kind: "hide" });
+}
+
+/** `<https://x.com>` -- hides the angle brackets, marks the URL between them. */
+function bracketedAutolink(ctx: WalkContext, node: SyntaxNode): void {
+  if (ownedByCursor(ctx, node.from, node.to)) return;
+
+  const url = childrenNamed(node, "URL")[0];
+  if (url === undefined) return;
+  if (!isAllowedUrl(ctx.state.doc.sliceString(url.from, url.to))) return;
+
+  const marks = childrenNamed(node, "LinkMark");
+  const open = marks[0];
+  const close = marks[1];
+  if (open === undefined || close === undefined) return;
+
+  push(ctx, { from: open.from, to: open.to, kind: "hide" });
+  push(ctx, { from: open.to, to: close.from, kind: "mark", markClass: "cm-md-link" });
+  push(ctx, { from: close.from, to: close.to, kind: "hide" });
+}
+
+/**
+ * `https://x.com`, `www.x.com` -- bare, unbracketed. The URL is its own label, so there is
+ * nothing to hide; only the allowlist stands between this and a live `javascript:` link, except
+ * that GFM's bare-autolink grammar only ever matches `www.`/`http(s)://`/`mailto:`/`xmpp:`/an
+ * email address in the first place, so a bare `javascript:` never reaches this function at all --
+ * only the bracketed form above can carry an arbitrary scheme.
+ */
+function bareAutolink(ctx: WalkContext, node: SyntaxNode): void {
+  if (ownedByCursor(ctx, node.from, node.to)) return;
+  if (!isAllowedUrl(ctx.state.doc.sliceString(node.from, node.to))) return;
+  push(ctx, { from: node.from, to: node.to, kind: "mark", markClass: "cm-md-link" });
 }
 
 /**
@@ -418,6 +474,57 @@ function listMark(ctx: WalkContext, node: SyntaxNode): void {
   push(ctx, { from: node.from, to: node.to, kind: "mark", markClass: "cm-md-list-mark" });
 }
 
+/** Deepest nesting level that still gets its own class; anything past this reuses the last one. */
+const MAX_LIST_DEPTH = 6;
+
+/**
+ * Hanging indent for a nested list item: one `cm-md-li-depth-N` line class per line the item
+ * owns directly, not counting a nested sublist's own lines (that sublist's `ListItem`s get their
+ * own, deeper classes when the walk reaches them).
+ *
+ * Unlike everything else in this file, this applies regardless of cursor ownership. Every other
+ * "reveal raw on the cursor's line" rule exists to un-hide collapsed *syntax* -- indentation is
+ * layout, not syntax, so hiding it while the cursor sits on the line would make the line jump
+ * sideways on every keystroke, which is worse than always showing it.
+ */
+function listItemIndent(ctx: WalkContext, node: SyntaxNode): void {
+  const depth = Math.min(listDepth(node), MAX_LIST_DEPTH);
+  const first = ctx.state.doc.lineAt(node.from).number;
+
+  // A nested sublist always opens at the start of its own line -- a list marker cannot begin
+  // mid-line -- so that whole line belongs to the sublist, never to this item's own content,
+  // even though the marker itself sits a few indent columns in. Excluding it by line number
+  // rather than by character offset is what keeps that line from also being pushed as this
+  // item's own last line and getting double-counted at two depths.
+  const nestedFrom = firstNestedListFrom(node);
+  const last = nestedFrom !== undefined
+    ? ctx.state.doc.lineAt(nestedFrom).number - 1
+    : ctx.state.doc.lineAt(clamp(node.to - 1, node.from, node.to)).number;
+  if (last < first) return;
+
+  for (let n = first; n <= last; n++) {
+    const line = ctx.state.doc.line(n);
+    push(ctx, { from: line.from, to: line.from, kind: "line", markClass: `cm-md-li-depth-${depth}` });
+  }
+}
+
+/** How many `BulletList`/`OrderedList` ancestors (inclusive of none) own this item. */
+function listDepth(node: SyntaxNode): number {
+  let depth = 0;
+  for (let current: SyntaxNode | null = node; current !== null; current = current.parent) {
+    if (current.name === "BulletList" || current.name === "OrderedList") depth += 1;
+  }
+  return depth;
+}
+
+/** The start of the item's first direct child sublist, if it has one. */
+function firstNestedListFrom(node: SyntaxNode): number | undefined {
+  for (let child = node.firstChild; child !== null; child = child.nextSibling) {
+    if (child.name === "BulletList" || child.name === "OrderedList") return child.from;
+  }
+  return undefined;
+}
+
 /**
  * A GFM task-list item: `- [ ] text` or `- [x] text`.
  *
@@ -520,6 +627,13 @@ function withTrailingSpace(state: EditorState, pos: number): number {
 }
 
 function push(ctx: WalkContext, range: PreviewRange): void {
+  // A `line` range is a point at the line's start, not a span -- `to` carries no meaning for it,
+  // so the "must be non-empty" and "must not cross a line break" rules below do not apply.
+  if (range.kind === "line") {
+    ctx.out.push(range);
+    return;
+  }
+
   if (range.to <= range.from) return;
   // CodeMirror refuses an INLINE replace decoration that spans a line break, and throws rather
   // than dropping it. `mark` has no such restriction, which is what lets a fence or a

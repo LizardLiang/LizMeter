@@ -239,10 +239,40 @@
     }
   }
 
+  // Hanging indent: each `.cm-md-li-depth-N` line gets `N` steps of `padding-left`, and the
+  // marker hangs back by exactly one step (`margin-left: -$li-step`) so it sits in the step the
+  // line above it left empty. A wrapped continuation line carries no marker at all, so it simply
+  // starts at the line's own padding -- aligned under the text, not under the bullet.
   :global(.cm-md-bullet),
   :global(.cm-md-list-mark) {
+    display: inline-block;
+    margin-left: -1.4em;
     color: var(--tn-blue, #7aa2f7);
     font-weight: 600;
+  }
+
+  :global(.cm-md-li-depth-1) {
+    padding-left: 1.4em;
+  }
+
+  :global(.cm-md-li-depth-2) {
+    padding-left: 2.8em;
+  }
+
+  :global(.cm-md-li-depth-3) {
+    padding-left: 4.2em;
+  }
+
+  :global(.cm-md-li-depth-4) {
+    padding-left: 5.6em;
+  }
+
+  :global(.cm-md-li-depth-5) {
+    padding-left: 7em;
+  }
+
+  :global(.cm-md-li-depth-6) {
+    padding-left: 8.4em;
   }
 
   // A real checkbox, not a glyph -- it is the one live-preview widget that edits the source.

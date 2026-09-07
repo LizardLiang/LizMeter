@@ -80,6 +80,16 @@ export function previewDecorations(
       continue;
     }
 
+    if (preview.kind === "line") {
+      // `Decoration.line` is a `LineDecoration`, not the `PointDecoration` CodeMirror's block
+      // check gates -- unlike a block replace or widget, a line decoration is safe straight from
+      // this `ViewPlugin` (confirmed at runtime, the same way the block restriction above was).
+      // Never atomic: it carries no width for a cursor to step over.
+      if (preview.markClass === undefined) continue;
+      decorations.push(Decoration.line({ class: preview.markClass }).range(preview.from));
+      continue;
+    }
+
     if (preview.widgetTable !== undefined) {
       // A table is rendered by `tablePreviewField` below, not here -- CodeMirror throws
       // `RangeError: Block decorations may not be specified via plugins`, verified at runtime,

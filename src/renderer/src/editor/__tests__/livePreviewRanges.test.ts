@@ -39,10 +39,13 @@ interface Analysis {
   widgets: string[];
   /** `<src>|<alt>` for every widget carrying an image source, in document order. */
   images: string[];
+  /** `<line number>:<class>` for every `line` range, in document order. */
+  lines: string[];
 }
 
 function analyse(doc: string, selection: readonly SelectionRange[], visible?: readonly DocRange[]): Analysis {
-  const ranges = livePreviewRanges(stateOf(doc), selection, visible);
+  const state = stateOf(doc);
+  const ranges = livePreviewRanges(state, selection, visible);
   return {
     ranges,
     hidden: ranges.filter((r) => r.kind === "hide").map((r) => doc.slice(r.from, r.to)),
@@ -51,6 +54,9 @@ function analyse(doc: string, selection: readonly SelectionRange[], visible?: re
       .filter((r) => r.kind === "widget")
       .map((r) => `${r.markClass}:${r.widgetText}@${doc.slice(r.from, r.to)}`),
     images: ranges.filter((r) => r.widgetSrc !== undefined).map((r) => `${r.widgetSrc}|${r.widgetText}`),
+    lines: ranges
+      .filter((r) => r.kind === "line")
+      .map((r) => `${state.doc.lineAt(r.from).number}:${r.markClass}`),
   };
 }
 
@@ -365,6 +371,7 @@ describe("livePreviewRanges", () => {
       const out = analyse(doc, parked(doc));
 
       expect(out.ranges).toEqual([
+        { from: 0, to: 0, kind: "line", markClass: "cm-md-li-depth-1" },
         { from: 0, to: 1, kind: "widget", markClass: "cm-md-bullet", widgetText: "•" },
         { from: 2, to: 6, kind: "widget", markClass: "cm-md-task", widgetChecked: false },
       ]);
@@ -375,6 +382,7 @@ describe("livePreviewRanges", () => {
       const out = analyse(doc, parked(doc));
 
       expect(out.ranges).toEqual([
+        { from: 0, to: 0, kind: "line", markClass: "cm-md-li-depth-1" },
         { from: 0, to: 1, kind: "widget", markClass: "cm-md-bullet", widgetText: "•" },
         { from: 2, to: 6, kind: "widget", markClass: "cm-md-task", widgetChecked: true },
         { from: 6, to: 10, kind: "mark", markClass: "cm-md-task-done" },
@@ -403,9 +411,13 @@ describe("livePreviewRanges", () => {
     });
 
     it("reveals raw source when the cursor is on the task item's line", () => {
+      // The checkbox and the done-mark are hidden syntax and reveal on the cursor's line; the
+      // line's own indentation is layout, not syntax, and keeps applying regardless.
       const doc = "- [ ] todo\n\ntail";
 
-      expect(analyse(doc, cursor(3)).ranges).toEqual([]);
+      expect(analyse(doc, cursor(3)).ranges).toEqual([
+        { from: 0, to: 0, kind: "line", markClass: "cm-md-li-depth-1" },
+      ]);
     });
   });
 
@@ -466,6 +478,113 @@ describe("livePreviewRanges", () => {
 
       // Cursor on "intro", off every line of the table -- isolates the cap from the cursor rule.
       expect(analyse(doc, cursor(0)).ranges).toEqual([]);
+    });
+  });
+
+  describe("nested list indentation", () => {
+    it("gives each nesting level its own line-depth class", () => {
+      const doc = "- one\n  - nested\n    - deep\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.lines).toEqual([
+        "1:cm-md-li-depth-1",
+        "2:cm-md-li-depth-2",
+        "3:cm-md-li-depth-3",
+      ]);
+    });
+
+    it("applies to a top-level, unnested item too", () => {
+      const doc = "- one\n- two\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.lines).toEqual(["1:cm-md-li-depth-1", "2:cm-md-li-depth-1"]);
+    });
+
+    it("gives an ordered list item a line-depth class alongside its marker style", () => {
+      const doc = "1. one\n2. two\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.lines).toEqual(["1:cm-md-li-depth-1", "2:cm-md-li-depth-1"]);
+      expect(out.marked).toEqual(["cm-md-list-mark:1.", "cm-md-list-mark:2."]);
+    });
+
+    it("caps the depth class at 6 for anything nested deeper", () => {
+      const marks = ["-", "  -", "    -", "      -", "        -", "          -", "            -"];
+      const doc = marks.map((m, i) => `${m} level ${i}`).join("\n") + "\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.lines.map((l) => l.split(":")[1])).toEqual([
+        "cm-md-li-depth-1",
+        "cm-md-li-depth-2",
+        "cm-md-li-depth-3",
+        "cm-md-li-depth-4",
+        "cm-md-li-depth-5",
+        "cm-md-li-depth-6",
+        "cm-md-li-depth-6",
+      ]);
+    });
+
+    it("applies regardless of cursor position -- indentation is layout, not hidden syntax", () => {
+      const doc = "- one\n  - nested\n\ntail";
+
+      expect(analyse(doc, cursor(2)).lines).toEqual(["1:cm-md-li-depth-1", "2:cm-md-li-depth-2"]);
+    });
+
+    it("does not indent a nested sublist's own lines twice", () => {
+      // A wrapped loose item with two lines of its own text, before its sublist starts.
+      const doc = "- one\n  more text\n  - nested\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.lines).toEqual([
+        "1:cm-md-li-depth-1",
+        "2:cm-md-li-depth-1",
+        "3:cm-md-li-depth-2",
+      ]);
+    });
+  });
+
+  describe("autolinks", () => {
+    it("marks a bare https:// autolink, with nothing to hide", () => {
+      const doc = "Visit https://example.com today\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.hidden).toEqual([]);
+      expect(out.marked).toEqual(["cm-md-link:https://example.com"]);
+    });
+
+    it("marks a bare www. autolink", () => {
+      const doc = "Visit www.example.com today\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.marked).toEqual(["cm-md-link:www.example.com"]);
+    });
+
+    it("reveals a bare autolink's raw source when the cursor is on its line", () => {
+      const doc = "Visit https://example.com today\n\ntail";
+
+      expect(analyse(doc, cursor(0)).ranges).toEqual([]);
+    });
+
+    it("hides the angle brackets of a bracketed autolink and marks the url", () => {
+      const doc = "See <https://example.com> for more\n\ntail";
+      const out = analyse(doc, parked(doc));
+
+      expect(out.hidden).toEqual(["<", ">"]);
+      expect(out.marked).toEqual(["cm-md-link:https://example.com"]);
+    });
+
+    it("reveals a bracketed autolink's raw source when the cursor is on its line", () => {
+      const doc = "See <https://example.com> for more\n\ntail";
+
+      expect(analyse(doc, cursor(0)).ranges).toEqual([]);
+    });
+
+    it("leaves a bracketed javascript: autolink as raw source", () => {
+      // Only the bracketed form can carry an arbitrary scheme; GFM's bare-autolink grammar never
+      // matches `javascript:` at all, so this is the one shape that needs the allowlist check.
+      const doc = "See <javascript:alert(1)> for more\n\ntail";
+
+      expect(analyse(doc, parked(doc)).ranges).toEqual([]);
     });
   });
 
