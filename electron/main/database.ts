@@ -1941,7 +1941,12 @@ export function createTodoState(input: CreateTodoStateInput): TodoState {
   const row = database
     .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = last_insert_rowid()`)
     .get() as TodoStateRow;
-  recordUpsert(database, "todo_states", uuid, { label, color, is_completed: false, is_default: false, created_at: createdAt });
+  // is_completed/is_default publish as 0/1, not raw JS booleans: better-sqlite3 refuses to bind a
+  // boolean, and a peer applying this entry binds change.value straight into an UPDATE (see
+  // merge-engine.ts's applyFieldsLww) -- merge-engine.ts's toBindValue coerces an already-written
+  // boolean back to 0/1 at apply time so old entries still merge, but a newly created state should
+  // not add another one to the shared folder.
+  recordUpsert(database, "todo_states", uuid, { label, color, is_completed: 0, is_default: 0, created_at: createdAt });
   return rowToTodoState(row);
 }
 
@@ -1991,11 +1996,14 @@ export function updateTodoState(input: UpdateTodoStateInput): TodoState {
   // Only fields this call actually touched go to the oplog -- see the comment in updateTodo's
   // own recordUpsert call for why re-publishing an untouched field is a real correctness bug,
   // not a cosmetic one.
-  const changedStateFields: Record<string, string | boolean> = {};
+  // Same reason as createTodoState's recordUpsert call just above in this file: publish 0/1, not
+  // a raw JS boolean, so a fresh oplog entry never repeats the bug toBindValue (row-codec.ts) now
+  // has to work around for entries already on disk.
+  const changedStateFields: Record<string, string | number> = {};
   if (input.label !== undefined) changedStateFields["label"] = label;
   if (input.color !== undefined) changedStateFields["color"] = color;
-  if (input.isCompleted !== undefined) changedStateFields["is_completed"] = isCompleted;
-  if (input.isDefault !== undefined) changedStateFields["is_default"] = isDefault;
+  if (input.isCompleted !== undefined) changedStateFields["is_completed"] = isCompleted ? 1 : 0;
+  if (input.isDefault !== undefined) changedStateFields["is_default"] = isDefault ? 1 : 0;
   recordUpsert(database, "todo_states", ensureUuid(database, "todo_states", input.id), changedStateFields);
 
   const row = database

@@ -21,6 +21,21 @@ const SQL = await initSqlJs();
 type BindParam = string | number | null | Uint8Array;
 type Row = Record<string, unknown>;
 
+// Debt fix (2026-09-14 stuck-merge-pass bug, .claude/.Arena/debt.md): sql.js's own `bind()`
+// silently tolerates a raw JS boolean, coercing or ignoring it, where real better-sqlite3 throws
+// synchronously from its native binding layer. That gap is exactly how the boolean-bind bug in
+// merge-engine.ts shipped undetected -- every sync test exercising a boolean-valued oplog field
+// passed green under this shim while the same code threw in the real Electron app. Checking each
+// bind parameter's type here, to match better-sqlite3's own error, turns that class of bug back
+// into a red test instead of a silent pass, for any future field of an unbindable type.
+function assertBindable(params: unknown[]): asserts params is BindParam[] {
+  for (const value of params) {
+    const t = typeof value;
+    if (t === "string" || t === "number" || t === "bigint" || value === null || value instanceof Uint8Array) continue;
+    throw new TypeError("SQLite3 can only bind numbers, strings, bigints, buffers, and null");
+  }
+}
+
 class Statement {
   constructor(
     private _db: SqlJsDb,
@@ -30,6 +45,7 @@ class Statement {
 
   run(...params: unknown[]): this {
     if (params.length > 0) {
+      assertBindable(params);
       this._db.run(this._sql, params as BindParam[]);
     } else {
       this._db.run(this._sql);
@@ -44,7 +60,10 @@ class Statement {
   get(...params: unknown[]): Row | undefined {
     const stmt = this._db.prepare(this._sql);
     try {
-      if (params.length > 0) stmt.bind(params as BindParam[]);
+      if (params.length > 0) {
+        assertBindable(params);
+        stmt.bind(params as BindParam[]);
+      }
       // getAsObject() with no args returns the current row without re-binding
       return stmt.step() ? (stmt.getAsObject() as Row) : undefined;
     } finally {
@@ -56,7 +75,10 @@ class Statement {
     const stmt = this._db.prepare(this._sql);
     const rows: Row[] = [];
     try {
-      if (params.length > 0) stmt.bind(params as BindParam[]);
+      if (params.length > 0) {
+        assertBindable(params);
+        stmt.bind(params as BindParam[]);
+      }
       // getAsObject() with no args returns current row without re-binding
       while (stmt.step()) rows.push(stmt.getAsObject() as Row);
     } finally {

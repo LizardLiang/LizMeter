@@ -16,7 +16,7 @@ import { advanceTodoIdWatermark, getOrAssignDeviceNumber } from "./device-identi
 import { compareHlc, receive, type Hlc } from "./hlc.ts";
 import { generateOrderedKeys } from "./lexorank.ts";
 import type { OplogEntry, OplogFieldValue, OplogUpsertEntry } from "./oplog.ts";
-import { foreignKeyByFieldName } from "./row-codec.ts";
+import { foreignKeyByFieldName, toBindValue } from "./row-codec.ts";
 import { addSyncNotice } from "./notices.ts";
 
 type DbHandle = Database.Database;
@@ -689,7 +689,7 @@ function applyFieldsLww(
     if (fieldName === "id") {
       if (table === "todos" && typeof change.value === "number") {
         database.prepare("UPDATE todos SET claimed_id = ? WHERE id = ? AND claimed_id IS NULL")
-          .run(change.value, currentId);
+          .run(toBindValue(change.value), currentId);
       }
       continue;
     }
@@ -718,7 +718,11 @@ function applyFieldsLww(
         console.warn(`[sync] skipping unknown field "${fieldName}" for table "${table}" (row ${rowUuid})`);
         continue;
       }
-      database.prepare(`UPDATE ${table} SET ${fieldName} = ? WHERE id = ?`).run(change.value, currentId);
+      // B-6 (2026-09-14 stuck-merge-pass bug): change.value is peer-authored and may still be a
+      // raw JS boolean (see toBindValue's doc comment) -- coerced here, at the bind boundary,
+      // since the entry on disk cannot be un-written and a peer on an older build keeps producing
+      // more of them.
+      database.prepare(`UPDATE ${table} SET ${fieldName} = ? WHERE id = ?`).run(toBindValue(change.value), currentId);
     }
 
     setClock.run(table, rowUuid, fieldName, change.hlc.physicalMs, change.hlc.counter, change.hlc.deviceNumber);
@@ -767,7 +771,9 @@ function applySessionUpsert(database: DbHandle, entry: OplogUpsertEntry): ApplyO
       console.warn(`[sync] skipping unknown field "${fieldName}" for table "sessions" (row ${sessionId})`);
       continue;
     }
-    database.prepare(`UPDATE sessions SET ${fieldName} = ? WHERE id = ?`).run(change.value, sessionId);
+    // B-6: same coercion as applyFieldsLww's generic branch, and the same reason -- change.value
+    // is peer-authored and may still be a raw JS boolean.
+    database.prepare(`UPDATE sessions SET ${fieldName} = ? WHERE id = ?`).run(toBindValue(change.value), sessionId);
     setClock.run(sessionId, fieldName, change.hlc.physicalMs, change.hlc.counter, change.hlc.deviceNumber);
   }
   // Sessions carry no foreign keys (row-codec.ts's FOREIGN_KEYS only names todos), so there is

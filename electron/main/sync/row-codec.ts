@@ -101,3 +101,24 @@ export function encodeRowFields(
 export function allColumnsFor(database: DbHandle, table: SyncedRowTable): string[] {
   return (database.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name);
 }
+
+/**
+ * Coerces an oplog field value into something better-sqlite3's bind layer will actually accept.
+ *
+ * `OplogFieldValue` (oplog.ts) legally includes `boolean` -- and `createTodoState`/
+ * `updateTodoState` (database.ts) really did publish raw JS `true`/`false` for
+ * `is_completed`/`is_default` before that producer was fixed alongside this helper. A peer still
+ * running an older build, or an oplog file already sitting in the shared folder from before that
+ * fix, keeps carrying those raw booleans regardless of what a current build writes going
+ * forward -- so the coercion has to live here, at the point a peer-authored field value is bound
+ * into a SQL statement, not only at the producer. Real `better-sqlite3` throws
+ * `TypeError: SQLite3 can only bind numbers, strings, bigints, buffers, and null` the instant a
+ * raw JS boolean reaches `.run()`/`.get()`/`.all()` -- unlike the Vitest sql.js shim, which
+ * silently tolerates one -- so every merge-engine.ts apply site that binds a `change.value` calls
+ * this first (see merge-engine.ts's `applyFieldsLww` and `applySessionUpsert`).
+ */
+export function toBindValue(value: OplogFieldValue): string | number | null {
+  if (value === true) return 1;
+  if (value === false) return 0;
+  return value;
+}

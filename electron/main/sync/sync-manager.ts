@@ -127,6 +127,28 @@ export function runMergePassSafely(): void {
       }
       return;
     }
+    // Defect 2 (2026-09-14 stuck-merge-pass bug's other half): every other error used to end here
+    // and nowhere else -- a bare console.warn, retried identically and silently every 30 seconds,
+    // with SyncStatus still reporting "enabled" and a stale lastSyncedAt because markSyncedNow()
+    // and the lastSyncedAt assignment above are never reached once this catch fires. This is the
+    // generic sibling of the NotFullyHydratedError/RebuildBackupFailedError branches above: same
+    // halt-on-transition dedupe (FR-031 -- silence on every retry while still blocked, not a
+    // repeat alarm), same one-OS-notification-per-halt posture, but with no dedicated notice kind
+    // of its own beyond "merge-failed" -- the underlying error message is the whole diagnosis, so
+    // it goes in the notice detail (Settings renders SyncNotice.detail) rather than being invented
+    // into a made-up category.
+    const message = err instanceof Error ? err.message : String(err);
+    const isNewHalt = haltedReason === null;
+    haltedReason = message;
+    if (isNewHalt) {
+      addSyncNotice(
+        database,
+        "merge-failed",
+        "A recent change could not be merged, so sync is paused until this is resolved.",
+        message,
+      );
+      notifyUser("LizMeter sync paused", message);
+    }
     console.warn("[sync] merge pass failed:", err);
   }
 }

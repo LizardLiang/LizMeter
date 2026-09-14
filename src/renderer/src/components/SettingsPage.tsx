@@ -1475,7 +1475,12 @@ export function SettingsPage({
               <label className={styles.label}>Status</label>
               <p className={styles.tokenHint} style={{ margin: "6px 0 0" }}>
                 {syncStatus.halted !== null
-                  ? "Paused — a shared file is not fully downloaded yet"
+                  // Generic on purpose: `halted` only ever carries `{ reason }`, no kind, and now
+                  // covers three causes (an incompletely downloaded shared file, a failed
+                  // pre-rebuild backup, or any other merge failure) -- a header hardcoded to the
+                  // first of those read as flatly wrong for the other two. The specific reason is
+                  // always shown right below this line.
+                  ? "Paused — see details below"
                   : syncStatus.lastSyncedAt !== null
                   ? `Last synced ${new Date(syncStatus.lastSyncedAt).toLocaleString()}`
                   : "Waiting for the first sync pass"}

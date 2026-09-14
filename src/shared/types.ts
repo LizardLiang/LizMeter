@@ -831,7 +831,9 @@ export type SyncNoticeKind =
   | "stale-machine-rebuild"
   | "adopted-backup"
   /** A todo's visible number changed because another machine had already claimed it. */
-  | "todo-id-reassigned";
+  | "todo-id-reassigned"
+  /** A merge pass failed for a reason with no dedicated notice kind of its own (sync-manager.ts). */
+  | "merge-failed";
 
 export interface SyncNotice {
   id: number;
