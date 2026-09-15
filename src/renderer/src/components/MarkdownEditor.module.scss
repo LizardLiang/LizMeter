@@ -332,6 +332,29 @@
   }
 }
 
+// Shared by `.wrapperBare` and `.wrapperFill` below. Both variants reset `:global(.cm-line)`'s
+// own padding, and a list line carries `.cm-line` and `.cm-md-li-depth-N` as two classes on the
+// very same element -- equal specificity, so whichever declaration comes later in this file wins
+// for any property both of them set, regardless of which selector reads as "more specific" to a
+// human. Left alone, each variant's blanket `.cm-line` reset (declared first) would be beaten by
+// nothing, since the untouched `.wrapper :global(.cm-md-li-depth-N)` rule sits earlier still and
+// therefore loses -- collapsing every nesting level's `padding-left` back to the reset's value and
+// leaving each marker's `margin-left: -1.4em` hanging outside the line, clipped by the viewport.
+// Re-declaring the same step size and count after the reset, once here rather than copied by hand
+// into both variants, is what lets the later declaration win instead. `$base` stays a plain
+// `calc()` term rather than a Sass addition because Sass refuses to add mismatched units (`px` and
+// `em`) directly, and `calc()` defers that arithmetic to the browser.
+$li-step: 1.4em;
+$li-max-depth: 6;
+
+@mixin li-depth-padding($base: 0px) {
+  @for $n from 1 through $li-max-depth {
+    :global(.cm-md-li-depth-#{$n}) {
+      padding-left: calc(#{$base} + #{$n} * #{$li-step});
+    }
+  }
+}
+
 // Linear-style description field: plain body text, no frame. Every rule here only ever removes
 // chrome or a length cap -- text colour, caret, selection, placeholder and every token/live-
 // preview style above are untouched, so the two variants read identically once focused.
@@ -367,6 +390,9 @@
   :global(.cm-line) {
     padding: 0;
   }
+
+  // A list line still gets exactly N steps of left padding -- see the comment above the mixin.
+  @include li-depth-padding(0px);
 }
 
 // Inside the expanded surface the flex body owns the height, so the editor stretches to it
@@ -398,6 +424,10 @@
   :global(.cm-line) {
     padding: 0 20px;
   }
+
+  // A list line keeps the same 20px right inset (untouched above) plus N steps of left padding
+  // on top of the same 20px -- see the comment above the mixin.
+  @include li-depth-padding(20px);
 }
 
 // ── Expand button ──
