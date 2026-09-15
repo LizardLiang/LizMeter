@@ -10,6 +10,12 @@
   font-size: 13px;
 }
 
+.errorMsg {
+  color: #f7768e;
+  font-size: 13px;
+  margin: 0 0 14px;
+}
+
 /* --- Breadcrumb header --- */
 
 .breadcrumb {
@@ -263,21 +269,6 @@
   font-size: 11px;
   font-variant-numeric: tabular-nums;
   color: #8b93b8;
-}
-
-.subRing,
-.subRingDone {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-}
-
-.subRing {
-  color: #7aa2f7;
-}
-
-.subRingDone {
-  color: #9ece6a;
 }
 
 /* --- Notes --- */

@@ -4,7 +4,7 @@
 // `.claude/.Arena/tactical-plans/2026-09-15-todo-detail-full-page.md` for the design.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Todo } from "../../../shared/types.ts";
+import type { Todo, TodoProject } from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS } from "../../../shared/types.ts";
 import { useTodosContext } from "../contexts/TodosContext.tsx";
 import { Combobox } from "./Combobox.tsx";
@@ -32,28 +32,62 @@ function formatDate(iso: string): string {
 }
 
 /**
+ * Fires a write and swallows its rejection. The write itself (`updateTodo`, `updateTodoQuiet`,
+ * `createProject`/`createLabel` through `useTodos`'s `run()`) already sets the shared `error`
+ * state before rethrowing -- that state is what the page renders. Leaving the rejection
+ * unhandled here would only add a console warning on top of the message already shown.
+ */
+function fireWrite(promise: Promise<unknown>): void {
+  promise.catch(() => {
+    // Surfaced via the shared `error` state, rendered below.
+  });
+}
+
+/**
+ * True once focus has genuinely left this field and its own listbox. A mouse pick on a
+ * `Combobox` option moves focus to the portalled option and then straight back to the input
+ * (`Combobox.pick`); that transition must not also fire a redundant, stale-value commit here
+ * (BLOCKER 3) -- `onCommit` already carries the correct picked value.
+ */
+function blurLeavesField(e: React.FocusEvent<HTMLDivElement>, listboxLabel: string): boolean {
+  const related = e.relatedTarget;
+  if (!(related instanceof Node)) return true;
+  if (e.currentTarget.contains(related)) return false;
+  const listbox = document.querySelector(`[role="listbox"][aria-label="${listboxLabel}"]`);
+  return !(listbox !== null && listbox.contains(related));
+}
+
+/**
  * Local draft for a field that auto-saves through `updateTodoQuiet` on a debounce and on blur.
  * The draft is authoritative while the field has focus, so a concurrent write from outside (the
  * MCP server, a sync merge) cannot yank the caret out from under the user (F10). Any pending
  * write is flushed on unmount, which covers prev/next (the page remounts by id, see the `key` in
  * `TomatoClock`) and navigating back to the list -- so a debounce in flight is never silently
  * dropped (F24).
+ *
+ * `onFlush` may return a promise. A rejection rolls `committedRef` back to what it held before
+ * this attempt, so the next debounce or blur retries the same value instead of treating the
+ * failed write as done (a failed write still surfaces through the shared `error` state).
  */
 function useQuietDraft(
   serverValue: string,
-  onFlush: (value: string) => void,
+  onFlush: (value: string) => Promise<void> | void,
 ): { value: string; onChange: (next: string) => void; onFocus: () => void; onBlur: () => void; } {
   const [value, setValue] = useState(serverValue);
   const valueRef = useRef(serverValue);
   const committedRef = useRef(serverValue);
+  /** The latest known server value, tracked even while focused (WARNING 4). */
+  const serverRef = useRef(serverValue);
   const focusedRef = useRef(false);
   const timerRef = useRef<number | null>(null);
   const onFlushRef = useRef(onFlush);
   onFlushRef.current = onFlush;
 
   // Follows an external write (the MCP server, a sync merge) while the field is not focused.
-  // While it is focused the draft stays authoritative, so a concurrent write cannot yank it.
+  // While it is focused the draft stays authoritative, so a concurrent write cannot yank it --
+  // `serverRef` still tracks the latest value so a blur with no unsaved edit can adopt it.
   useEffect(() => {
+    serverRef.current = serverValue;
     if (focusedRef.current) return;
     setValue(serverValue);
     valueRef.current = serverValue;
@@ -70,8 +104,17 @@ function useQuietDraft(
   const commit = useCallback(() => {
     clearTimer();
     if (valueRef.current === committedRef.current) return;
-    committedRef.current = valueRef.current;
-    onFlushRef.current(valueRef.current);
+    const attempted = valueRef.current;
+    const previousCommitted = committedRef.current;
+    committedRef.current = attempted;
+    const result = onFlushRef.current(attempted);
+    if (result) {
+      result.catch(() => {
+        // The write failed -- the page renders the shared `error`. Roll back so the next
+        // debounce or blur retries, unless the value has already moved on to something else.
+        if (committedRef.current === attempted) committedRef.current = previousCommitted;
+      });
+    }
   }, [clearTimer]);
 
   useEffect(() => {
@@ -99,6 +142,14 @@ function useQuietDraft(
 
   const onBlur = useCallback(() => {
     focusedRef.current = false;
+    // No unsaved local edit, but the server moved on while this field was focused -- adopt it
+    // rather than let the next commit silently overwrite an external change (WARNING 4).
+    if (valueRef.current === committedRef.current && serverRef.current !== valueRef.current) {
+      setValue(serverRef.current);
+      valueRef.current = serverRef.current;
+      committedRef.current = serverRef.current;
+      return;
+    }
     commit();
   }, [commit]);
 
@@ -113,6 +164,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
     labels,
     milestones,
     loading,
+    error,
     visibleIds,
     updateTodo,
     updateTodoQuiet,
@@ -123,14 +175,45 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
     toggleTodoLabel,
   } = useTodosContext();
 
-  const todo = useMemo(() => todos.find((t) => t.id === todoId) ?? null, [todos, todoId]);
+  const contextTodo = useMemo(() => todos.find((t) => t.id === todoId) ?? null, [todos, todoId]);
 
-  // Sync renumber/delete: once the shared list has loaded, a row that is not in it anymore has
-  // nothing left to show here -- follow it back to the list rather than rendering an empty page
-  // (F19), the same rule `TodosPage.tsx`'s `editing` lookup documents.
+  /**
+   * `contextTodo` only ever holds rows that pass the list's active filters (`useTodos`'s fetch
+   * forwards `filter`/`stateId`/`projectId`/`labelId`). Writing a field that no longer matches
+   * the filter (e.g. setting State to a completed state under the "Active" tab) drops the row
+   * out of `todos` on the next refetch even though the todo still exists -- that is not the same
+   * as the row being gone, and must not send the user back to the list (BLOCKER 1).
+   */
+  const [fallbackTodo, setFallbackTodo] = useState<Todo | null>(null);
+
   useEffect(() => {
-    if (!loading && todo === null) onBack(todoId);
-  }, [loading, todo, todoId, onBack]);
+    if (contextTodo !== null) setFallbackTodo(null);
+  }, [contextTodo]);
+
+  useEffect(() => {
+    if (loading || contextTodo !== null) return;
+    let cancelled = false;
+    // Unfiltered, so a row that only dropped out of the active filter is still found here.
+    window.electronAPI.todo.list().then((all) => {
+      if (cancelled) return;
+      const found = all.find((t) => t.id === todoId) ?? null;
+      if (found === null) {
+        // Genuinely gone -- deleted, or renumbered out from under this id by a sync merge
+        // (`reconcileTodoIds` in merge-engine.ts). Nothing left to show here (F19).
+        onBack(todoId);
+      } else {
+        setFallbackTodo(found);
+      }
+    }).catch(() => {
+      // Inconclusive: leave the page open on the last data it had rather than navigating away
+      // on a failed check.
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [loading, contextTodo, todoId, onBack]);
+
+  const todo = contextTodo ?? fallbackTodo;
 
   const [picking, setPicking] = useState<"parent" | "child" | null>(null);
   const [notesExpanded, setNotesExpanded] = useState(false);
@@ -140,6 +223,8 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
   const [newChildTitle, setNewChildTitle] = useState("");
   const [childBusy, setChildBusy] = useState(false);
   const overflowWrapRef = useRef<HTMLDivElement>(null);
+  /** De-dupes a repeat commit (Enter, then blur) for a name still being created (BLOCKER 3). */
+  const projectCreateRef = useRef<Map<string, Promise<TodoProject>>>(new Map());
 
   const loadChildren = useCallback(async () => {
     try {
@@ -151,20 +236,23 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
 
   useEffect(() => {
     void loadChildren();
-  }, [loadChildren]);
+    // `todo?.childCount`/`completedChildCount` are included so an external add/remove/complete
+    // (the MCP server, a sync merge) refreshes this block too -- `todoId` alone missed that,
+    // leaving the list stale after the count on the meta line had already moved on (WARNING 6).
+  }, [loadChildren, todo?.childCount, todo?.completedChildCount]);
 
-  const commitTitle = useCallback((value: string) => {
+  const commitTitle = useCallback((value: string): Promise<void> | void => {
     const trimmed = value.trim();
     // Auto-save has no submit gate to refuse an empty title at, so the write is simply skipped
     // until the user provides one -- the debounce/blur still fires again on the next edit.
-    if (trimmed.length === 0) return;
-    void updateTodoQuiet({ id: todoId, title: trimmed });
+    if (trimmed.length === 0) return undefined;
+    return updateTodoQuiet({ id: todoId, title: trimmed });
   }, [todoId, updateTodoQuiet]);
 
   const titleDraft = useQuietDraft(todo?.title ?? "", commitTitle);
 
-  const commitNotes = useCallback((value: string) => {
-    void updateTodoQuiet({ id: todoId, notes: value.trim().length > 0 ? value.trim() : null });
+  const commitNotes = useCallback((value: string): Promise<void> => {
+    return updateTodoQuiet({ id: todoId, notes: value.trim().length > 0 ? value.trim() : null });
   }, [todoId, updateTodoQuiet]);
 
   const notesDraft = useQuietDraft(todo?.notes ?? "", commitNotes);
@@ -183,18 +271,43 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
     setProjectDraft(todo?.project?.name ?? "");
   }, [todo?.project?.name]);
 
-  async function commitProject() {
+  /** `value` is always the value being committed -- never read from `projectDraft` state here,
+   * which a same-tick `onChange` may not have applied yet (BLOCKER 3). */
+  async function commitProject(value: string) {
     if (todo === null) return;
-    const trimmed = projectDraft.trim();
+    const trimmed = value.trim();
     const current = todo.project?.name ?? "";
     if (trimmed === current) return;
     if (trimmed.length === 0) {
-      void updateTodo({ id: todo.id, projectId: null });
+      fireWrite(updateTodo({ id: todo.id, projectId: null }));
       return;
     }
     const existing = projects.find((p) => p.name.toLowerCase() === trimmed.toLowerCase());
-    const id = existing ? existing.id : (await createProject({ name: trimmed })).id;
-    void updateTodo({ id: todo.id, projectId: id });
+    if (existing) {
+      fireWrite(updateTodo({ id: todo.id, projectId: existing.id }));
+      return;
+    }
+
+    const key = trimmed.toLowerCase();
+    let inFlight = projectCreateRef.current.get(key);
+    if (inFlight === undefined) {
+      inFlight = createProject({ name: trimmed });
+      projectCreateRef.current.set(key, inFlight);
+      // Handled again below via `await inFlight` for this call; attached here too so a
+      // *different* concurrent caller sharing this same promise is not left with its own
+      // unhandled rejection.
+      inFlight
+        .catch(() => {})
+        .finally(() => {
+          if (projectCreateRef.current.get(key) === inFlight) projectCreateRef.current.delete(key);
+        });
+    }
+    try {
+      const created = await inFlight;
+      fireWrite(updateTodo({ id: todo.id, projectId: created.id }));
+    } catch {
+      // Surfaced via the shared `error` state, rendered below.
+    }
   }
 
   const [milestoneDraft, setMilestoneDraft] = useState(todo?.milestone ?? "");
@@ -202,12 +315,12 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
     setMilestoneDraft(todo?.milestone ?? "");
   }, [todo?.milestone]);
 
-  function commitMilestone() {
+  function commitMilestone(value: string) {
     if (todo === null) return;
-    const trimmed = milestoneDraft.trim();
+    const trimmed = value.trim();
     const current = todo.milestone ?? "";
     if (trimmed === current) return;
-    void updateTodo({ id: todo.id, milestone: trimmed.length > 0 ? trimmed : null });
+    fireWrite(updateTodo({ id: todo.id, milestone: trimmed.length > 0 ? trimmed : null }));
   }
 
   const [labelDraft, setLabelDraft] = useState("");
@@ -217,10 +330,15 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
     if (trimmed.length === 0 || todo === null) return;
     const existing = labels.find((l) => l.name.toLowerCase() === trimmed.toLowerCase());
     if (existing) {
-      if (!todo.labels.some((l) => l.id === existing.id)) void toggleTodoLabel(todo, existing.id);
+      if (!todo.labels.some((l) => l.id === existing.id)) fireWrite(toggleTodoLabel(todo, existing.id));
     } else {
-      const created = await createLabel({ name: trimmed });
-      void toggleTodoLabel(todo, created.id);
+      try {
+        const created = await createLabel({ name: trimmed });
+        fireWrite(toggleTodoLabel(todo, created.id));
+      } catch {
+        // Surfaced via the shared `error` state, rendered below.
+        return;
+      }
     }
     setLabelDraft("");
   }
@@ -271,6 +389,8 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
     try {
       await deleteTodo(todoId);
       onBack(todoId);
+    } catch {
+      // Surfaced via the shared `error` state, rendered below.
     } finally {
       setDeleting(false);
     }
@@ -371,6 +491,8 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
         </div>
       </header>
 
+      {error && <p className={styles.errorMsg}>{error}</p>}
+
       <div className={styles.layout}>
         <div className={styles.main}>
           <input
@@ -404,7 +526,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
                   <button
                     className={styles.chipClear}
                     type="button"
-                    onClick={() => void updateTodo({ id: todo.id, parentId: null })}
+                    onClick={() => fireWrite(updateTodo({ id: todo.id, parentId: null }))}
                     aria-label="Remove parent"
                   >
                     x
@@ -512,7 +634,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
 
           <p className={styles.metaFooter}>
             Created {formatDate(todo.createdAt)}
-            {todo.completedAt !== null && <>&middot; Completed {formatDate(todo.completedAt)}</>}
+            {todo.completedAt !== null && <>{" · Completed "}{formatDate(todo.completedAt)}</>}
             {" · added by "}
             {todo.source === "user" ? "you" : (todo.sourceLabel ?? "AI")}
           </p>
@@ -526,7 +648,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
               className={styles.selectTrigger}
               value={String(todo.state.id)}
               options={states.map((s) => ({ value: String(s.id), label: s.label, color: s.color }))}
-              onChange={(next) => void updateTodo({ id: todo.id, stateId: Number(next) })}
+              onChange={(next) => fireWrite(updateTodo({ id: todo.id, stateId: Number(next) }))}
             />
           </div>
 
@@ -537,11 +659,16 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
               className={styles.selectTrigger}
               value={String(todo.priority)}
               options={TODO_PRIORITY_LABELS.map((label, value) => ({ value: String(value), label }))}
-              onChange={(next) => void updateTodo({ id: todo.id, priority: Number(next) })}
+              onChange={(next) => fireWrite(updateTodo({ id: todo.id, priority: Number(next) }))}
             />
           </div>
 
-          <div className={styles.field} onBlur={() => void commitProject()}>
+          <div
+            className={styles.field}
+            onBlur={(e) => {
+              if (blurLeavesField(e, "Project")) void commitProject(projectDraft);
+            }}
+          >
             <span className={styles.sectionLabel}>Project</span>
             <Combobox
               ariaLabel="Project"
@@ -549,12 +676,17 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
               value={projectDraft}
               options={projects.map((p) => p.name)}
               onChange={setProjectDraft}
-              onCommit={() => void commitProject()}
+              onCommit={(v) => void commitProject(v)}
               maxLength={60}
             />
           </div>
 
-          <div className={styles.field}>
+          <div
+            className={styles.field}
+            onBlur={(e) => {
+              if (blurLeavesField(e, "Add label")) void commitLabel(labelDraft);
+            }}
+          >
             <span className={styles.sectionLabel}>Labels</span>
             <div className={styles.labelRow}>
               {todo.labels.map((label) => (
@@ -567,7 +699,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
                   <button
                     type="button"
                     className={styles.labelRemove}
-                    onClick={() => void toggleTodoLabel(todo, label.id)}
+                    onClick={() => fireWrite(toggleTodoLabel(todo, label.id))}
                     aria-label={`Remove label ${label.name}`}
                   >
                     &times;
@@ -588,7 +720,12 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
             </div>
           </div>
 
-          <div className={styles.field} onBlur={() => commitMilestone()}>
+          <div
+            className={styles.field}
+            onBlur={(e) => {
+              if (blurLeavesField(e, "Milestone")) commitMilestone(milestoneDraft);
+            }}
+          >
             <span className={styles.sectionLabel}>Milestone</span>
             <Combobox
               ariaLabel="Milestone"
@@ -596,7 +733,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
               value={milestoneDraft}
               options={milestones}
               onChange={setMilestoneDraft}
-              onCommit={() => commitMilestone()}
+              onCommit={(v) => commitMilestone(v)}
               maxLength={120}
             />
           </div>
@@ -607,7 +744,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
               ariaLabel="Start date"
               className={styles.selectTrigger}
               value={todo.startDate ?? ""}
-              onChange={(v) => void updateTodo({ id: todo.id, startDate: v.length > 0 ? v : null })}
+              onChange={(v) => fireWrite(updateTodo({ id: todo.id, startDate: v.length > 0 ? v : null }))}
             />
           </div>
 
@@ -617,7 +754,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
               ariaLabel="Due date"
               className={styles.selectTrigger}
               value={todo.dueDate ?? ""}
-              onChange={(v) => void updateTodo({ id: todo.id, dueDate: v.length > 0 ? v : null })}
+              onChange={(v) => fireWrite(updateTodo({ id: todo.id, dueDate: v.length > 0 ? v : null }))}
             />
           </div>
         </div>
@@ -627,7 +764,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
         <TodoPicker
           heading="Nest this todo under"
           mode={{ kind: "parent", todoId: todo.id, currentParentId: todo.parentId }}
-          onPick={(picked) => void updateTodo({ id: todo.id, parentId: picked.id })}
+          onPick={(picked) => fireWrite(updateTodo({ id: todo.id, parentId: picked.id }))}
           onClose={() => setPicking(null)}
         />
       )}

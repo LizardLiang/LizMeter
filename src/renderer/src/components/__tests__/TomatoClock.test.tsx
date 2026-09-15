@@ -517,7 +517,8 @@ const mockElectronAPI = {
   tag: { assign: vi.fn().mockResolvedValue(undefined) },
   // `TodosProvider` now mounts at the top level of `TomatoClock` (survives Timer <-> Todos
   // navigation, see TodosContext.tsx), so `useTodos()` fires on every render of this component --
-  // not just when the Todos page itself is visited. These four calls are what it makes on mount.
+  // not just when the Todos page itself is visited. These five calls, plus subscribing via
+  // `onChanged`, are what it makes on mount.
   todo: {
     list: vi.fn().mockResolvedValue([]),
     listMilestones: vi.fn().mockResolvedValue([]),

@@ -25,6 +25,18 @@ const backlogState: TodoState = {
   createdAt: "2026-01-01T00:00:00.000Z",
 };
 
+const doneState: TodoState = {
+  id: 3,
+  label: "Done",
+  color: "#9ece6a",
+  position: 2,
+  isCompleted: true,
+  isDefault: false,
+  createdAt: "2026-01-01T00:00:00.000Z",
+};
+
+const allStates = [todoState, backlogState, doneState];
+
 const infraProject: TodoProject = {
   id: 7,
   name: "Infra",
@@ -32,6 +44,8 @@ const infraProject: TodoProject = {
   position: 0,
   createdAt: "2026-01-01T00:00:00.000Z",
 };
+
+let allProjects: TodoProject[] = [infraProject];
 
 const bugLabel: TodoLabel = {
   id: 11,
@@ -64,12 +78,18 @@ function makeTodo(id: number, title: string, state: TodoState, extra: Partial<To
   };
 }
 
-// Rendered order (grouped by state position, then array order): 152, 100, 162.
-const sampleTodos: Todo[] = [
-  makeTodo(152, "Old prod to new prod migration", todoState),
-  makeTodo(100, "Fix misc code quality issues", todoState, { project: infraProject }),
-  makeTodo(162, "Server-side PDF optimization", backlogState),
-];
+function defaultTodos(): Todo[] {
+  // Rendered order (grouped by state position, then array order): 152, 100, 162.
+  return [
+    makeTodo(152, "Old prod to new prod migration", todoState),
+    makeTodo(100, "Fix misc code quality issues", todoState, { project: infraProject }),
+    makeTodo(162, "Server-side PDF optimization", backlogState),
+  ];
+}
+
+/** Reassigned, never mutated in place -- a `list()` caller holding an older array reference
+ * must never observe a later write (WARNING 7). */
+let sampleTodos: Todo[] = defaultTodos();
 
 const mockTodoAPI = {
   list: vi.fn(),
@@ -118,7 +138,30 @@ let onChangedCallback: () => void = () => {};
 const mockOnBack = vi.fn();
 const mockOnNavigate = vi.fn();
 
-/** Merges the write into the matching sample row, the way the real main process would. */
+interface ListLikeInput {
+  filter?: string;
+  stateId?: number;
+  projectId?: number;
+  labelId?: number;
+  parentId?: number;
+}
+
+/** Mirrors the main process's own filtering (see `useTodos.ts`'s fetch), so a filtered call and
+ * an unfiltered one (`TodoDetailPage`'s BLOCKER-1 fallback lookup) can disagree the same way the
+ * real backend would. */
+function applyFilter(list: Todo[], input?: ListLikeInput): Todo[] {
+  let result = list;
+  if (input?.filter === "active") result = result.filter((t) => !t.state.isCompleted);
+  else if (input?.filter === "done") result = result.filter((t) => t.state.isCompleted);
+  else if (input?.filter === "ai") result = result.filter((t) => t.source === "ai");
+  if (input?.stateId !== undefined) result = result.filter((t) => t.state.id === input.stateId);
+  if (input?.projectId !== undefined) result = result.filter((t) => t.project?.id === input.projectId);
+  if (input?.labelId !== undefined) result = result.filter((t) => t.labels.some((l) => l.id === input.labelId));
+  return result;
+}
+
+/** Builds a new array rather than mutating `sampleTodos`'s elements in place -- a stale array
+ * reference held elsewhere (or by a test) must never see a later write (WARNING 7). */
 function applyUpdate(input: UpdateTodoInput): Todo {
   const current = sampleTodos.find((t) => t.id === input.id)!;
   const next: Todo = {
@@ -130,10 +173,12 @@ function applyUpdate(input: UpdateTodoInput): Todo {
     ...(input.startDate !== undefined ? { startDate: input.startDate } : {}),
     ...(input.dueDate !== undefined ? { dueDate: input.dueDate } : {}),
     ...(input.parentId !== undefined ? { parentId: input.parentId } : {}),
-    ...(input.stateId !== undefined ? { state: input.stateId === 2 ? backlogState : todoState } : {}),
+    ...(input.projectId !== undefined
+      ? { project: input.projectId === null ? null : allProjects.find((p) => p.id === input.projectId) ?? null }
+      : {}),
+    ...(input.stateId !== undefined ? { state: allStates.find((s) => s.id === input.stateId) ?? current.state } : {}),
   };
-  const index = sampleTodos.findIndex((t) => t.id === input.id);
-  sampleTodos[index] = next;
+  sampleTodos = sampleTodos.map((t) => (t.id === input.id ? next : t));
   return next;
 }
 
@@ -145,11 +190,11 @@ beforeEach(() => {
     todoLabel: mockTodoLabelAPI,
     attachment: mockAttachmentAPI,
   });
-  mockTodoAPI.list.mockImplementation((input?: { parentId?: number; }) => {
+  mockTodoAPI.list.mockImplementation((input?: ListLikeInput) => {
     if (input?.parentId !== undefined) {
-      return Promise.resolve(sampleTodos.filter((t) => t.parentId === input.parentId));
+      return Promise.resolve(sampleTodos.filter((t) => t.parentId === input.parentId).map((t) => ({ ...t })));
     }
-    return Promise.resolve(sampleTodos);
+    return Promise.resolve(applyFilter(sampleTodos, input).map((t) => ({ ...t })));
   });
   mockTodoAPI.listMilestones.mockResolvedValue([]);
   mockTodoAPI.delete.mockResolvedValue(undefined);
@@ -159,9 +204,13 @@ beforeEach(() => {
     onChangedCallback = cb;
     return () => {};
   });
-  mockTodoStateAPI.list.mockResolvedValue([todoState, backlogState]);
-  mockTodoProjectAPI.list.mockResolvedValue([infraProject]);
-  mockTodoProjectAPI.create.mockResolvedValue({ ...infraProject, id: 8, name: "Billing" });
+  mockTodoStateAPI.list.mockResolvedValue(allStates);
+  mockTodoProjectAPI.list.mockImplementation(() => Promise.resolve([...allProjects]));
+  mockTodoProjectAPI.create.mockImplementation(({ name }: { name: string; }) => {
+    const created = { ...infraProject, id: 8, name };
+    allProjects = [...allProjects, created];
+    return Promise.resolve(created);
+  });
   mockTodoLabelAPI.list.mockResolvedValue([bugLabel]);
   mockTodoLabelAPI.create.mockResolvedValue({ ...bugLabel, id: 12, name: "ui" });
   mockAttachmentAPI.list.mockResolvedValue([]);
@@ -171,11 +220,10 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   vi.useRealTimers();
-  // Reset the shared fixture back to its original shape -- individual tests mutate it via
-  // `applyUpdate`, the same way a real write would.
-  sampleTodos[0] = makeTodo(152, "Old prod to new prod migration", todoState);
-  sampleTodos[1] = makeTodo(100, "Fix misc code quality issues", todoState, { project: infraProject });
-  sampleTodos[2] = makeTodo(162, "Server-side PDF optimization", backlogState);
+  // Reset the shared fixtures back to their original shape -- individual tests mutate them via
+  // `applyUpdate`/`createProject`, the same way a real write would.
+  sampleTodos = defaultTodos();
+  allProjects = [infraProject];
 });
 
 async function renderDetail(todoId: number) {
@@ -186,6 +234,18 @@ async function renderDetail(todoId: number) {
   );
   await screen.findByLabelText("Title");
   return utils;
+}
+
+/** Combines the list and the detail page under one shared provider, the way `TomatoClock`
+ * switches between the two `NavPage` routes. */
+function Harness({ showDetail, todoId = 100 }: { showDetail: boolean; todoId?: number; }) {
+  return (
+    <TodosProvider>
+      {showDetail
+        ? <TodoDetailPage todoId={todoId} onBack={mockOnBack} onNavigate={mockOnNavigate} />
+        : <TodosPage onOpenDetail={() => {}} />}
+    </TodosProvider>
+  );
 }
 
 describe("TodoDetailPage fields", () => {
@@ -211,11 +271,275 @@ describe("TodoDetailPage fields", () => {
     await renderDetail(162);
 
     // The MCP server and a sync merge write through the main process, not the renderer, so the
-    // shared list only learns about the removal via the `onChanged` push event (F19).
-    mockTodoAPI.list.mockResolvedValue(sampleTodos.filter((t) => t.id !== 162));
+    // shared list only learns about the removal via the `onChanged` push event (F19). Both the
+    // context's own refetch and the BLOCKER-1 fallback lookup agree the row is genuinely gone.
+    sampleTodos = sampleTodos.filter((t) => t.id !== 162);
     onChangedCallback();
 
     await waitFor(() => expect(mockOnBack).toHaveBeenCalledWith(162));
+  });
+});
+
+describe("TodoDetailPage stays open when a write moves the row out of the active filter (BLOCKER 1)", () => {
+  it("keeps the page open and shows the row as filtered-out, not gone", async () => {
+    const { rerender } = render(<Harness showDetail={false} />);
+    await screen.findByText("Old prod to new prod migration");
+
+    fireEvent.click(screen.getByRole("button", { name: "Active" }));
+    await waitFor(() => expect(mockTodoAPI.list).toHaveBeenCalledWith(expect.objectContaining({ filter: "active" })));
+
+    rerender(<Harness showDetail={true} />);
+    await screen.findByLabelText("Title");
+
+    fireEvent.click(screen.getByLabelText("State"));
+    fireEvent.click(within(screen.getByRole("listbox", { name: "State" })).getByText("Done"));
+
+    // The write completes and the "active"-filtered refetch no longer includes todo 100 --
+    // the page must recognize it only fell out of the filter, not that it was deleted.
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, stateId: doneState.id }));
+    await waitFor(() => expect(screen.getByLabelText("State")).toHaveTextContent("Done"));
+    expect(screen.getByLabelText("Title")).toHaveValue("Fix misc code quality issues");
+    expect(mockOnBack).not.toHaveBeenCalled();
+  });
+});
+
+describe("TodoDetailPage surfaces write failures (BLOCKER 2)", () => {
+  it("shows the error, sends no unhandled rejection, and retries on the next blur", async () => {
+    await renderDetail(100);
+    mockTodoAPI.update.mockRejectedValueOnce(new Error("Network blip"));
+
+    const input = screen.getByLabelText("Title");
+    fireEvent.change(input, { target: { value: "Retry me" } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(screen.getByText("Network blip")).toBeInTheDocument());
+    expect(mockTodoAPI.update).toHaveBeenCalledTimes(1);
+
+    // No further typing -- only a second blur. The failed commit must have rolled back so this
+    // is recognised as still-unsaved, not treated as already written.
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledTimes(2));
+    expect(mockTodoAPI.update).toHaveBeenLastCalledWith({ id: 100, title: "Retry me" });
+  });
+
+  it("shows a message when the main process rejects a rail write (start after due)", async () => {
+    await renderDetail(100);
+    mockTodoAPI.update.mockRejectedValueOnce(new Error("Start date must not be after the due date."));
+
+    fireEvent.click(screen.getByLabelText("Start date"));
+    const panel = await screen.findByRole("dialog", { name: "Start date" });
+    fireEvent.click(within(panel).getByText("15"));
+
+    expect(await screen.findByText("Start date must not be after the due date.")).toBeInTheDocument();
+  });
+
+  it("shows a message when delete fails, without an unhandled rejection", async () => {
+    await renderDetail(162);
+    mockTodoAPI.delete.mockRejectedValueOnce(new Error("Could not delete this todo."));
+
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    expect(await screen.findByText("Could not delete this todo.")).toBeInTheDocument();
+    expect(mockOnBack).not.toHaveBeenCalled();
+  });
+});
+
+describe("TodoDetailPage Project/Milestone commit the picked value (BLOCKER 3)", () => {
+  it("links to the existing project on ArrowDown+Enter, without creating one", async () => {
+    // Todo 152 starts with no project -- picking "Infra" is a real change, unlike todo 100
+    // (which already carries it, and would make this a no-op commit either way).
+    await renderDetail(152);
+
+    const project = screen.getByLabelText("Project");
+    fireEvent.change(project, { target: { value: "Inf" } });
+    fireEvent.keyDown(project, { key: "ArrowDown" });
+    fireEvent.keyDown(project, { key: "Enter" });
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, projectId: infraProject.id }));
+    expect(mockTodoProjectAPI.create).not.toHaveBeenCalled();
+  });
+
+  it("creates the typed project at most once even when Enter is followed by a blur", async () => {
+    await renderDetail(100);
+
+    const project = screen.getByLabelText("Project");
+    fireEvent.change(project, { target: { value: "Billing" } });
+    fireEvent.keyDown(project, { key: "Enter" });
+    fireEvent.blur(project);
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, projectId: 8 }));
+    expect(mockTodoProjectAPI.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-commit when a mouse pick moves focus to the field's own listbox", async () => {
+    await renderDetail(152);
+
+    const project = screen.getByLabelText("Project");
+    fireEvent.change(project, { target: { value: "Inf" } });
+    const listbox = await screen.findByRole("listbox", { name: "Project" });
+    const option = within(listbox).getByText("Infra");
+
+    // The browser blurs the input as focus moves toward the option being clicked, before the
+    // click (and therefore `onCommit`) fires -- reproduced here with an explicit `relatedTarget`
+    // rather than relying on jsdom to simulate that transition on its own.
+    fireEvent.blur(project, { relatedTarget: option });
+    fireEvent.click(option);
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 152, projectId: infraProject.id }));
+    expect(mockTodoAPI.update).toHaveBeenCalledTimes(1);
+  });
+
+  it("commits the picked milestone value, not a stale draft", async () => {
+    mockTodoAPI.listMilestones.mockResolvedValue(["Q1 Launch"]);
+    await renderDetail(100);
+    await waitFor(() => expect(screen.getByLabelText("Milestone")).toBeInTheDocument());
+
+    const milestone = screen.getByLabelText("Milestone");
+    fireEvent.change(milestone, { target: { value: "Q1" } });
+    fireEvent.keyDown(milestone, { key: "ArrowDown" });
+    fireEvent.keyDown(milestone, { key: "Enter" });
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, milestone: "Q1 Launch" }));
+  });
+
+  it("commits a label on blur, not only on Enter or a pick", async () => {
+    await renderDetail(100);
+
+    const addLabel = screen.getByLabelText("Add label");
+    fireEvent.change(addLabel, { target: { value: "bug" } });
+    fireEvent.blur(addLabel);
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, labelIds: [bugLabel.id] }));
+  });
+});
+
+describe("TodoDetailPage adopts an external write on blur (WARNING 4)", () => {
+  it("shows the new title after an external rename, and sends no write", async () => {
+    await renderDetail(100);
+    const input = screen.getByLabelText("Title");
+
+    fireEvent.focus(input);
+    sampleTodos = sampleTodos.map((t) => (t.id === 100 ? { ...t, title: "Renamed by the MCP server" } : t));
+    onChangedCallback();
+
+    // Wait for the refetch to actually land in context before touching focus at all -- the
+    // breadcrumb reads `todo.title` directly (no debounce, no focus gate), so it is a reliable
+    // signal that this happened, independent of the field under test.
+    await waitFor(() => expect(screen.getByText(/Renamed by the MCP server/)).toBeInTheDocument());
+    // The draft stays authoritative while focused, so the rename must not be visible in the
+    // field yet -- if it already were, blur below would prove nothing about WARNING 4's fix.
+    expect(input).toHaveValue("Fix misc code quality issues");
+
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(input).toHaveValue("Renamed by the MCP server"));
+    expect(mockTodoAPI.update).not.toHaveBeenCalled();
+  });
+});
+
+describe("TodoDetailPage sub-issues", () => {
+  it("adds a sub-issue, writing immediately", async () => {
+    await renderDetail(152);
+
+    const input = screen.getByLabelText("New sub-issue title");
+    fireEvent.change(input, { target: { value: "Back up the database" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+    await waitFor(() =>
+      expect(mockTodoAPI.create).toHaveBeenCalledWith({
+        title: "Back up the database",
+        parentId: 152,
+        source: "user",
+      })
+    );
+  });
+
+  it("unlinking a sub-issue clears its parent rather than deleting it", async () => {
+    sampleTodos = [
+      ...sampleTodos,
+    ].map((t) => t.id === 100 ? { ...t, parentId: 152, parentTitle: "Old prod to new prod migration" } : t);
+    await renderDetail(152);
+
+    const unlink = await screen.findByLabelText("Remove Fix misc code quality issues from this todo");
+    fireEvent.click(unlink);
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, parentId: null }));
+    expect(mockTodoAPI.delete).not.toHaveBeenCalled();
+  });
+
+  it("setting a parent from the picker writes immediately, with no save step", async () => {
+    await renderDetail(100);
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Set parent" }));
+    const picker = await screen.findByRole("dialog", { name: "Nest this todo under" });
+    fireEvent.click(within(picker).getByText("Old prod to new prod migration"));
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, parentId: 152 }));
+  });
+
+  it("refreshes the sub-issues list when an outside change adds a child (WARNING 6)", async () => {
+    await renderDetail(152);
+    await screen.findByLabelText("New sub-issue title");
+    expect(screen.queryByText("Added from outside")).not.toBeInTheDocument();
+
+    // External add: the MCP server files a new sub-issue under 152. The push event only makes
+    // the shared `todos` array (and therefore `childCount`) fresh -- `loadChildren`'s own result
+    // must be re-derived from that, not stay pinned to the id alone.
+    sampleTodos = [
+      ...sampleTodos.map((t) => t.id === 152 ? { ...t, childCount: t.childCount + 1 } : t),
+      makeTodo(300, "Added from outside", todoState, { parentId: 152, parentTitle: "Old prod to new prod migration" }),
+    ];
+    onChangedCallback();
+
+    expect(await screen.findByText("Added from outside")).toBeInTheDocument();
+  });
+});
+
+describe("TodoDetailPage prev/next", () => {
+  it("steps through the same order the list shows, and shows the position", async () => {
+    await renderDetail(100);
+
+    expect(screen.getByText("2 / 3")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Previous todo"));
+    expect(mockOnNavigate).toHaveBeenCalledWith(152);
+
+    fireEvent.click(screen.getByLabelText("Next todo"));
+    expect(mockOnNavigate).toHaveBeenCalledWith(162);
+  });
+
+  it("disables Previous on the first row", async () => {
+    await renderDetail(152);
+    expect(screen.getByLabelText("Previous todo")).toBeDisabled();
+  });
+
+  it("disables Next on the last row", async () => {
+    await renderDetail(162);
+    expect(screen.getByLabelText("Next todo")).toBeDisabled();
+  });
+});
+
+describe("TodoDetailPage delete", () => {
+  it("deletes from the overflow menu and navigates back to the list", async () => {
+    await renderDetail(162);
+
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+
+    await waitFor(() => expect(mockTodoAPI.delete).toHaveBeenCalledWith(162));
+    await waitFor(() => expect(mockOnBack).toHaveBeenCalledWith(162));
+  });
+});
+
+describe("TodoDetailPage keyboard", () => {
+  it("Escape returns to the list", async () => {
+    await renderDetail(100);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    expect(mockOnBack).toHaveBeenCalledWith(100);
   });
 });
 
@@ -278,107 +602,8 @@ describe("TodoDetailPage auto-save", () => {
   });
 });
 
-describe("TodoDetailPage prev/next", () => {
-  it("steps through the same order the list shows, and shows the position", async () => {
-    await renderDetail(100);
-
-    expect(screen.getByText("2 / 3")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByLabelText("Previous todo"));
-    expect(mockOnNavigate).toHaveBeenCalledWith(152);
-
-    fireEvent.click(screen.getByLabelText("Next todo"));
-    expect(mockOnNavigate).toHaveBeenCalledWith(162);
-  });
-
-  it("disables Previous on the first row", async () => {
-    await renderDetail(152);
-    expect(screen.getByLabelText("Previous todo")).toBeDisabled();
-  });
-
-  it("disables Next on the last row", async () => {
-    await renderDetail(162);
-    expect(screen.getByLabelText("Next todo")).toBeDisabled();
-  });
-});
-
-describe("TodoDetailPage delete", () => {
-  it("deletes from the overflow menu and navigates back to the list", async () => {
-    await renderDetail(162);
-
-    fireEvent.click(screen.getByLabelText("More actions"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
-
-    await waitFor(() => expect(mockTodoAPI.delete).toHaveBeenCalledWith(162));
-    await waitFor(() => expect(mockOnBack).toHaveBeenCalledWith(162));
-  });
-});
-
-describe("TodoDetailPage keyboard", () => {
-  it("Escape returns to the list", async () => {
-    await renderDetail(100);
-
-    fireEvent.keyDown(document, { key: "Escape" });
-
-    expect(mockOnBack).toHaveBeenCalledWith(100);
-  });
-});
-
-describe("TodoDetailPage sub-issues", () => {
-  it("adds a sub-issue, writing immediately", async () => {
-    await renderDetail(152);
-
-    const input = screen.getByLabelText("New sub-issue title");
-    fireEvent.change(input, { target: { value: "Back up the database" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-
-    await waitFor(() =>
-      expect(mockTodoAPI.create).toHaveBeenCalledWith({
-        title: "Back up the database",
-        parentId: 152,
-        source: "user",
-      })
-    );
-  });
-
-  it("unlinking a sub-issue clears its parent rather than deleting it", async () => {
-    mockTodoAPI.list.mockImplementation((input?: { parentId?: number; }) => {
-      if (input?.parentId === 152) return Promise.resolve([makeTodo(100, "Fix misc code quality issues", todoState)]);
-      if (input?.parentId !== undefined) return Promise.resolve([]);
-      return Promise.resolve(sampleTodos);
-    });
-    await renderDetail(152);
-
-    const unlink = await screen.findByLabelText("Remove Fix misc code quality issues from this todo");
-    fireEvent.click(unlink);
-
-    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, parentId: null }));
-    expect(mockTodoAPI.delete).not.toHaveBeenCalled();
-  });
-
-  it("setting a parent from the picker writes immediately, with no save step", async () => {
-    await renderDetail(100);
-
-    fireEvent.click(screen.getByRole("button", { name: "+ Set parent" }));
-    const picker = await screen.findByRole("dialog", { name: "Nest this todo under" });
-    fireEvent.click(within(picker).getByText("Old prod to new prod migration"));
-
-    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, parentId: 152 }));
-  });
-});
-
 describe("TodoDetailPage shares state with TodosPage", () => {
   it("keeps the active filter after switching from the list to the detail page and back", async () => {
-    function Harness({ showDetail }: { showDetail: boolean; }) {
-      return (
-        <TodosProvider>
-          {showDetail
-            ? <TodoDetailPage todoId={100} onBack={mockOnBack} onNavigate={mockOnNavigate} />
-            : <TodosPage onOpenDetail={() => {}} />}
-        </TodosProvider>
-      );
-    }
-
     const { rerender } = render(<Harness showDetail={false} />);
     await screen.findByText("Old prod to new prod migration");
 
@@ -396,16 +621,6 @@ describe("TodoDetailPage shares state with TodosPage", () => {
   });
 
   it("shows a title edited on the detail page in the list, without a second fetch (F25)", async () => {
-    function Harness({ showDetail }: { showDetail: boolean; }) {
-      return (
-        <TodosProvider>
-          {showDetail
-            ? <TodoDetailPage todoId={100} onBack={mockOnBack} onNavigate={mockOnNavigate} />
-            : <TodosPage onOpenDetail={() => {}} />}
-        </TodosProvider>
-      );
-    }
-
     const { rerender } = render(<Harness showDetail={true} />);
     await screen.findByLabelText("Title");
     const listCallsBeforeEdit = mockTodoAPI.list.mock.calls.length;
