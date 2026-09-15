@@ -433,328 +433,351 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
 
   return (
     <div className={styles.page}>
-      <header className={styles.breadcrumb}>
-        <button className={styles.crumbBtn} type="button" onClick={() => onBack(todo.id)}>
-          Todos
-        </button>
-        <span className={styles.crumbSep}>/</span>
-        <span className={styles.crumbCurrent}>#{todo.id} {todo.title}</span>
-
-        <div className={styles.headerRight}>
-          <span className={styles.stepCounter}>
-            {currentIndex === -1 ? visibleIds.length : `${currentIndex + 1} / ${visibleIds.length}`}
-          </span>
-          <button
-            className={styles.stepBtn}
-            type="button"
-            onClick={handlePrev}
-            disabled={!canPrev}
-            aria-label="Previous todo"
-          >
-            &lsaquo;
+      {
+        /* `.page` only establishes the container query used below (TodoDetailPage.module.scss)
+          -- a container query cannot restyle the element it is measuring, so the padding that
+          actually shrinks at the narrow breakpoint lives on this wrapper instead. */
+      }
+      <div className={styles.pageBody}>
+        <header className={styles.breadcrumb}>
+          <button className={styles.crumbBtn} type="button" onClick={() => onBack(todo.id)}>
+            Todos
           </button>
-          <button
-            className={styles.stepBtn}
-            type="button"
-            onClick={handleNext}
-            disabled={!canNext}
-            aria-label="Next todo"
-          >
-            &rsaquo;
-          </button>
+          <span className={styles.crumbSep}>/</span>
+          <span className={styles.crumbCurrent}>#{todo.id} {todo.title}</span>
 
-          <div className={styles.overflowWrap} ref={overflowWrapRef}>
+          <div className={styles.headerRight}>
+            <span className={styles.stepCounter}>
+              {currentIndex === -1 ? visibleIds.length : `${currentIndex + 1} / ${visibleIds.length}`}
+            </span>
             <button
-              className={styles.overflowBtn}
+              className={styles.stepBtn}
               type="button"
-              onClick={() => setOverflowOpen((v) => !v)}
-              aria-haspopup="menu"
-              aria-expanded={overflowOpen}
-              aria-label="More actions"
+              onClick={handlePrev}
+              disabled={!canPrev}
+              aria-label="Previous todo"
             >
-              &hellip;
+              &lsaquo;
             </button>
-            {overflowOpen && (
-              <div className={styles.overflowMenu} role="menu" aria-label={`Actions for ${todo.title}`}>
-                <button
-                  className={styles.overflowItem}
-                  type="button"
-                  role="menuitem"
-                  disabled={deleting}
-                  onClick={() => void handleDelete()}
-                >
-                  Delete
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
+            <button
+              className={styles.stepBtn}
+              type="button"
+              onClick={handleNext}
+              disabled={!canNext}
+              aria-label="Next todo"
+            >
+              &rsaquo;
+            </button>
 
-      {error && <p className={styles.errorMsg}>{error}</p>}
-
-      <div className={styles.layout}>
-        <div className={styles.main}>
-          <input
-            className={styles.titleInput}
-            value={titleDraft.value}
-            onChange={(e) => titleDraft.onChange(e.target.value)}
-            onFocus={titleDraft.onFocus}
-            onBlur={titleDraft.onBlur}
-            maxLength={500}
-            aria-label="Title"
-          />
-
-          <div className={styles.metaLine}>
-            {todo.parentId === null
-              ? (
-                <button className={styles.linkBtn} type="button" onClick={() => setPicking("parent")}>
-                  + Set parent
-                </button>
-              )
-              : (
-                <span className={styles.parentChip}>
-                  <button
-                    className={styles.parentChipBody}
-                    type="button"
-                    onClick={() => setPicking("parent")}
-                    title="Change parent"
-                  >
-                    <span className={styles.chipId}>#{todo.parentId}</span>
-                    Sub-issue of {todo.parentTitle ?? `#${todo.parentId}`}
-                  </button>
-                  <button
-                    className={styles.chipClear}
-                    type="button"
-                    onClick={() => fireWrite(updateTodo({ id: todo.id, parentId: null }))}
-                    aria-label="Remove parent"
-                  >
-                    x
-                  </button>
-                </span>
-              )}
-
-            {todo.childCount > 0 && (
-              <span
-                className={styles.subProgress}
-                title={`${todo.completedChildCount} of ${todo.childCount} sub-issue${
-                  todo.childCount === 1 ? "" : "s"
-                } done`}
+            <div className={styles.overflowWrap} ref={overflowWrapRef}>
+              <button
+                className={styles.overflowBtn}
+                type="button"
+                onClick={() => setOverflowOpen((v) => !v)}
+                aria-haspopup="menu"
+                aria-expanded={overflowOpen}
+                aria-label="More actions"
               >
-                <SubProgressRing done={todo.completedChildCount} total={todo.childCount} />
-                {todo.completedChildCount}/{todo.childCount}
-              </span>
-            )}
-          </div>
-
-          <div className={styles.notesField} onFocus={notesDraft.onFocus} onBlur={notesDraft.onBlur}>
-            <span className={styles.visuallyHidden} id="todo-detail-notes-label">Notes</span>
-            <MarkdownEditor
-              value={notesDraft.value}
-              onChange={notesDraft.onChange}
-              ariaLabelledBy="todo-detail-notes-label"
-              placeholder="Add notes…"
-              variant="bare"
-              expandable={false}
-              todoId={todo.id}
-            />
-          </div>
-
-          <TodoAttachments todoId={todo.id} onInsertEmbed={insertNotesEmbed} />
-
-          <section className={styles.subSection} aria-label="Sub-issues">
-            <div className={styles.subHeader}>
-              <span className={styles.sectionLabel}>
-                Sub-issues{children.length > 0 ? ` (${children.length})` : ""}
-              </span>
-              <button className={styles.linkBtn} type="button" onClick={() => setPicking("child")} disabled={childBusy}>
-                Link existing
+                &hellip;
               </button>
+              {overflowOpen && (
+                <div className={styles.overflowMenu} role="menu" aria-label={`Actions for ${todo.title}`}>
+                  <button
+                    className={styles.overflowItem}
+                    type="button"
+                    role="menuitem"
+                    disabled={deleting}
+                    onClick={() =>
+                      void handleDelete()}
+                  >
+                    Delete
+                  </button>
+                </div>
+              )}
             </div>
+          </div>
+        </header>
 
-            {children.length > 0 && (
-              <ul className={styles.subList}>
-                {children.map((child) => (
-                  <li key={child.id} className={styles.subRow}>
-                    <span className={styles.chipId}>#{child.id}</span>
-                    <span
-                      className={styles.subDot}
-                      style={{
-                        borderColor: child.state.color,
-                        background: child.state.isCompleted ? child.state.color : "transparent",
-                      }}
-                      aria-hidden="true"
-                    />
-                    <span className={child.state.isCompleted ? styles.subTitleDone : styles.subTitle}>
-                      {child.title}
-                    </span>
-                    <span className={styles.subState}>{child.state.label}</span>
+        {error && <p className={styles.errorMsg}>{error}</p>}
+
+        {
+          /* Three siblings in reading order -- header (title + meta), the properties rail, then
+          the body (notes onward) -- rather than the rail nested after a single "main" block.
+          Below the 48rem container breakpoint (TodoDetailPage.module.scss) these simply stack in
+          that order; at and above it, CSS Grid areas pull the rail beside header+body without
+          touching this order. Either way DOM order is visual reading order, so Tab never departs
+          from what is on screen -- see the comment above `.layout` in the stylesheet. */
+        }
+        <div className={styles.layout}>
+          <div className={styles.mainHeader}>
+            <input
+              className={styles.titleInput}
+              value={titleDraft.value}
+              onChange={(e) => titleDraft.onChange(e.target.value)}
+              onFocus={titleDraft.onFocus}
+              onBlur={titleDraft.onBlur}
+              maxLength={500}
+              aria-label="Title"
+            />
+
+            <div className={styles.metaLine}>
+              {todo.parentId === null
+                ? (
+                  <button className={styles.linkBtn} type="button" onClick={() => setPicking("parent")}>
+                    + Set parent
+                  </button>
+                )
+                : (
+                  <span className={styles.parentChip}>
+                    <button
+                      className={styles.parentChipBody}
+                      type="button"
+                      onClick={() => setPicking("parent")}
+                      title="Change parent"
+                    >
+                      <span className={styles.chipId}>#{todo.parentId}</span>
+                      Sub-issue of {todo.parentTitle ?? `#${todo.parentId}`}
+                    </button>
                     <button
                       className={styles.chipClear}
                       type="button"
-                      disabled={childBusy}
-                      onClick={() => void runChildAction(() => updateTodo({ id: child.id, parentId: null }))}
-                      aria-label={`Remove ${child.title} from this todo`}
+                      onClick={() => fireWrite(updateTodo({ id: todo.id, parentId: null }))}
+                      aria-label="Remove parent"
                     >
                       x
                     </button>
-                  </li>
-                ))}
-              </ul>
-            )}
+                  </span>
+                )}
 
-            <div className={styles.subAdd}>
-              <input
-                className={styles.input}
-                value={newChildTitle}
-                onChange={(e) => setNewChildTitle(e.target.value)}
-                onKeyDown={(e) => {
-                  // Enter adds a sub-issue here. Left alone it would do nothing on a page with
-                  // no form to submit.
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    void addChild();
-                  }
-                }}
-                placeholder="Add a sub-issue and press Enter"
-                aria-label="New sub-issue title"
-                maxLength={500}
-              />
-              <button
-                className={styles.subAddBtn}
-                type="button"
-                onClick={() => void addChild()}
-                disabled={childBusy || newChildTitle.trim().length === 0}
-              >
-                Add
-              </button>
-            </div>
-          </section>
-
-          <p className={styles.metaFooter}>
-            Created {formatDate(todo.createdAt)}
-            {todo.completedAt !== null && <>{" · Completed "}{formatDate(todo.completedAt)}</>}
-            {" · added by "}
-            {todo.source === "user" ? "you" : (todo.sourceLabel ?? "AI")}
-          </p>
-        </div>
-
-        <div className={styles.rail}>
-          <div className={styles.field}>
-            <span className={styles.sectionLabel}>State</span>
-            <Select
-              ariaLabel="State"
-              className={styles.selectTrigger}
-              value={String(todo.state.id)}
-              options={states.map((s) => ({ value: String(s.id), label: s.label, color: s.color }))}
-              onChange={(next) => fireWrite(updateTodo({ id: todo.id, stateId: Number(next) }))}
-            />
-          </div>
-
-          <div className={styles.field}>
-            <span className={styles.sectionLabel}>Priority</span>
-            <Select
-              ariaLabel="Priority"
-              className={styles.selectTrigger}
-              value={String(todo.priority)}
-              options={TODO_PRIORITY_LABELS.map((label, value) => ({ value: String(value), label }))}
-              onChange={(next) => fireWrite(updateTodo({ id: todo.id, priority: Number(next) }))}
-            />
-          </div>
-
-          <div
-            className={styles.field}
-            onBlur={(e) => {
-              if (blurLeavesField(e, "Project")) void commitProject(projectDraft);
-            }}
-          >
-            <span className={styles.sectionLabel}>Project</span>
-            <Combobox
-              ariaLabel="Project"
-              className={styles.selectTrigger}
-              value={projectDraft}
-              options={projects.map((p) => p.name)}
-              onChange={setProjectDraft}
-              onCommit={(v) => void commitProject(v)}
-              maxLength={60}
-            />
-          </div>
-
-          <div
-            className={styles.field}
-            onBlur={(e) => {
-              if (blurLeavesField(e, "Add label")) void commitLabel(labelDraft);
-            }}
-          >
-            <span className={styles.sectionLabel}>Labels</span>
-            <div className={styles.labelRow}>
-              {todo.labels.map((label) => (
+              {todo.childCount > 0 && (
                 <span
-                  key={label.id}
-                  className={styles.labelChip}
-                  style={{ borderColor: `${label.color}66`, color: label.color }}
+                  className={styles.subProgress}
+                  title={`${todo.completedChildCount} of ${todo.childCount} sub-issue${
+                    todo.childCount === 1 ? "" : "s"
+                  } done`}
                 >
-                  {label.name}
-                  <button
-                    type="button"
-                    className={styles.labelRemove}
-                    onClick={() => fireWrite(toggleTodoLabel(todo, label.id))}
-                    aria-label={`Remove label ${label.name}`}
-                  >
-                    &times;
-                  </button>
+                  <SubProgressRing done={todo.completedChildCount} total={todo.childCount} />
+                  {todo.completedChildCount}/{todo.childCount}
                 </span>
-              ))}
+              )}
+            </div>
+          </div>
+
+          <div className={styles.rail}>
+            <div className={styles.field}>
+              <span className={styles.sectionLabel}>State</span>
+              <Select
+                ariaLabel="State"
+                className={styles.selectTrigger}
+                value={String(todo.state.id)}
+                options={states.map((s) => ({ value: String(s.id), label: s.label, color: s.color }))}
+                onChange={(next) => fireWrite(updateTodo({ id: todo.id, stateId: Number(next) }))}
+              />
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.sectionLabel}>Priority</span>
+              <Select
+                ariaLabel="Priority"
+                className={styles.selectTrigger}
+                value={String(todo.priority)}
+                options={TODO_PRIORITY_LABELS.map((label, value) => ({ value: String(value), label }))}
+                onChange={(next) => fireWrite(updateTodo({ id: todo.id, priority: Number(next) }))}
+              />
+            </div>
+
+            <div
+              className={styles.field}
+              onBlur={(e) => {
+                if (blurLeavesField(e, "Project")) void commitProject(projectDraft);
+              }}
+            >
+              <span className={styles.sectionLabel}>Project</span>
               <Combobox
-                ariaLabel="Add label"
-                className={styles.labelBox}
-                value={labelDraft}
-                options={labels
-                  .map((l) => l.name)
-                  .filter((n) => !todo.labels.some((picked) => picked.name.toLowerCase() === n.toLowerCase()))}
-                onChange={setLabelDraft}
-                onCommit={(value) => void commitLabel(value)}
-                maxLength={40}
+                ariaLabel="Project"
+                className={styles.selectTrigger}
+                value={projectDraft}
+                options={projects.map((p) => p.name)}
+                onChange={setProjectDraft}
+                onCommit={(v) => void commitProject(v)}
+                maxLength={60}
+              />
+            </div>
+
+            <div
+              className={`${styles.field} ${styles.fieldWide}`}
+              onBlur={(e) => {
+                if (blurLeavesField(e, "Add label")) void commitLabel(labelDraft);
+              }}
+            >
+              <span className={styles.sectionLabel}>Labels</span>
+              <div className={styles.labelRow}>
+                {todo.labels.map((label) => (
+                  <span
+                    key={label.id}
+                    className={styles.labelChip}
+                    style={{ borderColor: `${label.color}66`, color: label.color }}
+                  >
+                    {label.name}
+                    <button
+                      type="button"
+                      className={styles.labelRemove}
+                      onClick={() => fireWrite(toggleTodoLabel(todo, label.id))}
+                      aria-label={`Remove label ${label.name}`}
+                    >
+                      &times;
+                    </button>
+                  </span>
+                ))}
+                <Combobox
+                  ariaLabel="Add label"
+                  className={styles.labelBox}
+                  value={labelDraft}
+                  options={labels
+                    .map((l) => l.name)
+                    .filter((n) => !todo.labels.some((picked) => picked.name.toLowerCase() === n.toLowerCase()))}
+                  onChange={setLabelDraft}
+                  onCommit={(value) => void commitLabel(value)}
+                  maxLength={40}
+                />
+              </div>
+            </div>
+
+            <div
+              className={styles.field}
+              onBlur={(e) => {
+                if (blurLeavesField(e, "Milestone")) commitMilestone(milestoneDraft);
+              }}
+            >
+              <span className={styles.sectionLabel}>Milestone</span>
+              <Combobox
+                ariaLabel="Milestone"
+                className={styles.selectTrigger}
+                value={milestoneDraft}
+                options={milestones}
+                onChange={setMilestoneDraft}
+                onCommit={(v) => commitMilestone(v)}
+                maxLength={120}
+              />
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.sectionLabel}>Start</span>
+              <DatePicker
+                ariaLabel="Start date"
+                className={styles.selectTrigger}
+                value={todo.startDate ?? ""}
+                onChange={(v) => fireWrite(updateTodo({ id: todo.id, startDate: v.length > 0 ? v : null }))}
+              />
+            </div>
+
+            <div className={styles.field}>
+              <span className={styles.sectionLabel}>Due</span>
+              <DatePicker
+                ariaLabel="Due date"
+                className={styles.selectTrigger}
+                value={todo.dueDate ?? ""}
+                onChange={(v) => fireWrite(updateTodo({ id: todo.id, dueDate: v.length > 0 ? v : null }))}
               />
             </div>
           </div>
 
-          <div
-            className={styles.field}
-            onBlur={(e) => {
-              if (blurLeavesField(e, "Milestone")) commitMilestone(milestoneDraft);
-            }}
-          >
-            <span className={styles.sectionLabel}>Milestone</span>
-            <Combobox
-              ariaLabel="Milestone"
-              className={styles.selectTrigger}
-              value={milestoneDraft}
-              options={milestones}
-              onChange={setMilestoneDraft}
-              onCommit={(v) => commitMilestone(v)}
-              maxLength={120}
-            />
-          </div>
+          <div className={styles.mainBody}>
+            <div className={styles.notesField} onFocus={notesDraft.onFocus} onBlur={notesDraft.onBlur}>
+              <span className={styles.visuallyHidden} id="todo-detail-notes-label">Notes</span>
+              <MarkdownEditor
+                value={notesDraft.value}
+                onChange={notesDraft.onChange}
+                ariaLabelledBy="todo-detail-notes-label"
+                placeholder="Add notes…"
+                variant="bare"
+                expandable={false}
+                todoId={todo.id}
+              />
+            </div>
 
-          <div className={styles.field}>
-            <span className={styles.sectionLabel}>Start</span>
-            <DatePicker
-              ariaLabel="Start date"
-              className={styles.selectTrigger}
-              value={todo.startDate ?? ""}
-              onChange={(v) => fireWrite(updateTodo({ id: todo.id, startDate: v.length > 0 ? v : null }))}
-            />
-          </div>
+            <TodoAttachments todoId={todo.id} onInsertEmbed={insertNotesEmbed} />
 
-          <div className={styles.field}>
-            <span className={styles.sectionLabel}>Due</span>
-            <DatePicker
-              ariaLabel="Due date"
-              className={styles.selectTrigger}
-              value={todo.dueDate ?? ""}
-              onChange={(v) => fireWrite(updateTodo({ id: todo.id, dueDate: v.length > 0 ? v : null }))}
-            />
+            <section className={styles.subSection} aria-label="Sub-issues">
+              <div className={styles.subHeader}>
+                <span className={styles.sectionLabel}>
+                  Sub-issues{children.length > 0 ? ` (${children.length})` : ""}
+                </span>
+                <button
+                  className={styles.linkBtn}
+                  type="button"
+                  onClick={() => setPicking("child")}
+                  disabled={childBusy}
+                >
+                  Link existing
+                </button>
+              </div>
+
+              {children.length > 0 && (
+                <ul className={styles.subList}>
+                  {children.map((child) => (
+                    <li key={child.id} className={styles.subRow}>
+                      <span className={styles.chipId}>#{child.id}</span>
+                      <span
+                        className={styles.subDot}
+                        style={{
+                          borderColor: child.state.color,
+                          background: child.state.isCompleted ? child.state.color : "transparent",
+                        }}
+                        aria-hidden="true"
+                      />
+                      <span className={child.state.isCompleted ? styles.subTitleDone : styles.subTitle}>
+                        {child.title}
+                      </span>
+                      <span className={styles.subState}>{child.state.label}</span>
+                      <button
+                        className={styles.chipClear}
+                        type="button"
+                        disabled={childBusy}
+                        onClick={() => void runChildAction(() => updateTodo({ id: child.id, parentId: null }))}
+                        aria-label={`Remove ${child.title} from this todo`}
+                      >
+                        x
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <div className={styles.subAdd}>
+                <input
+                  className={styles.input}
+                  value={newChildTitle}
+                  onChange={(e) => setNewChildTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    // Enter adds a sub-issue here. Left alone it would do nothing on a page with
+                    // no form to submit.
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void addChild();
+                    }
+                  }}
+                  placeholder="Add a sub-issue and press Enter"
+                  aria-label="New sub-issue title"
+                  maxLength={500}
+                />
+                <button
+                  className={styles.subAddBtn}
+                  type="button"
+                  onClick={() => void addChild()}
+                  disabled={childBusy || newChildTitle.trim().length === 0}
+                >
+                  Add
+                </button>
+              </div>
+            </section>
+
+            <p className={styles.metaFooter}>
+              Created {formatDate(todo.createdAt)}
+              {todo.completedAt !== null && <>{" · Completed "}{formatDate(todo.completedAt)}</>}
+              {" · added by "}
+              {todo.source === "user" ? "you" : (todo.sourceLabel ?? "AI")}
+            </p>
           </div>
         </div>
       </div>

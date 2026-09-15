@@ -3,6 +3,23 @@
 .page {
   @include page-container;
   max-width: clamp(40rem, 78vw, 96rem);
+  // Establishes the query container for `.pageBody`'s, `.layout`'s and `.rail`'s breakpoint
+  // below. This follows the PAGE's own width, not the viewport -- the nav sidebar and the right
+  // sidebar both eat into the window, so a `@media` query on viewport width would stack the rail
+  // long before this page actually runs out of room, or keep it side-by-side past the point it
+  // has.
+  //
+  // The mixin's own padding moves to `.pageBody` below rather than staying here: a container
+  // query never matches the element establishing the container against its own box, only its
+  // descendants -- confirmed empirically (a `@container` block targeting `.page` itself left its
+  // padding untouched at every width). `.pageBody` is a child of `.page`, so it is a valid query
+  // target the same way `.layout` and `.rail` already are.
+  padding: 0;
+  container-type: inline-size;
+}
+
+.pageBody {
+  padding: 32px 40px;
 }
 
 .stateMsg {
@@ -132,22 +149,37 @@
   }
 }
 
-/* --- Layout: main column + properties rail --- */
+/* --- Layout: header + properties rail + body --- */
 
+// Three DOM siblings -- `.mainHeader` (title + meta line), `.rail` (properties), `.mainBody`
+// (notes onward) -- in that literal document order, which is also the narrow-mode reading order
+// (TodoDetailPage.tsx renders them in exactly this sequence, in one comment above `.layout`
+// there). Wide mode places the rail beside header+body with CSS Grid areas, which changes where
+// each block sits on screen but never reorders the DOM: `grid-template-areas` placement, unlike
+// the `order` property, does not affect keyboard/tab sequence, so Tab always follows this same
+// header -> rail -> body sequence regardless of which breakpoint is active.
 .layout {
-  display: flex;
-  align-items: flex-start;
-  gap: 32px;
+  display: grid;
+  grid-template-columns: 1fr 17rem;
+  grid-template-areas:
+    "header rail"
+    "body   rail";
+  column-gap: 32px;
+  align-items: start;
 }
 
-.main {
-  flex: 1;
+.mainHeader {
+  grid-area: header;
+  min-width: 0;
+}
+
+.mainBody {
+  grid-area: body;
   min-width: 0;
 }
 
 .rail {
-  flex-shrink: 0;
-  width: 17rem;
+  grid-area: rail;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -158,6 +190,40 @@
   -webkit-backdrop-filter: blur(24px) saturate(1.5);
   border: 1px solid rgba(122, 162, 247, 0.12);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+// Narrow: below 48rem of PAGE container width (see `.page`'s `container-type` above), the grid
+// collapses to one column, stacked in DOM order -- header, rail, body -- and the rail's own
+// fields wrap into a compact grid instead of one full-width row each. `.pageBody`'s side padding
+// also tightens here (top padding is untouched -- only the sides were ever the problem at a
+// narrow width).
+@container (max-width: 48rem) {
+  .pageBody {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "header"
+      "rail"
+      "body";
+    row-gap: 20px;
+  }
+
+  .rail {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(10rem, 1fr));
+    gap: 14px;
+  }
+
+  // Labels holds a chip list, not a single control, so it claims the full row instead of
+  // competing for a 10rem cell like the other fields.
+  .fieldWide {
+    grid-column: 1 / -1;
+  }
 }
 
 /* --- Title + meta line --- */
