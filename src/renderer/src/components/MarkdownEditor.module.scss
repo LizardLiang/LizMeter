@@ -332,6 +332,43 @@
   }
 }
 
+// Linear-style description field: plain body text, no frame. Every rule here only ever removes
+// chrome or a length cap -- text colour, caret, selection, placeholder and every token/live-
+// preview style above are untouched, so the two variants read identically once focused.
+.wrapperBare {
+  :global(.cm-editor) {
+    border: none;
+    border-radius: 0;
+    background: transparent;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    overflow: visible;
+  }
+
+  :global(.cm-editor.cm-focused) {
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  // CodeMirror scrolls internally only when its content exceeds a capped height. Bare mode sets
+  // no `maxHeight` (see the `sizing` branch in MarkdownEditor.tsx), so there is never anything to
+  // scroll here -- this just makes that explicit and keeps a wrapped long line from clipping.
+  :global(.cm-scroller) {
+    overflow: visible;
+  }
+
+  // Zero horizontal padding, same as the title input above it (`padding: 4px 0` in
+  // TodoDetailPage.module.scss), so the two fields' text lines up on the same left edge.
+  // Vertical padding stays -- it only affects caret/line spacing, never the left edge.
+  :global(.cm-content) {
+    padding: 4px 0;
+  }
+
+  :global(.cm-line) {
+    padding: 0;
+  }
+}
+
 // Inside the expanded surface the flex body owns the height, so the editor stretches to it
 // instead of carrying its own min/max. The rounded chrome goes too -- the card already has it.
 .wrapperFill {

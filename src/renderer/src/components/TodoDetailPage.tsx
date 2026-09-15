@@ -216,7 +216,6 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
   const todo = contextTodo ?? fallbackTodo;
 
   const [picking, setPicking] = useState<"parent" | "child" | null>(null);
-  const [notesExpanded, setNotesExpanded] = useState(false);
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [children, setChildren] = useState<Todo[]>([]);
@@ -413,13 +412,14 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
         setOverflowOpen(false);
         return;
       }
-      // The picker and the expanded notes editor each handle their own Escape -- see
-      // `TodoEditDialog`'s identical guard. Without it one press would also navigate away.
-      if (picking === null && !notesExpanded) onBack(todoId);
+      // The picker and the overflow menu each handle their own Escape -- see `TodoEditDialog`'s
+      // identical guard. Without it one press would also navigate away. The notes editor here has
+      // no expanded surface (`expandable={false}`), so there is no third guard to add.
+      if (picking === null) onBack(todoId);
     }
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [onBack, todoId, picking, notesExpanded, overflowOpen]);
+  }, [onBack, todoId, picking, overflowOpen]);
 
   if (todo === null) {
     return loading
@@ -548,15 +548,14 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
           </div>
 
           <div className={styles.notesField} onFocus={notesDraft.onFocus} onBlur={notesDraft.onBlur}>
-            <span className={styles.sectionLabel} id="todo-detail-notes-label">Notes</span>
+            <span className={styles.visuallyHidden} id="todo-detail-notes-label">Notes</span>
             <MarkdownEditor
               value={notesDraft.value}
               onChange={notesDraft.onChange}
               ariaLabelledBy="todo-detail-notes-label"
-              placeholder="Markdown supported"
-              expandable
-              modalTitle="Edit Notes"
-              onModalOpenChange={setNotesExpanded}
+              placeholder="Add notes…"
+              variant="bare"
+              expandable={false}
               todoId={todo.id}
             />
           </div>

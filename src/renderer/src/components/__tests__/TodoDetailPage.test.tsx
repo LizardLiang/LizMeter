@@ -280,6 +280,18 @@ describe("TodoDetailPage fields", () => {
   });
 });
 
+describe("TodoDetailPage notes field", () => {
+  it("renders the notes editor frameless, findable by its accessible name, with no expand button", async () => {
+    await renderDetail(100);
+
+    // `ariaLabelledBy` lands on `.cm-content`, the textbox CodeMirror mounts -- so the visually
+    // hidden "Notes" label still resolves through Testing Library's accessible-name lookup even
+    // though nothing reading "Notes" is visible on screen (Linear shows no field label at all).
+    expect(screen.getByLabelText("Notes")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Open full editor" })).toBeNull();
+  });
+});
+
 describe("TodoDetailPage stays open when a write moves the row out of the active filter (BLOCKER 1)", () => {
   it("keeps the page open and shows the row as filtered-out, not gone", async () => {
     const { rerender } = render(<Harness showDetail={false} />);

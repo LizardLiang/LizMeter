@@ -10,6 +10,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { NOTES_MAX_LENGTH, type TodoAttachment } from "../../../../shared/types.ts";
 import { livePreviewPlugin } from "../../editor/livePreviewPlugin.ts";
+import styles from "../MarkdownEditor.module.scss";
 import { MarkdownEditor } from "../MarkdownEditor.tsx";
 
 /** The single `.cm-content` element CodeMirror mounts inside the given root. */
@@ -345,6 +346,26 @@ describe("MarkdownEditor", () => {
       await waitFor(() => {
         expect(container.querySelector(".cm-line .tok-keyword")).not.toBeNull();
       });
+    });
+  });
+
+  describe("variant", () => {
+    it("applies the framed wrapper class by default", () => {
+      const { container } = render(<MarkdownEditor value="" onChange={vi.fn()} />);
+
+      const wrapper = container.querySelector(`.${styles.wrapper}`);
+      expect(wrapper).not.toBeNull();
+      expect(wrapper?.className).not.toContain(styles.wrapperBare);
+    });
+
+    it("applies the bare wrapper class and renders no expand button in bare mode", () => {
+      // Mirrors how TodoDetailPage calls this: `variant="bare"` with `expandable={false}`
+      // (the default), the Linear-style description field with no frame and no expand affordance.
+      const { container } = render(<MarkdownEditor value="" onChange={vi.fn()} variant="bare" />);
+
+      const wrapper = container.querySelector(`.${styles.wrapper}`);
+      expect(wrapper?.className).toContain(styles.wrapperBare);
+      expect(screen.queryByRole("button", { name: "Open full editor" })).toBeNull();
     });
   });
 

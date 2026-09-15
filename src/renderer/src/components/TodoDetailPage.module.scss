@@ -283,6 +283,20 @@
   margin-bottom: 5px;
 }
 
+// Keeps the notes field named for assistive tech (`ariaLabelledBy` on MarkdownEditor) without
+// the visible "Notes" heading Linear's description field does not have.
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* --- Sub-issues --- */
 
 .subSection {

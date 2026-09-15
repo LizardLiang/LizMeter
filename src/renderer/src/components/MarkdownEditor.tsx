@@ -15,10 +15,20 @@ interface MarkdownEditorProps {
   value: string;
   onChange: (next: string) => void;
   placeholder?: string;
-  /** px. Ignored when `fillHeight` is set. */
+  /** px. Ignored when `fillHeight` is set or `variant` is `"bare"`. */
   minHeight?: number;
-  /** px. Ignored when `fillHeight` is set. */
+  /** px. Ignored when `fillHeight` is set or `variant` is `"bare"`. */
   maxHeight?: number;
+  /**
+   * `"framed"` (default) is the glass input surface used by `TodoEditDialog` and the create
+   * dialog: bordered, capped height, inner scroll, focus ring. `"bare"` drops all of that for a
+   * Linear-style description field that reads as page body text -- no chrome, no height cap, no
+   * inner scroll, and no `.cm-content`/`.cm-line` horizontal padding, so the text's left edge
+   * lines up with whatever sits above it. Every text colour, caret, selection, placeholder and
+   * live-preview/token style stays identical in both variants; only the chrome around them
+   * changes.
+   */
+  variant?: "framed" | "bare";
   disabled?: boolean;
   /**
    * Renders markdown in place and reveals the raw source of the line the cursor is on.
@@ -87,6 +97,9 @@ const BASIC_SETUP = {
  * holds, because the MCP writer never passes through this editor.
  */
 const lengthCap = EditorState.changeFilter.of((tr) => tr.newDoc.length <= NOTES_MAX_LENGTH);
+
+/** Roughly two lines at the bare variant's font size, just enough to keep an empty field clickable. */
+const BARE_MIN_HEIGHT = 48;
 
 /**
  * CodeMirror's `defaultKeymap` binds Mod-Enter to `insertBlankLine`, and the create dialog
@@ -524,6 +537,7 @@ export function MarkdownEditor(
     placeholder,
     minHeight = 160,
     maxHeight = 320,
+    variant = "framed",
     disabled = false,
     // Defaulted here rather than at the create dialog's (TodoEditDialog) call site: the dialog
     // is owned by another change in flight, and every caller of this editor wants live preview anyway.
@@ -584,15 +598,25 @@ export function MarkdownEditor(
     onModalOpenChange?.(modalOpen);
   }, [modalOpen, onModalOpenChange]);
 
-  // `@uiw` writes these as inline styles on `.cm-editor`, so the two shapes are exclusive:
-  // in the modal the flex body owns the height and any min/max here would fight it.
+  // `@uiw` writes these as inline styles on `.cm-editor`, so the three shapes are exclusive: in
+  // the modal the flex body owns the height and any min/max here would fight it, and bare mode
+  // deliberately passes no `maxHeight` at all -- the editor grows with its content and the page
+  // scrolls, rather than scrolling inside a fixed box.
   const sizing = fillHeight
     ? { height: "100%" }
+    : variant === "bare"
+    ? { minHeight: `${BARE_MIN_HEIGHT}px` }
     : { minHeight: `${minHeight}px`, maxHeight: `${maxHeight}px` };
+
+  const wrapperClassName = fillHeight
+    ? `${styles.wrapper} ${styles.wrapperFill}`
+    : variant === "bare"
+    ? `${styles.wrapper} ${styles.wrapperBare}`
+    : styles.wrapper;
 
   return (
     <>
-      <div className={fillHeight ? `${styles.wrapper} ${styles.wrapperFill}` : styles.wrapper}>
+      <div className={wrapperClassName}>
         <CodeMirror
           value={value}
           onChange={onChange}
