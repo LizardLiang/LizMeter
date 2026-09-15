@@ -11,6 +11,7 @@ import type {
   TimerSettings,
 } from "../../../shared/types.ts";
 import { MusicPlayerProvider, useMusicPlayer } from "../contexts/MusicPlayerContext.tsx";
+import { TodosProvider } from "../contexts/TodosContext.tsx";
 import { useClaudeTracker } from "../hooks/useClaudeTracker.ts";
 import { useNotificationSound } from "../hooks/useNotificationSound.ts";
 import { useSessionHistory } from "../hooks/useSessionHistory.ts";
@@ -41,6 +42,7 @@ const SettingsPage = lazy(() => import("./SettingsPage.tsx").then(m => ({ defaul
 const StatsPage = lazy(() => import("./StatsPage.tsx").then(m => ({ default: m.StatsPage })));
 const TagsPage = lazy(() => import("./TagsPage.tsx").then(m => ({ default: m.TagsPage })));
 const TodosPage = lazy(() => import("./TodosPage.tsx").then(m => ({ default: m.TodosPage })));
+const TodoDetailPage = lazy(() => import("./TodoDetailPage.tsx").then(m => ({ default: m.TodoDetailPage })));
 import styles from "./TomatoClock.module.scss";
 
 const DEFAULT_SETTINGS: TimerSettings = {
@@ -108,6 +110,9 @@ export function TomatoClock() {
   // Which Todo row to scroll to and flash when the Todos page next mounts, set by clicking a
   // Todo-linked IssueBadge in History.
   const [highlightTodoId, setHighlightTodoId] = useState<number | null>(null);
+  // The todo open on the full-page detail route ("todo-detail"). Null whenever that page is not
+  // the active one.
+  const [detailTodoId, setDetailTodoId] = useState<number | null>(null);
 
   // Claude Code settings
   const [claudeProjectDirName, setClaudeProjectDirName] = useState<string | null>(null);
@@ -477,6 +482,18 @@ export function TomatoClock() {
     setHighlightTodoId(null);
   }, []);
 
+  const handleOpenTodoDetail = useCallback((todoId: number) => {
+    setDetailTodoId(todoId);
+    setActivePage("todo-detail");
+  }, []);
+
+  // Back from the detail page (breadcrumb, Escape, delete, or the todo vanishing) reuses the
+  // list's existing highlight path -- it already expands the group, scrolls, and flashes the row.
+  const handleBackFromTodoDetail = useCallback((todoId: number) => {
+    setHighlightTodoId(todoId);
+    setActivePage("todos");
+  }, []);
+
   const handlePendingTagAdd = useCallback((tagId: number) => {
     setPendingTagIds((prev) => (prev.includes(tagId) ? prev : [...prev, tagId]));
   }, []);
@@ -554,72 +571,78 @@ export function TomatoClock() {
 
   return (
     <MusicPlayerProvider>
-      <TomatoClockInner
-        activePage={activePage}
-        onNavigate={setActivePage}
-        onTimerStart={() => void start()}
-        timerStatus={state.status}
-        isAnyTimerActive={isAnyTimerActive}
-        isPomodoroActive={isPomodoroActive}
-        isStopwatchActive={isStopwatchActive}
-        state={state}
-        stopwatch={stopwatch}
-        appMode={appMode}
-        handleModeChange={handleModeChange}
-        pendingIssue={pendingIssue}
-        saveError={saveError}
-        handlePause={handlePause}
-        handleResume={handleResume}
-        handleReset={handleReset}
-        dismissCompletion={dismissCompletion}
-        setTimerType={setTimerType}
-        setTitle={setTitle}
-        setRemaining={setRemaining}
-        handleIssueSelect={handleIssueSelect}
-        pickerState={pickerState}
-        pickerOpenKey={pickerOpenKey}
-        claudeTracker={claudeTracker}
-        handlePickerConfirm={handlePickerConfirm}
-        handlePickerSkip={handlePickerSkip}
-        handlePickerToggleCollapse={handlePickerToggleCollapse}
-        showPicker={showPicker}
-        showStats={showStats}
-        claudeIdleThresholdMinutes={claudeIdleThresholdMinutes}
-        handleManageSessions={handleManageSessions}
-        handleAddNewSession={handleAddNewSession}
-        tagManager={tagManager}
-        pendingTagIds={pendingTagIds}
-        handlePendingTagAdd={handlePendingTagAdd}
-        handlePendingTagRemove={handlePendingTagRemove}
-        handleStopwatchStart={handleStopwatchStart}
-        handleStopwatchPause={handleStopwatchPause}
-        handleStopwatchResume={handleStopwatchResume}
-        stopwatchSettings={stopwatchSettings}
-        linkedStopwatchClaudeSession={linkedStopwatchClaudeSession}
-        handleLinkedStopwatchClaudeSessionChange={handleLinkedStopwatchClaudeSessionChange}
-        linkedPomodoroClaudeSession={linkedPomodoroClaudeSession}
-        handlePomodoroClaudeSessionSelect={handlePomodoroClaudeSessionSelect}
-        sessions={sessions}
-        total={total}
-        historyLoading={historyLoading}
-        historyError={historyError}
-        activeTagFilter={activeTagFilter}
-        setTagFilter={setTagFilter}
-        deleteSession={deleteSession}
-        loadMore={loadMore}
-        logWork={logWork}
-        refresh={refresh}
-        worklogLoading={worklogLoading}
-        handleResumeSession={handleResumeSession}
-        effectiveSettings={effectiveSettings}
-        saveSettings={saveSettings}
-        setStopwatchSettings={setStopwatchSettings}
-        soundEnabled={soundEnabled}
-        onSoundEnabledChange={setSoundEnabled}
-        highlightTodoId={highlightTodoId}
-        onNavigateToTodo={handleNavigateToTodo}
-        onHighlightConsumed={handleHighlightConsumed}
-      />
+      <TodosProvider>
+        <TomatoClockInner
+          activePage={activePage}
+          onNavigate={setActivePage}
+          onTimerStart={() => void start()}
+          timerStatus={state.status}
+          isAnyTimerActive={isAnyTimerActive}
+          isPomodoroActive={isPomodoroActive}
+          isStopwatchActive={isStopwatchActive}
+          state={state}
+          stopwatch={stopwatch}
+          appMode={appMode}
+          handleModeChange={handleModeChange}
+          pendingIssue={pendingIssue}
+          saveError={saveError}
+          handlePause={handlePause}
+          handleResume={handleResume}
+          handleReset={handleReset}
+          dismissCompletion={dismissCompletion}
+          setTimerType={setTimerType}
+          setTitle={setTitle}
+          setRemaining={setRemaining}
+          handleIssueSelect={handleIssueSelect}
+          pickerState={pickerState}
+          pickerOpenKey={pickerOpenKey}
+          claudeTracker={claudeTracker}
+          handlePickerConfirm={handlePickerConfirm}
+          handlePickerSkip={handlePickerSkip}
+          handlePickerToggleCollapse={handlePickerToggleCollapse}
+          showPicker={showPicker}
+          showStats={showStats}
+          claudeIdleThresholdMinutes={claudeIdleThresholdMinutes}
+          handleManageSessions={handleManageSessions}
+          handleAddNewSession={handleAddNewSession}
+          tagManager={tagManager}
+          pendingTagIds={pendingTagIds}
+          handlePendingTagAdd={handlePendingTagAdd}
+          handlePendingTagRemove={handlePendingTagRemove}
+          handleStopwatchStart={handleStopwatchStart}
+          handleStopwatchPause={handleStopwatchPause}
+          handleStopwatchResume={handleStopwatchResume}
+          stopwatchSettings={stopwatchSettings}
+          linkedStopwatchClaudeSession={linkedStopwatchClaudeSession}
+          handleLinkedStopwatchClaudeSessionChange={handleLinkedStopwatchClaudeSessionChange}
+          linkedPomodoroClaudeSession={linkedPomodoroClaudeSession}
+          handlePomodoroClaudeSessionSelect={handlePomodoroClaudeSessionSelect}
+          sessions={sessions}
+          total={total}
+          historyLoading={historyLoading}
+          historyError={historyError}
+          activeTagFilter={activeTagFilter}
+          setTagFilter={setTagFilter}
+          deleteSession={deleteSession}
+          loadMore={loadMore}
+          logWork={logWork}
+          refresh={refresh}
+          worklogLoading={worklogLoading}
+          handleResumeSession={handleResumeSession}
+          effectiveSettings={effectiveSettings}
+          saveSettings={saveSettings}
+          setStopwatchSettings={setStopwatchSettings}
+          soundEnabled={soundEnabled}
+          onSoundEnabledChange={setSoundEnabled}
+          highlightTodoId={highlightTodoId}
+          onNavigateToTodo={handleNavigateToTodo}
+          onHighlightConsumed={handleHighlightConsumed}
+          detailTodoId={detailTodoId}
+          onOpenTodoDetail={handleOpenTodoDetail}
+          onBackFromTodoDetail={handleBackFromTodoDetail}
+          onNavigateTodoDetail={setDetailTodoId}
+        />
+      </TodosProvider>
     </MusicPlayerProvider>
   );
 }
@@ -695,6 +718,10 @@ interface TomatoClockInnerProps {
   highlightTodoId: number | null;
   onNavigateToTodo: (todoId: number) => void;
   onHighlightConsumed: () => void;
+  detailTodoId: number | null;
+  onOpenTodoDetail: (todoId: number) => void;
+  onBackFromTodoDetail: (todoId: number) => void;
+  onNavigateTodoDetail: (todoId: number) => void;
 }
 
 function TomatoClockInner(props: TomatoClockInnerProps) {
@@ -764,6 +791,10 @@ function TomatoClockInner(props: TomatoClockInnerProps) {
     highlightTodoId,
     onNavigateToTodo,
     onHighlightConsumed,
+    detailTodoId,
+    onOpenTodoDetail,
+    onBackFromTodoDetail,
+    onNavigateTodoDetail,
   } = props;
 
   return (
@@ -899,8 +930,22 @@ function TomatoClockInner(props: TomatoClockInnerProps) {
           )}
 
           {activePage === "todos" && (
-            <TodosPage highlightTodoId={highlightTodoId} onHighlightConsumed={onHighlightConsumed} />
+            <TodosPage
+              highlightTodoId={highlightTodoId}
+              onHighlightConsumed={onHighlightConsumed}
+              onOpenDetail={onOpenTodoDetail}
+            />
           )}
+
+          {activePage === "todo-detail" && detailTodoId !== null && (
+            <TodoDetailPage
+              key={detailTodoId}
+              todoId={detailTodoId}
+              onBack={onBackFromTodoDetail}
+              onNavigate={onNavigateTodoDetail}
+            />
+          )}
+
           {activePage === "stats" && <StatsPage />}
 
           {activePage === "tags" && (

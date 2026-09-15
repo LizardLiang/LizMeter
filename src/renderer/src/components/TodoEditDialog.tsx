@@ -1,13 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   CreateTodoInput,
   CreateTodoLabelInput,
   CreateTodoProjectInput,
-  Todo,
   TodoLabel,
   TodoProject,
   TodoState,
-  UpdateTodoInput,
 } from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS } from "../../../shared/types.ts";
 import { Combobox } from "./Combobox.tsx";
@@ -19,11 +17,9 @@ import styles from "./TodoEditDialog.module.scss";
 import { TodoPicker } from "./TodoPicker.tsx";
 
 interface Props {
-  /** Null opens the dialog in create mode. */
-  todo: Todo | null;
-  /** Create mode only: the state the new todo lands in. Falls back to the default state. */
+  /** The state the new todo lands in. Falls back to the default state. */
   defaultStateId?: number;
-  /** Create mode only: pre-fills the parent chip, so "add sub-issue" opens ready to type a title. */
+  /** Pre-fills the parent chip, so "add sub-issue" opens ready to type a title. */
   defaultParent?: { id: number; title: string; };
   states: TodoState[];
   projects: TodoProject[];
@@ -33,32 +29,23 @@ interface Props {
   onCreateProject: (input: CreateTodoProjectInput) => Promise<TodoProject>;
   /** Get-or-create, so naming an existing label in the Labels box reuses it. */
   onCreateLabel: (input: CreateTodoLabelInput) => Promise<TodoLabel>;
-  onSave: (input: UpdateTodoInput) => Promise<void>;
   onCreate: (input: CreateTodoInput) => Promise<void>;
-  onDelete: (id: number) => Promise<void>;
   onClose: () => void;
 }
 
 /** The state a new todo starts in: the group it was added from, else the workflow default. */
-function initialStateId(todo: Todo | null, defaultStateId: number | undefined, states: TodoState[]): number {
-  if (todo) return todo.state.id;
+function initialStateId(defaultStateId: number | undefined, states: TodoState[]): number {
   if (defaultStateId !== undefined) return defaultStateId;
   return states.find((s) => s.isDefault)?.id ?? states[0]?.id ?? 0;
 }
 
-/** The parent chip's label, falling back to the bare id if the join did not carry a title. */
-function initialParent(
-  todo: Todo | null,
-  defaultParent: { id: number; title: string; } | undefined,
-): { id: number; title: string; } | null {
-  if (todo === null) return defaultParent ?? null;
-  if (todo.parentId === null) return null;
-  return { id: todo.parentId, title: todo.parentTitle ?? "#" + todo.parentId };
-}
-
+/**
+ * The create dialog for a new todo. Editing an existing one happens on `TodoDetailPage` instead
+ * -- this component used to serve both, but the full page replaced its edit mode (see
+ * `.claude/.Arena/tactical-plans/2026-09-15-todo-detail-full-page.md`).
+ */
 export function TodoEditDialog(
   {
-    todo,
     defaultStateId,
     defaultParent,
     states,
@@ -67,67 +54,45 @@ export function TodoEditDialog(
     milestones,
     onCreateProject,
     onCreateLabel,
-    onSave,
     onCreate,
-    onDelete,
     onClose,
   }: Props,
 ) {
-  const creating = todo === null;
-
-  const [title, setTitle] = useState(todo?.title ?? "");
-  const [notes, setNotes] = useState(todo?.notes ?? "");
-  const [stateId, setStateId] = useState(() => initialStateId(todo, defaultStateId, states));
+  const [title, setTitle] = useState("");
+  const [notes, setNotes] = useState("");
+  const [stateId, setStateId] = useState(() => initialStateId(defaultStateId, states));
   // Held as the project's name rather than its id, so the box keeps accepting a new name.
   // `submit` turns whatever is in it into a real row.
-  const [project, setProject] = useState(todo?.project?.name ?? "");
+  const [project, setProject] = useState("");
   /** Staged label names. Resolved to ids on save, the same way `project` is. */
-  const [labelNames, setLabelNames] = useState<string[]>(() => todo?.labels.map((l) => l.name) ?? []);
+  const [labelNames, setLabelNames] = useState<string[]>([]);
   const [labelDraft, setLabelDraft] = useState("");
-  const [milestone, setMilestone] = useState(todo?.milestone ?? "");
-  const [priority, setPriority] = useState(todo?.priority ?? 0);
-  const [startDate, setStartDate] = useState(todo?.startDate ?? "");
-  const [dueDate, setDueDate] = useState(todo?.dueDate ?? "");
+  const [milestone, setMilestone] = useState("");
+  const [priority, setPriority] = useState(0);
+  const [startDate, setStartDate] = useState("");
+  const [dueDate, setDueDate] = useState("");
   const [busy, setBusy] = useState(false);
 
-  // The parent is a property of this todo, so it is staged locally and written on Save.
-  // Sub-issues are rows of their own, so those are written the moment you change them.
-  const [parent, setParent] = useState(() => initialParent(todo, defaultParent));
-  const [children, setChildren] = useState<Todo[]>([]);
-  const [newChildTitle, setNewChildTitle] = useState("");
-  const [childBusy, setChildBusy] = useState(false);
-  const [picking, setPicking] = useState<"parent" | "child" | null>(null);
+  // The parent is a property of this todo, so it is staged locally and written on Create.
+  const [parent, setParent] = useState(defaultParent ?? null);
+  const [picking, setPicking] = useState<"parent" | null>(null);
   // Mirrors the notes editor's expanded surface. Only the Escape guard below reads it.
   const [notesExpanded, setNotesExpanded] = useState(false);
 
   const datesInvalid = startDate.length > 0 && dueDate.length > 0 && startDate > dueDate;
   const canSubmit = title.trim().length > 0 && !datesInvalid && !busy;
 
-  /** Read straight from the main process, so the page filter cannot hide a sub-issue. */
-  const loadChildren = useCallback(async () => {
-    if (todo === null) return;
-    try {
-      setChildren(await window.electronAPI.todo.list({ parentId: todo.id }));
-    } catch {
-      // A failed read only costs the block its contents. The page surfaces write errors.
-    }
-  }, [todo]);
-
-  useEffect(() => {
-    void loadChildren();
-  }, [loadChildren]);
-
   /**
    * Appends an image embed to the notes. Appending, rather than inserting at the caret, is
    * deliberate for now: the caret lives inside CodeMirror and reaching into it belongs to the
    * paste-and-drop work, which owns editor-side insertion.
    */
-  const insertNotesEmbed = useCallback((markdown: string) => {
+  function insertNotesEmbed(markdown: string) {
     setNotes((prev) => {
       const body = prev.replace(/\s+$/, "");
       return body.length === 0 ? markdown : body + "\n\n" + markdown;
     });
-  }, []);
+  }
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -184,8 +149,7 @@ export function TodoEditDialog(
         parentId: parent === null ? null : parent.id,
       };
 
-      if (todo) await onSave({ id: todo.id, ...fields });
-      else await onCreate({ ...fields, source: "user" });
+      await onCreate({ ...fields, source: "user" });
       onClose();
     } catch {
       // The hook surfaces the message on the page.
@@ -207,40 +171,6 @@ export function TodoEditDialog(
     await submit();
   }
 
-  async function handleDelete() {
-    if (!todo) return;
-    setBusy(true);
-    try {
-      await onDelete(todo.id);
-      onClose();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /** Every sub-issue write goes through here: run it, reload the block, keep the dialog open. */
-  async function runChildAction(action: () => Promise<void>) {
-    if (childBusy) return;
-    setChildBusy(true);
-    try {
-      await action();
-      await loadChildren();
-    } catch {
-      // The hook surfaces the message on the page.
-    } finally {
-      setChildBusy(false);
-    }
-  }
-
-  async function addChild() {
-    const childTitle = newChildTitle.trim();
-    if (todo === null || childTitle.length === 0) return;
-    await runChildAction(async () => {
-      await onCreate({ title: childTitle, parentId: todo.id, source: "user" });
-      setNewChildTitle("");
-    });
-  }
-
   return (
     <div className={styles.overlay} onClick={onClose} role="presentation">
       <div
@@ -256,11 +186,11 @@ export function TodoEditDialog(
         }}
         role="dialog"
         aria-modal="true"
-        aria-label={creating ? "New todo" : "Edit todo"}
+        aria-label="New todo"
       >
         <form onSubmit={handleSubmit}>
           <div className={styles.header}>
-            <h2 className={styles.heading}>{creating ? "New Todo" : "Edit Todo"}</h2>
+            <h2 className={styles.heading}>New Todo</h2>
             <button className={styles.closeBtn} type="button" onClick={onClose} aria-label="Close">x</button>
           </div>
 
@@ -323,11 +253,11 @@ export function TodoEditDialog(
               expandable
               modalTitle="Edit Notes"
               onModalOpenChange={setNotesExpanded}
-              todoId={todo === null ? null : todo.id}
+              todoId={null}
             />
           </div>
 
-          <TodoAttachments todoId={todo === null ? null : todo.id} onInsertEmbed={insertNotesEmbed} />
+          <TodoAttachments todoId={null} onInsertEmbed={insertNotesEmbed} />
 
           <div className={styles.grid}>
             <div className={styles.field}>
@@ -438,103 +368,17 @@ export function TodoEditDialog(
 
           <section className={styles.subSection} aria-label="Sub-issues">
             <div className={styles.subHeader}>
-              <span className={styles.label}>
-                Sub-issues{children.length > 0 ? " (" + children.length + ")" : ""}
-              </span>
-              {todo !== null && (
-                <button
-                  className={styles.linkBtn}
-                  type="button"
-                  onClick={() => setPicking("child")}
-                  disabled={childBusy}
-                >
-                  Link existing
-                </button>
-              )}
+              <span className={styles.label}>Sub-issues</span>
             </div>
-
-            {creating
-              ? <p className={styles.subHint}>Create this todo first, then add sub-issues to it.</p>
-              : (
-                <>
-                  {children.length > 0 && (
-                    <ul className={styles.subList}>
-                      {children.map((child) => (
-                        <li key={child.id} className={styles.subRow}>
-                          <span className={styles.chipId}>#{child.id}</span>
-                          <span
-                            className={styles.subDot}
-                            style={{
-                              borderColor: child.state.color,
-                              background: child.state.isCompleted ? child.state.color : "transparent",
-                            }}
-                            aria-hidden="true"
-                          />
-                          <span className={child.state.isCompleted ? styles.subTitleDone : styles.subTitle}>
-                            {child.title}
-                          </span>
-                          <span className={styles.subState}>{child.state.label}</span>
-                          <button
-                            className={styles.chipClear}
-                            type="button"
-                            disabled={childBusy}
-                            onClick={() => void runChildAction(() => onSave({ id: child.id, parentId: null }))}
-                            aria-label={"Remove " + child.title + " from this todo"}
-                          >
-                            x
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-
-                  <div className={styles.subAdd}>
-                    <input
-                      className={styles.input}
-                      value={newChildTitle}
-                      onChange={(e) => setNewChildTitle(e.target.value)}
-                      onKeyDown={(e) => {
-                        // Enter adds a sub-issue here. Left alone it would submit the whole form.
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          void addChild();
-                        }
-                      }}
-                      placeholder="Add a sub-issue and press Enter"
-                      aria-label="New sub-issue title"
-                      maxLength={500}
-                    />
-                    <button
-                      className={styles.subAddBtn}
-                      type="button"
-                      onClick={() => void addChild()}
-                      disabled={childBusy || newChildTitle.trim().length === 0}
-                    >
-                      Add
-                    </button>
-                  </div>
-
-                  {children.length > 0 && (
-                    <p className={styles.subHint}>
-                      Sub-issues keep their own state. Completing or deleting this todo leaves them alone.
-                    </p>
-                  )}
-                </>
-              )}
+            <p className={styles.subHint}>Create this todo first, then add sub-issues to it.</p>
           </section>
 
           <div className={styles.actions}>
-            {todo
-              ? (
-                <button className={styles.deleteBtn} type="button" onClick={() => void handleDelete()} disabled={busy}>
-                  Delete
-                </button>
-              )
-              : <span />}
+            <span />
             <div className={styles.actionsRight}>
               <button className={styles.cancelBtn} type="button" onClick={onClose}>Cancel</button>
               <button className={styles.saveBtn} type="submit" disabled={!canSubmit}>
-                {creating ? "Create" : "Save"}
+                Create
               </button>
             </div>
           </div>
@@ -544,21 +388,8 @@ export function TodoEditDialog(
       {picking === "parent" && (
         <TodoPicker
           heading="Nest this todo under"
-          mode={{
-            kind: "parent",
-            todoId: todo === null ? null : todo.id,
-            currentParentId: parent === null ? null : parent.id,
-          }}
+          mode={{ kind: "parent", todoId: null, currentParentId: parent === null ? null : parent.id }}
           onPick={(picked) => setParent({ id: picked.id, title: picked.title })}
-          onClose={() => setPicking(null)}
-        />
-      )}
-
-      {picking === "child" && todo !== null && (
-        <TodoPicker
-          heading="Add an existing todo as a sub-issue"
-          mode={{ kind: "child", todoId: todo.id }}
-          onPick={(picked) => void runChildAction(() => onSave({ id: picked.id, parentId: todo.id }))}
           onClose={() => setPicking(null)}
         />
       )}

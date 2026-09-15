@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Todo, TodoLabel, TodoProject, TodoState } from "../../../../shared/types.ts";
+import { TodosProvider } from "../../contexts/TodosContext.tsx";
 import styles from "../TodosPage.module.scss";
 import { TodosPage } from "../TodosPage.tsx";
 
@@ -102,6 +103,8 @@ const mockTodoLabelAPI = {
   delete: vi.fn(),
 };
 
+const mockOnOpenDetail = vi.fn();
+
 beforeEach(() => {
   localStorage.clear();
   vi.stubGlobal("electronAPI", {
@@ -131,7 +134,11 @@ afterEach(() => {
 
 /** Waits past the initial IPC load so the panel is populated. */
 async function renderPage() {
-  render(<TodosPage />);
+  render(
+    <TodosProvider>
+      <TodosPage onOpenDetail={mockOnOpenDetail} />
+    </TodosProvider>,
+  );
   await screen.findByText("Old prod to new prod migration");
 }
 
@@ -264,12 +271,13 @@ describe("TodosPage drag and drop", () => {
       .not.toHaveAttribute("aria-roledescription");
   });
 
-  it("still opens the editor on a plain click, which the drag guard must not swallow", async () => {
+  it("still opens the detail page on a plain click, which the drag guard must not swallow", async () => {
     await renderPage();
 
     fireEvent.click(screen.getByRole("button", { name: "Edit Old prod to new prod migration" }));
 
-    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(mockOnOpenDetail).toHaveBeenCalledWith(152);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 });
 
@@ -285,7 +293,11 @@ describe("TodosPage nesting", () => {
 
   async function renderNested() {
     mockTodoAPI.list.mockResolvedValue(nestedTodos);
-    render(<TodosPage />);
+    render(
+      <TodosProvider>
+        <TodosPage onOpenDetail={mockOnOpenDetail} />
+      </TodosProvider>,
+    );
     await screen.findByText("Ship v1.14");
   }
 
@@ -305,7 +317,11 @@ describe("TodosPage nesting", () => {
     mockTodoAPI.list.mockResolvedValue([
       makeTodo(210, "Cut the release", todoState, { childCount: 2, completedChildCount: 2 }),
     ]);
-    render(<TodosPage />);
+    render(
+      <TodosProvider>
+        <TodosPage onOpenDetail={mockOnOpenDetail} />
+      </TodosProvider>,
+    );
     await screen.findByText("Cut the release");
 
     expect(screen.getByTitle("2 of 2 sub-issues done")).toHaveTextContent("2/2");
@@ -367,69 +383,26 @@ describe("TodosPage nesting", () => {
     expect(within(picker).getByText("Unrelated chore")).toBeInTheDocument();
   });
 
-  it("shows the sub-issue block in the edit dialog", async () => {
-    await renderNested();
-    mockTodoAPI.list.mockResolvedValue([nestedTodos[1]!]);
-
-    fireEvent.click(screen.getByLabelText("Edit Ship v1.14"));
-
-    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
-    const block = within(dialog).getByLabelText("Sub-issues");
-    await waitFor(() => expect(block).toHaveTextContent("Write the migration"));
-    expect(within(block).getByLabelText("New sub-issue title")).toBeInTheDocument();
-  });
-
-  it("adds a sub-issue from the edit dialog under the open todo", async () => {
+  // The edit dialog is gone -- editing an existing todo, including its sub-issue block, now
+  // opens `TodoDetailPage` instead (see TodoDetailPage.test.tsx for sub-issue add/unlink and
+  // the immediate parent write those three tests used to cover here).
+  it("opening a todo with sub-issues routes to its detail page, not the dialog", async () => {
     await renderNested();
 
     fireEvent.click(screen.getByLabelText("Edit Ship v1.14"));
-    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
 
-    const input = within(dialog).getByLabelText("New sub-issue title");
-    fireEvent.change(input, { target: { value: "Back up the database" } });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Add" }));
-
-    await waitFor(() =>
-      expect(mockTodoAPI.create).toHaveBeenCalledWith({
-        title: "Back up the database",
-        parentId: 200,
-        source: "user",
-      })
-    );
-  });
-
-  it("unlinking a sub-issue from the dialog clears its parent rather than deleting it", async () => {
-    await renderNested();
-    mockTodoAPI.list.mockResolvedValue([nestedTodos[1]!]);
-
-    fireEvent.click(screen.getByLabelText("Edit Ship v1.14"));
-    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
-
-    const unlink = await within(dialog).findByLabelText("Remove Write the migration from this todo");
-    fireEvent.click(unlink);
-
-    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 201, parentId: null }));
-    expect(mockTodoAPI.delete).not.toHaveBeenCalled();
-  });
-
-  it("saving the dialog carries the parent it was opened with", async () => {
-    await renderNested();
-
-    fireEvent.click(screen.getByLabelText("Edit Write the migration"));
-    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Save" }));
-
-    await waitFor(() =>
-      expect(mockTodoAPI.update).toHaveBeenCalledWith(expect.objectContaining({ id: 201, parentId: 200 }))
-    );
+    expect(mockOnOpenDetail).toHaveBeenCalledWith(200);
+    expect(screen.queryByRole("dialog", { name: "Edit todo" })).not.toBeInTheDocument();
   });
 });
 
 describe("TodosPage notes editor", () => {
+  // The edit dialog is gone, but the create dialog keeps the same MarkdownEditor contract
+  // (expandable, Escape-guarded) -- see F17. Opened via `c` instead of clicking an existing row.
   async function openNotesEditor() {
     await renderPage();
-    fireEvent.click(screen.getByLabelText("Edit Old prod to new prod migration"));
-    const dialog = await screen.findByRole("dialog", { name: "Edit todo" });
+    fireEvent.keyDown(document.body, { key: "c" });
+    const dialog = await screen.findByRole("dialog", { name: "New todo" });
     fireEvent.click(within(dialog).getByRole("button", { name: "Open full editor" }));
     return await screen.findByRole("dialog", { name: "Edit Notes" });
   }
@@ -441,26 +414,26 @@ describe("TodosPage notes editor", () => {
     expect(within(modal).getByRole("button", { name: "Cancel" })).toBeInTheDocument();
   });
 
-  it("closes only the expanded editor on Escape, leaving the todo dialog open", async () => {
+  it("closes only the expanded editor on Escape, leaving the create dialog open", async () => {
     const modal = await openNotesEditor();
 
     fireEvent.keyDown(modal, { key: "Escape" });
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit Notes" })).not.toBeInTheDocument());
-    expect(screen.getByRole("dialog", { name: "Edit todo" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New todo" })).toBeInTheDocument();
   });
 
   it("holds that layering even when the Escape targets document itself", async () => {
     // The other case: nothing focused, so the key event's target is `document` rather than an
     // element inside the modal. Both Escape layers are exercised here -- drop either the
     // modal's capture-phase listener or the dialog's `notesExpanded` guard and this still
-    // passes; drop both and the todo dialog closes with the editor.
+    // passes; drop both and the create dialog closes with the editor.
     await openNotesEditor();
 
     fireEvent.keyDown(document, { key: "Escape" });
 
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Edit Notes" })).not.toBeInTheDocument());
-    expect(screen.getByRole("dialog", { name: "Edit todo" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "New todo" })).toBeInTheDocument();
   });
 });
 
@@ -1061,7 +1034,11 @@ describe("the Manage dialog", () => {
 describe("TodosPage highlight-on-navigate", () => {
   it("flashes the highlighted row and clears it once the flash animation ends, not via a timer", async () => {
     const onHighlightConsumed = vi.fn();
-    render(<TodosPage highlightTodoId={100} onHighlightConsumed={onHighlightConsumed} />);
+    render(
+      <TodosProvider>
+        <TodosPage highlightTodoId={100} onHighlightConsumed={onHighlightConsumed} onOpenDetail={mockOnOpenDetail} />
+      </TodosProvider>,
+    );
     await screen.findByText("Fix misc code quality issues");
 
     await waitFor(() => expect(onHighlightConsumed).toHaveBeenCalledTimes(1));
@@ -1085,7 +1062,11 @@ describe("TodosPage highlight-on-navigate", () => {
     localStorage.setItem("lizmeter.todos.collapsedStates", JSON.stringify([1]));
     const onHighlightConsumed = vi.fn();
 
-    render(<TodosPage highlightTodoId={9999} onHighlightConsumed={onHighlightConsumed} />);
+    render(
+      <TodosProvider>
+        <TodosPage highlightTodoId={9999} onHighlightConsumed={onHighlightConsumed} onOpenDetail={mockOnOpenDetail} />
+      </TodosProvider>,
+    );
     await screen.findByText("Server-side PDF optimization");
 
     await waitFor(() => expect(onHighlightConsumed).toHaveBeenCalledTimes(1));
@@ -1103,7 +1084,11 @@ describe("TodosPage highlight-on-navigate", () => {
     );
     const onHighlightConsumed = vi.fn();
 
-    render(<TodosPage highlightTodoId={9999} onHighlightConsumed={onHighlightConsumed} />);
+    render(
+      <TodosProvider>
+        <TodosPage highlightTodoId={9999} onHighlightConsumed={onHighlightConsumed} onOpenDetail={mockOnOpenDetail} />
+      </TodosProvider>,
+    );
 
     // Still loading -- must not be mistaken for "not found" yet.
     expect(onHighlightConsumed).not.toHaveBeenCalled();

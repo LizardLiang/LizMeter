@@ -16,7 +16,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Todo, TodoFilter, TodoSource, TodoState } from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS, todoPriorityLabel } from "../../../shared/types.ts";
-import { useTodos } from "../hooks/useTodos.ts";
+import { useTodosContext } from "../contexts/TodosContext.tsx";
 import { toPlainSummary } from "../utils/markdownPlain.ts";
 import { droppedStateId, stateDropId, todosToMove } from "../utils/todoDrag.ts";
 import { Select } from "./Select.tsx";
@@ -34,29 +34,6 @@ const FILTERS: Array<{ id: TodoFilter; label: string; }> = [
   { id: "done", label: "Done" },
   { id: "ai", label: "From AI" },
 ];
-
-/** Collapsed groups outlive the page, which unmounts whenever you navigate away. */
-const COLLAPSED_KEY = "lizmeter.todos.collapsedStates";
-
-function loadCollapsed(): Set<number> {
-  try {
-    const raw = localStorage.getItem(COLLAPSED_KEY);
-    if (raw === null) return new Set();
-    const parsed: unknown = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return new Set();
-    return new Set(parsed.filter((v): v is number => typeof v === "number"));
-  } catch {
-    return new Set();
-  }
-}
-
-function saveCollapsed(ids: Set<number>): void {
-  try {
-    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids]));
-  } catch {
-    // Storage being unavailable only costs the collapse memory, so it is not worth surfacing.
-  }
-}
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
@@ -119,7 +96,7 @@ function ProjectIcon() {
  * It replaces the old elbow-arrow glyph, which could only say "this row has work filed under
  * it" -- the ring says that and how much of it is done, without costing more width.
  */
-function SubProgressRing({ done, total }: { done: number; total: number; }) {
+export function SubProgressRing({ done, total }: { done: number; total: number; }) {
   const radius = 5;
   const circumference = 2 * Math.PI * radius;
   const ratio = total > 0 ? Math.min(done / total, 1) : 0;
@@ -546,9 +523,11 @@ interface TodosPageProps {
   highlightTodoId?: number | null;
   /** Called once the highlight has been applied, so the caller can clear it. */
   onHighlightConsumed?: () => void;
+  /** Row click, Enter on the cursor, and the row menu's Edit all open the todo here instead of a dialog. */
+  onOpenDetail: (id: number) => void;
 }
 
-export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: TodosPageProps = {}) {
+export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenDetail }: TodosPageProps) {
   const {
     todos,
     states,
@@ -582,18 +561,19 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
     updateLabel,
     deleteLabel,
     toggleTodoLabel,
-  } = useTodos();
+    collapsed,
+    toggleCollapsed,
+    expandGroup,
+    groups,
+    visibleIds,
+    focusedId,
+    focusedTodo,
+    setFocusedId,
+    countsByState,
+    countsByProject,
+    countsByLabel,
+  } = useTodosContext();
 
-  /**
-   * The open edit dialog is tracked by id and the row is looked up fresh on every render, rather
-   * than holding the `Todo` object the dialog was opened with. A sync merge can renumber todos
-   * (merge-engine.ts's `reconcileTodoIds`) or delete one out from under an open dialog, and a
-   * captured snapshot would go on saving against a number that by then means a different todo --
-   * or none. Deriving means the dialog follows the row, and closes by itself once it is gone.
-   */
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const editing = editingId === null ? null : todos.find((t) => t.id === editingId) ?? null;
-  const setEditing = useCallback((todo: Todo | null) => setEditingId(todo === null ? null : todo.id), []);
   /**
    * Non-null while the create dialog is open. `stateId` is the group whose "+" was clicked;
    * `parent` is set by Ctrl+Shift+O, which creates the new todo as a sub-issue.
@@ -609,8 +589,6 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
   const [linkingChild, setLinkingChild] = useState<Todo | null>(null);
   /** The `?` cheat sheet. */
   const [showingShortcuts, setShowingShortcuts] = useState(false);
-  /** The keyboard cursor. Independent of the checkbox selection, the way Linear splits them. */
-  const [focusedIdRaw, setFocusedIdRaw] = useState<number | null>(null);
   /** Which single-key menu is open over the cursor, and the row rect it hangs off. */
   const [quickMenu, setQuickMenu] = useState<
     | { kind: QuickMenuKind; todo: Todo; anchor: MenuAnchor; }
@@ -618,7 +596,6 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
   >(null);
   /** The right-click action menu: which row it acts on, and the pointer it hangs off. */
   const [actionMenu, setActionMenu] = useState<{ todo: Todo; anchor: MenuAnchor; } | null>(null);
-  const [collapsed, setCollapsed] = useState<Set<number>>(loadCollapsed);
   const [selectedRaw, setSelectedRaw] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
   /** Non-null while a row is in flight. `ids` is every todo the drop will move. */
@@ -635,64 +612,10 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
 
   // Anything that owns the keyboard. While one of these is up the page's own bindings stand down,
   // or `d` typed into a search box would fall through and open the due-date menu behind it.
-  const dialogOpen = editing !== null || creating !== null || managing
+  const dialogOpen = creating !== null || managing
     || reparenting !== null || linkingChild !== null || quickMenu !== null || showingShortcuts
     || actionMenu !== null;
   const doneCount = todos.filter((todo) => todo.state.isCompleted).length;
-
-  const countsByState = useMemo(() => {
-    const counts: Record<number, number> = {};
-    for (const todo of todos) counts[todo.state.id] = (counts[todo.state.id] ?? 0) + 1;
-    return counts;
-  }, [todos]);
-
-  // Both counts are of the todos currently loaded, so a narrowing filter narrows them too.
-  // The manage dialog says so, and the delete confirm reads the authoritative count from
-  // the main process anyway.
-  const countsByProject = useMemo(() => {
-    const counts: Record<number, number> = {};
-    for (const todo of todos) {
-      if (todo.project) counts[todo.project.id] = (counts[todo.project.id] ?? 0) + 1;
-    }
-    return counts;
-  }, [todos]);
-
-  const countsByLabel = useMemo(() => {
-    const counts: Record<number, number> = {};
-    for (const todo of todos) {
-      for (const label of todo.labels) counts[label.id] = (counts[label.id] ?? 0) + 1;
-    }
-    return counts;
-  }, [todos]);
-
-  const groups = useMemo(() => {
-    const byState = new Map<number, Todo[]>();
-    for (const todo of todos) {
-      const list = byState.get(todo.state.id);
-      if (list) list.push(todo);
-      else byState.set(todo.state.id, [todo]);
-    }
-    return [...states]
-      .sort((a, b) => a.position - b.position)
-      .map((state) => ({ state, items: byState.get(state.id) ?? [] }));
-  }, [todos, states]);
-
-  /** Row order as rendered, so shift-click can select a contiguous range across groups. */
-  const visibleIds = useMemo(
-    () => groups.flatMap((g) => collapsed.has(g.state.id) ? [] : g.items.map((t) => t.id)),
-    [groups, collapsed],
-  );
-
-  // Collapsing a group, changing the filter, or a delete elsewhere can all take the cursor's row
-  // away. Deriving it against the rendered order means the cursor can never point at nothing.
-  const focusedId = useMemo(
-    () => (focusedIdRaw !== null && visibleIds.includes(focusedIdRaw) ? focusedIdRaw : null),
-    [focusedIdRaw, visibleIds],
-  );
-  const focusedTodo = useMemo(
-    () => (focusedId === null ? null : todos.find((t) => t.id === focusedId) ?? null),
-    [focusedId, todos],
-  );
 
   useEffect(() => {
     if (focusedId === null) return;
@@ -722,13 +645,7 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
     }
 
     // The row cannot be found or scrolled to while its state group is collapsed.
-    setCollapsed((prev) => {
-      if (!prev.has(target.state.id)) return prev;
-      const next = new Set(prev);
-      next.delete(target.state.id);
-      saveCollapsed(next);
-      return next;
-    });
+    expandGroup(target.state.id);
 
     setFlashedTodoId(highlightTodoId);
     onHighlightConsumed?.();
@@ -776,23 +693,13 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
     const ids = renderedIds();
     if (ids.length === 0) return;
 
-    setFocusedIdRaw((current) => {
+    setFocusedId((current) => {
       const at = current === null ? -1 : ids.indexOf(current);
       // No cursor yet: ArrowDown starts at the top of the list, ArrowUp at the bottom.
       if (at === -1) return delta > 0 ? ids[0]! : ids[ids.length - 1]!;
       return ids[Math.min(ids.length - 1, Math.max(0, at + delta))]!;
     });
-  }, [renderedIds]);
-
-  const toggleCollapsed = useCallback((stateId: number) => {
-    setCollapsed((prev) => {
-      const next = new Set(prev);
-      if (next.has(stateId)) next.delete(stateId);
-      else next.add(stateId);
-      saveCollapsed(next);
-      return next;
-    });
-  }, []);
+  }, [renderedIds, setFocusedId]);
 
   const toggleSelect = useCallback((id: number, shiftKey: boolean) => {
     setSelectedRaw((prev) => {
@@ -870,15 +777,29 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
   // selection changes. Re-subscribing leaves a window where React has committed a render but not
   // yet run the effect, and a key pressed in that window is handled by the previous closure --
   // an ArrowDown landing while `visibleIds` was still empty would silently place no cursor.
-  const keymap = useRef({ dialogOpen, focusedTodo, selectedSize: selected.size, moveFocus, rowAnchor });
+  const keymap = useRef({
+    dialogOpen,
+    focusedTodo,
+    selectedSize: selected.size,
+    moveFocus,
+    rowAnchor,
+    onOpenDetail,
+  });
 
   useEffect(() => {
-    keymap.current = { dialogOpen, focusedTodo, selectedSize: selected.size, moveFocus, rowAnchor };
+    keymap.current = {
+      dialogOpen,
+      focusedTodo,
+      selectedSize: selected.size,
+      moveFocus,
+      rowAnchor,
+      onOpenDetail,
+    };
   });
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      const { dialogOpen, focusedTodo, selectedSize, moveFocus, rowAnchor } = keymap.current;
+      const { dialogOpen, focusedTodo, selectedSize, moveFocus, rowAnchor, onOpenDetail } = keymap.current;
 
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
@@ -920,7 +841,7 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
       if (event.key === "Escape") {
         // The selection is the louder state, so it clears first; a second press drops the cursor.
         if (selectedSize > 0) setSelectedRaw(new Set());
-        else setFocusedIdRaw(null);
+        else setFocusedId(null);
         return;
       }
 
@@ -958,7 +879,7 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
           break;
         case "Enter":
           event.preventDefault();
-          setEditing(focusedTodo);
+          onOpenDetail(focusedTodo.id);
           break;
         default:
           break;
@@ -967,9 +888,9 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
 
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-    // `setEditing` is a stable useCallback with no dependencies of its own, so listing it here
-    // keeps the shortcut handler bound exactly once, as before.
-  }, [setEditing]);
+    // Every value `onKey` needs lives in `keymap.current` or is a stable setState setter, so this
+    // has no real dependencies -- keeping the shortcut handler bound exactly once, as before.
+  }, [setFocusedId]);
 
   const selectedIds = useMemo(() => [...selected], [selected]);
 
@@ -984,9 +905,9 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
   const handleOpenMenu = useCallback((todo: Todo, anchor: MenuAnchor) => {
     // Right-clicking a row is also a way of pointing at it, so the cursor follows the menu --
     // the shortcuts the menu advertises then act on the row you just aimed at.
-    setFocusedIdRaw(todo.id);
+    setFocusedId(todo.id);
     setActionMenu({ todo, anchor });
-  }, []);
+  }, [setFocusedId]);
 
   /**
    * The menu holds a snapshot of the row it opened on, which a write from the MCP server or a
@@ -1211,7 +1132,7 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
                   onToggleCollapsed={toggleCollapsed}
                   onAdd={handleAdd}
                   onToggleSelect={toggleSelect}
-                  onEdit={setEditing}
+                  onEdit={(todo) => onOpenDetail(todo.id)}
                   onOpenMenu={handleOpenMenu}
                   onFlashEnd={handleFlashEnd}
                   wasJustDragged={wasJustDragged}
@@ -1261,27 +1182,19 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
         </div>
       )}
 
-      {(editing !== null || creating !== null) && (
+      {creating !== null && (
         <TodoEditDialog
-          key={editing
-            ? `edit-${editing.id}`
-            : `new-${creating?.stateId ?? "default"}-${creating?.parent?.id ?? "top"}`}
-          todo={editing}
-          defaultStateId={creating?.stateId ?? undefined}
-          defaultParent={creating?.parent}
+          key={`new-${creating.stateId ?? "default"}-${creating.parent?.id ?? "top"}`}
+          defaultStateId={creating.stateId ?? undefined}
+          defaultParent={creating.parent}
           states={states}
           projects={projects}
           labels={labels}
           milestones={milestones}
           onCreateProject={createProject}
           onCreateLabel={createLabel}
-          onSave={updateTodo}
           onCreate={createTodo}
-          onDelete={deleteTodo}
-          onClose={() => {
-            setEditing(null);
-            setCreating(null);
-          }}
+          onClose={() => setCreating(null)}
         />
       )}
 
@@ -1311,7 +1224,7 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed }: Todos
           todo={actionMenuTodo}
           states={states}
           anchor={actionMenu.anchor}
-          onEdit={() => setEditing(actionMenuTodo)}
+          onEdit={() => onOpenDetail(actionMenuTodo.id)}
           onQuickMenu={(kind) => setQuickMenu({ kind, todo: actionMenuTodo, anchor: rowAnchor(actionMenuTodo.id) })}
           onAddSubIssue={() =>
             setCreating({ stateId: null, parent: { id: actionMenuTodo.id, title: actionMenuTodo.title } })}

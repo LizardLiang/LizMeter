@@ -101,6 +101,17 @@ const mockElectronAPI = {
     log: vi.fn().mockResolvedValue({ worklogId: "wl-1" }),
     markLogged: vi.fn().mockResolvedValue(undefined),
   },
+  // `TodosProvider` mounts at the top level of `TomatoClock` (survives Timer <-> Todos
+  // navigation, see TodosContext.tsx), so `useTodos()` fires on every render -- not just when
+  // the Todos page itself is visited.
+  todo: {
+    list: vi.fn().mockResolvedValue([]),
+    listMilestones: vi.fn().mockResolvedValue([]),
+    onChanged: vi.fn().mockReturnValue(() => {}),
+  },
+  todoState: { list: vi.fn().mockResolvedValue([]) },
+  todoProject: { list: vi.fn().mockResolvedValue([]) },
+  todoLabel: { list: vi.fn().mockResolvedValue([]) },
   claudeTracker: {
     scan: vi.fn().mockResolvedValue({ success: true, sessions: [] }),
     trackSelected: vi.fn().mockResolvedValue({ tracked: 0 }),

@@ -42,10 +42,10 @@ interface MarkdownEditorProps {
   /** Heading and accessible name of the expanded surface. */
   modalTitle?: string;
   /**
-   * Fires whenever the expanded surface opens or closes. `TodoEditDialog` uses it as the
-   * second Escape layer: the modal's capture-phase listener already stops the event before
-   * the dialog's native `document` listener sees it, and this makes that outcome independent
-   * of which listener happens to win the phase race.
+   * Fires whenever the expanded surface opens or closes. The create dialog (`TodoEditDialog`)
+   * uses it as the second Escape layer: the modal's capture-phase listener already stops the
+   * event before the dialog's native `document` listener sees it, and this makes that outcome
+   * independent of which listener happens to win the phase race.
    */
   onModalOpenChange?: (open: boolean) => void;
   /** Focus the editor on mount. The modal uses it so typing carries on without a click. */
@@ -89,11 +89,11 @@ const BASIC_SETUP = {
 const lengthCap = EditorState.changeFilter.of((tr) => tr.newDoc.length <= NOTES_MAX_LENGTH);
 
 /**
- * CodeMirror's `defaultKeymap` binds Mod-Enter to `insertBlankLine`, and `TodoEditDialog`
- * submits the form on Mod-Enter from a React handler on the dialog div. Without this both fire
- * and the note gains a blank line on every save. Returning `true` marks the command handled so
- * `insertBlankLine` never runs, while the DOM event still bubbles to the dialog, so the form
- * submits exactly once.
+ * CodeMirror's `defaultKeymap` binds Mod-Enter to `insertBlankLine`, and the create dialog
+ * (`TodoEditDialog`) submits the form on Mod-Enter from a React handler on the dialog div.
+ * Without this both fire and the note gains a blank line on every save. Returning `true` marks
+ * the command handled so `insertBlankLine` never runs, while the DOM event still bubbles to the
+ * dialog, so the form submits exactly once.
  */
 const modEnterGuard = Prec.highest(keymap.of([{ key: "Mod-Enter", run: () => true }]));
 
@@ -430,8 +430,8 @@ function ModalEditor(
       // Capture phase on `document`, and both halves of that are load-bearing. Verified by
       // flipping the flag to `false` and watching two tests fail:
       //
-      // 1. `TodoEditDialog` closes the whole dialog from a NATIVE bubble-phase listener on
-      //    this same `document`, registered before this one. A React synthetic
+      // 1. The create dialog (`TodoEditDialog`) closes the whole dialog from a NATIVE bubble-phase
+      //    listener on this same `document`, registered before this one. A React synthetic
       //    `stopPropagation` cannot reach a native listener at all, and a native bubble
       //    listener added here would run after the dialog's. Capture runs while the event is
       //    still descending, so stopping it there means the bubble pass never reaches
@@ -466,8 +466,8 @@ function ModalEditor(
         aria-label={title}
         onClick={(e) => e.stopPropagation()}
         // React portals bubble synthetic events through the React tree, not the DOM tree, so
-        // a key pressed in here still reaches `TodoEditDialog`'s `onKeyDown` and its
-        // Ctrl+Enter submit -- which would save the pre-modal notes and bin this draft.
+        // a key pressed in here still reaches the create dialog's (`TodoEditDialog`) `onKeyDown`
+        // and its Ctrl+Enter submit -- which would save the pre-modal notes and bin this draft.
         onKeyDown={(e) => e.stopPropagation()}
       >
         <div className={styles.modalHeader}>
@@ -525,8 +525,8 @@ export function MarkdownEditor(
     minHeight = 160,
     maxHeight = 320,
     disabled = false,
-    // Defaulted here rather than at the TodoEditDialog call site: the dialog is owned by
-    // another change in flight, and every caller of this editor wants live preview anyway.
+    // Defaulted here rather than at the create dialog's (TodoEditDialog) call site: the dialog
+    // is owned by another change in flight, and every caller of this editor wants live preview anyway.
     livePreview = true,
     ariaLabelledBy,
     expandable = false,

@@ -1,0 +1,485 @@
+@use "../styles/mixins" as *;
+
+.page {
+  @include page-container;
+  max-width: clamp(40rem, 78vw, 96rem);
+}
+
+.stateMsg {
+  color: #8b93b8;
+  font-size: 13px;
+}
+
+/* --- Breadcrumb header --- */
+
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(86, 95, 137, 0.22);
+}
+
+.crumbBtn {
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  color: #8b93b8;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: 4px;
+
+  &:hover {
+    color: #c0caf5;
+  }
+}
+
+.crumbSep {
+  color: #565f89;
+  font-size: 13px;
+}
+
+.crumbCurrent {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #c0caf5;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.headerRight {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.stepCounter {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #8b93b8;
+  margin-right: 4px;
+  white-space: nowrap;
+}
+
+.stepBtn {
+  @include icon-btn;
+  font-size: 16px;
+  padding: 2px 8px;
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: default;
+    color: #7a8194;
+  }
+}
+
+.overflowWrap {
+  position: relative;
+}
+
+.overflowBtn {
+  @include icon-btn;
+  font-size: 16px;
+  padding: 2px 8px;
+}
+
+.overflowMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  min-width: 9rem;
+  padding: 4px;
+  border-radius: 10px;
+  border: 1px solid rgba(86, 95, 137, 0.3);
+  background: rgba(14, 16, 30, 0.92);
+  backdrop-filter: blur(28px) saturate(1.6);
+  -webkit-backdrop-filter: blur(28px) saturate(1.6);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+}
+
+.overflowItem {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #f7768e;
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    background: rgba(247, 118, 142, 0.12);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+/* --- Layout: main column + properties rail --- */
+
+.layout {
+  display: flex;
+  align-items: flex-start;
+  gap: 32px;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.rail {
+  flex-shrink: 0;
+  width: 17rem;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(16, 18, 36, 0.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  border: 1px solid rgba(122, 162, 247, 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+
+/* --- Title + meta line --- */
+
+.titleInput {
+  display: block;
+  width: 100%;
+  margin-bottom: 10px;
+  padding: 4px 0;
+  border: none;
+  background: transparent;
+  color: #c0caf5;
+  font-size: 1.5rem;
+  font-weight: 700;
+  font-family: inherit;
+  outline: none;
+
+  &:focus {
+    outline: none;
+  }
+}
+
+.metaLine {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+  min-height: 26px;
+}
+
+.linkBtn {
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px dashed rgba(86, 95, 137, 0.5);
+  background: transparent;
+  color: #a3abc9;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: #7aa2f7;
+    border-color: rgba(122, 162, 247, 0.5);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.parentChip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  border-radius: 6px;
+  border: 1px solid rgba(122, 162, 247, 0.28);
+  background: rgba(122, 162, 247, 0.1);
+}
+
+.parentChipBody {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 24rem;
+  padding: 4px 4px 4px 9px;
+  border: none;
+  background: transparent;
+  color: #7aa2f7;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chipId {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #8b93b8;
+}
+
+.chipClear {
+  padding: 3px 7px;
+  border: none;
+  background: transparent;
+  color: #a3abc9;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  border-radius: 4px;
+
+  &:hover:not(:disabled) {
+    color: #f7768e;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.subProgress {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #8b93b8;
+}
+
+.subRing,
+.subRingDone {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.subRing {
+  color: #7aa2f7;
+}
+
+.subRingDone {
+  color: #9ece6a;
+}
+
+/* --- Notes --- */
+
+.notesField {
+  display: block;
+  margin-bottom: 14px;
+}
+
+.sectionLabel {
+  @include section-label;
+  margin-bottom: 5px;
+}
+
+/* --- Sub-issues --- */
+
+.subSection {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(86, 95, 137, 0.22);
+}
+
+.subHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+
+  .sectionLabel {
+    margin-bottom: 0;
+  }
+}
+
+.subList {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+
+.subRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px 6px 8px;
+  border-radius: 7px;
+  font-size: 13px;
+  color: #a9b1d6;
+
+  &:hover {
+    background: rgba(122, 162, 247, 0.07);
+  }
+}
+
+.subDot {
+  flex-shrink: 0;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  border: 1.5px solid;
+}
+
+.subTitle,
+.subTitleDone {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subTitleDone {
+  color: #8b93b8;
+  text-decoration: line-through;
+}
+
+.subState {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #8b93b8;
+}
+
+.subAdd {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.input {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(41, 46, 66, 0.8);
+  background: rgba(12, 13, 24, 0.55);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: #c0caf5;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+
+  &:focus {
+    border-color: rgba(122, 162, 247, 0.5);
+    box-shadow: 0 0 0 3px rgba(122, 162, 247, 0.08);
+  }
+}
+
+.subAddBtn {
+  flex-shrink: 0;
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid #292e42;
+  background: transparent;
+  color: #a9b1d6;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: #c0caf5;
+    border-color: #3b4261;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
+.metaFooter {
+  margin: 24px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid rgba(86, 95, 137, 0.22);
+  font-size: 11px;
+  color: #8b93b8;
+}
+
+/* --- Properties rail fields --- */
+
+.field {
+  display: block;
+}
+
+// Sizing only -- the Select/Combobox/DatePicker components own the look.
+.selectTrigger {
+  width: 100%;
+}
+
+.labelRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  background: rgba(12, 13, 24, 0.5);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(41, 46, 66, 0.8);
+}
+
+.labelChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(122, 134, 180, 0.5);
+  color: #a3abc9;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.labelRemove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  line-height: 1;
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 0.15s ease, background 0.15s ease;
+
+  &:hover {
+    opacity: 1;
+    background: rgba(247, 118, 142, 0.2);
+  }
+}
+
+// Sits inside .labelRow, so it drops the border the other inputs carry and just takes
+// whatever width is left on the line.
+.labelBox {
+  flex: 1;
+  min-width: 90px;
+  border: none;
+  background: transparent;
+}

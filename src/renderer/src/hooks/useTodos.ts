@@ -33,6 +33,17 @@ interface UseTodosResult {
   error: string | null;
   createTodo: (input: CreateTodoInput) => Promise<void>;
   updateTodo: (input: UpdateTodoInput) => Promise<void>;
+  /**
+   * Like `updateTodo`, but never refetches the list -- it patches the written fields into the
+   * matching row of the local `todos` array instead, using the server's own return value.
+   *
+   * For a field that writes on every keystroke's debounce (see `TodoDetailPage`'s title and
+   * notes), a `run()`-style refetch landing mid-keystroke would yank the input back to the
+   * server's copy. Skipping the refetch fixes that, but only because `todos` is patched here --
+   * once `TodosContext` shares one `useTodos` instance between the list and the detail page, an
+   * unpatched write would otherwise leave the list showing a stale title after an edit.
+   */
+  updateTodoQuiet: (input: UpdateTodoInput) => Promise<void>;
   setTodoState: (id: number, stateId: number) => Promise<void>;
   deleteTodo: (id: number) => Promise<void>;
   /** Bulk move. Runs one IPC call per id, then refreshes once. */
@@ -143,6 +154,17 @@ export function useTodos(): UseTodosResult {
   const updateTodo = useCallback(async (input: UpdateTodoInput) => {
     await run(() => window.electronAPI.todo.update(input));
   }, [run]);
+
+  const updateTodoQuiet = useCallback(async (input: UpdateTodoInput) => {
+    try {
+      const updated = await window.electronAPI.todo.update(input);
+      setError(null);
+      setTodos((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong");
+      throw err;
+    }
+  }, []);
 
   const setTodoState = useCallback(async (id: number, stateId: number) => {
     await run(() => window.electronAPI.todo.update({ id, stateId }));
@@ -267,6 +289,7 @@ export function useTodos(): UseTodosResult {
     error,
     createTodo,
     updateTodo,
+    updateTodoQuiet,
     setTodoState,
     deleteTodo,
     setTodosState,

@@ -5,6 +5,8 @@ export type NavPage =
   | "timer"
   | "history"
   | "todos"
+  /** The full-page todo detail. Not a `NAV_ITEMS` entry -- it is a route, not a sidebar destination. */
+  | "todo-detail"
   | "stats"
   | "tags"
   | "settings"
@@ -224,7 +226,9 @@ export function NavSidebar({ activePage, onNavigate, timerStatus }: Props) {
   return (
     <nav className={styles.sidebar} aria-label="Main navigation">
       {NAV_ITEMS.map(({ id, label, Icon }) => {
-        const isActive = activePage === id;
+        // The detail page is a route, not a sidebar destination (no NAV_ITEMS entry of its own),
+        // so Todos stays lit while it's open.
+        const isActive = activePage === id || (id === "todos" && activePage === "todo-detail");
         const showDot = id === "timer" && isTimerActive;
 
         return (
