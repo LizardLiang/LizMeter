@@ -18,8 +18,38 @@ const DEFAULT_PIPE_PATH = process.platform === "win32" ? "\\\\.\\pipe\\lizmeter"
 const PIPE_PATH = process.env.LIZMETER_PIPE_PATH || DEFAULT_PIPE_PATH;
 const REQUEST_TIMEOUT_MS = 5000;
 const SERVER_NAME = "lizmeter-todo";
-const SERVER_VERSION = "1.1.0";
+const SERVER_VERSION = "1.2.0";
 const DEFAULT_PROTOCOL_VERSION = "2024-11-05";
+
+// Sent once in the `initialize` result. The MCP client injects it into the model's system
+// prompt, so it is the only place a rule reaches the model before it composes a note.
+// LizMeter renders `notes` with a CodeMirror live-preview editor (@codemirror/lang-markdown +
+// GFM): headings, lists, clickable task checkboxes, fenced code, blockquotes, tables,
+// strikethrough, links, and images all render. A note written as flat prose renders as a wall
+// of text and wastes that.
+const SERVER_INSTRUCTIONS = [
+  "LizMeter renders every todo note as GitHub-flavored Markdown in a live-preview editor.",
+  "Write a note as a structured document, not as one block of prose.",
+  "",
+  "Markers to use:",
+  "- `#` for the note title. Use one per note, and only when the note carries 2 or more sections.",
+  "- `##` and `###` for sections, for example Context, Findings, Steps, Open questions, Links.",
+  "- `- ` for a bullet. Indent 2 spaces for a nested bullet.",
+  "- `1. ` for an ordered sequence of steps.",
+  "- `- [ ]` for a sub-step the user can act on. `- [x]` marks it done. The checkbox is clickable in the UI.",
+  "- `**bold**` for the one fact the user must not miss.",
+  "- `` `code` `` for a path, command, identifier, or value.",
+  "- A ``` fence for 2 or more lines of code, with the language after the opening fence.",
+  "- `> ` for a quoted error message or a quoted reply.",
+  "- A GFM table for 3 or more items that share the same fields.",
+  "- `[text](url)` for a link.",
+  "",
+  "Rules:",
+  "- Put the answer, the decision, or the action first. Put the background after it.",
+  "- Keep one topic per section.",
+  "- Write no heading for a section that holds no content.",
+  "- A note of one short sentence needs no headings. Write it as plain text.",
+].join("\n");
 
 // --- Pipe client ---
 
@@ -193,7 +223,13 @@ const TOOLS = [
         },
         notes: {
           type: "string",
-          description: "Optional longer detail, context, or a link. 4000 characters or fewer.",
+          description:
+            "Optional detail, context, or links. LizMeter renders it as GitHub-flavored Markdown, "
+            + "so give it structure instead of flat prose: `#`/`##` headings for sections, `- ` "
+            + "bullets, `- [ ]` for sub-steps the user can tick off, `` `code` `` for paths and "
+            + "commands, a ``` fence for multi-line code, and a table for repeated fields. Lead "
+            + "with the answer or the action. Plain text is right only for a one-sentence note. "
+            + "32000 characters or fewer.",
         },
         agent: {
           type: "string",
@@ -250,7 +286,14 @@ const TOOLS = [
       properties: {
         id: { type: "number", description: "The todo's numeric id." },
         title: { type: "string", description: "Optional new title." },
-        notes: { type: "string", description: "Optional new notes. Pass an empty string to clear them." },
+        notes: {
+          type: "string",
+          description:
+            "Optional new notes. They replace the existing notes in full, so read the todo with "
+            + "todo_list first when you mean to extend them. Pass an empty string to clear them. "
+            + "Markdown structure as in todo_add: `#`/`##` headings, `- ` bullets, `- [ ]` "
+            + "sub-steps, fenced code for commands. 32000 characters or fewer.",
+        },
         ...FIELD_PROPERTIES,
       },
       required: ["id"],
@@ -612,6 +655,7 @@ async function handleRequest(request) {
           : DEFAULT_PROTOCOL_VERSION,
         capabilities: { tools: {} },
         serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
+        instructions: SERVER_INSTRUCTIONS,
       });
       return;
 
