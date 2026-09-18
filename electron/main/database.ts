@@ -2853,8 +2853,12 @@ export function createTodo(input: CreateTodoInput): Todo {
   return withLabelsForOne(database, row);
 }
 
-export function listTodos(input: ListTodosInput = {}): Todo[] {
-  const database = getDb();
+/**
+ * Builds the WHERE clause (and its bound params) shared by `listTodos` and `countTodos`, from
+ * every field below `id`/`limit`/`offset` on {@link ListTodosInput}. Kept separate so the two
+ * functions cannot drift apart on what "matches the filters" means.
+ */
+function buildTodoFilterClause(input: ListTodosInput): { where: string; params: Array<string | number> } {
   const filter = input.filter ?? "all";
 
   const clauses: string[] = [];
@@ -2883,13 +2887,50 @@ export function listTodos(input: ListTodosInput = {}): Todo[] {
   }
 
   const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+  return { where, params };
+}
 
-  // Completed sink to the bottom; among the rest, dated before undated and soonest first.
-  // Once todos carry due dates, "what is due next" beats "what did I add last".
-  const order = ` ORDER BY s.is_completed ASC, (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC`;
+export function listTodos(input: ListTodosInput = {}): Todo[] {
+  const database = getDb();
 
-  const rows = database.prepare(`${TODO_SELECT}${where}${order}`).all(...params) as TodoRow[];
+  // `id` short-circuits every other field -- see the doc comment on ListTodosInput.id.
+  if (input.id !== undefined) {
+    const rows = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).all(input.id) as TodoRow[];
+    return withLabels(database, rows);
+  }
+
+  const { where, params } = buildTodoFilterClause(input);
+
+  // Completed sink to the bottom; among the rest, dated before undated and soonest first. Once
+  // todos carry due dates, "what is due next" beats "what did I add last". `t.id ASC` is pinned
+  // last as a tiebreaker: `id` is the primary key and therefore unique, so it is the only field
+  // here guaranteed to fully order two todos that tie on every field before it. Without it, a
+  // LIMIT/OFFSET page over the tied rows has no defined order to page through, and a caller
+  // paging with `offset` can see a row twice or miss it entirely.
+  const order = ` ORDER BY s.is_completed ASC, (t.due_date IS NULL) ASC, t.due_date ASC, t.created_at DESC, t.id ASC`;
+
+  let sql = `${TODO_SELECT}${where}${order}`;
+  const finalParams = [...params];
+  if (input.limit !== undefined) {
+    sql += ` LIMIT ? OFFSET ?`;
+    finalParams.push(input.limit, input.offset ?? 0);
+  }
+
+  const rows = database.prepare(sql).all(...finalParams) as TodoRow[];
   return withLabels(database, rows);
+}
+
+/**
+ * Total rows `listTodos` would match for the same filter fields, ignoring `id`/`limit`/`offset`.
+ * Lets a paged caller learn how many more rows exist beyond the page it received.
+ */
+export function countTodos(input: ListTodosInput = {}): number {
+  const database = getDb();
+  const { where, params } = buildTodoFilterClause(input);
+  const { count } = database
+    .prepare(`SELECT COUNT(*) AS count FROM todos t INNER JOIN todo_states s ON s.id = t.state_id${where}`)
+    .get(...params) as { count: number };
+  return count;
 }
 
 export function updateTodo(input: UpdateTodoInput): Todo {

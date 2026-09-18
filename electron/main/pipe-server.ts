@@ -14,11 +14,13 @@ import net from "node:net";
 import fs from "node:fs";
 import {
   clearCompletedTodos,
+  countTodos,
   createTodo,
   createTodoLabel,
   createTodoProject,
   createTodoState,
   getDb,
+  deleteTodo,
   deleteTodoLabel,
   deleteTodoProject,
   deleteTodoState,
@@ -61,6 +63,12 @@ const PIPE_PATH = process.env.LIZMETER_PIPE_PATH || DEFAULT_PIPE_PATH;
 const MAX_BUFFER_SIZE = 262_144;
 
 const VALID_TODO_FILTERS = new Set<TodoFilter>(["all", "active", "done", "ai"]);
+
+// An unfiltered todo.list can run into the thousands of rows, which blows past an MCP client's
+// tool-result token cap -- the reply gets spilled to a file instead of returned, and the tool
+// becomes unusable on the real list. 50 keeps a typical page well under that cap while still
+// showing enough to be useful without paging.
+const DEFAULT_TODO_LIST_LIMIT = 50;
 
 // --- Module-level singleton state ---
 
@@ -192,6 +200,22 @@ function optionalNumber(value: unknown, field: string): number | null | undefine
   if (value === null) return null;
   if (typeof value !== "number" || !Number.isInteger(value)) {
     throw new Error(`'${field}' must be an integer or null`);
+  }
+  return value;
+}
+
+/** `todo.list`'s `limit`: a positive integer, since 0 or fewer rows is never a useful page. */
+function requireLimit(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+    throw new Error("'limit' must be a positive integer");
+  }
+  return value;
+}
+
+/** `todo.list`'s `offset`: zero or more rows to skip. */
+function requireOffset(value: unknown): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0) {
+    throw new Error("'offset' must be a non-negative integer");
   }
   return value;
 }
@@ -361,6 +385,22 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
     }
 
     case "todo.list": {
+      // 'todoId' (not 'id' -- see requireTodoId's comment: 'id' is the envelope's correlation
+      // field) fetches exactly one todo and short-circuits every other field below, including
+      // limit/offset -- a single-id lookup and a filtered page are two different requests.
+      // Permissive at the database layer (listTodos just returns no rows on a miss, like every
+      // other lookup here), but the friendly "no such todo" message belongs at this layer, the
+      // same as resolveProjectName/resolveLabelNames/resolveStateLabel do for unknown names.
+      if (data.todoId !== undefined) {
+        const todoId = data.todoId;
+        if (typeof todoId !== "number" || !Number.isInteger(todoId)) {
+          throw new Error("'todoId' must be an integer");
+        }
+        const todos = listTodos({ id: todoId }).map((todo) => ({ ...todo, uuid: todoUuidFor(todo.id) }));
+        if (todos.length === 0) throw new Error(`No todo #${todoId}.`);
+        return { todos, total: 1 };
+      }
+
       const raw = data.filter;
       const filter = typeof raw === "string" && VALID_TODO_FILTERS.has(raw as TodoFilter)
         ? (raw as TodoFilter)
@@ -369,12 +409,20 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
       const labelIds = resolveLabelNames(data.label === undefined ? undefined : [data.label], "label");
       const stateId = resolveStateLabel(data.state);
       const parentId = optionalNumber(data.parentId, "parentId") ?? undefined;
-      const todos = listTodos({ filter, projectId, labelId: labelIds?.[0], stateId, parentId });
-      // Each todo's permanent uuid rides along so a caller can prove, on a later write, that the
-      // number it is about to address still means the same todo. A merge can renumber todos
-      // between a list and a write (see merge-engine.ts's reconcileTodoIds), and without this the
-      // write would silently land on whichever todo inherited the number.
-      return { todos: todos.map((todo) => ({ ...todo, uuid: todoUuidFor(todo.id) })) };
+      const limit = data.limit === undefined ? DEFAULT_TODO_LIST_LIMIT : requireLimit(data.limit);
+      const offset = data.offset === undefined ? 0 : requireOffset(data.offset);
+
+      const filterInput = { filter, projectId, labelId: labelIds?.[0], stateId, parentId };
+      const total = countTodos(filterInput);
+      const todos = listTodos({ ...filterInput, limit, offset }).map((todo) => ({
+        ...todo,
+        // Each todo's permanent uuid rides along so a caller can prove, on a later write, that
+        // the number it is about to address still means the same todo. A merge can renumber
+        // todos between a list and a write (see merge-engine.ts's reconcileTodoIds), and without
+        // this the write would silently land on whichever todo inherited the number.
+        uuid: todoUuidFor(todo.id),
+      }));
+      return { todos, total };
     }
 
     case "todo.complete": {
@@ -392,6 +440,31 @@ function dispatchCommand(type: string, data: Record<string, unknown>): unknown {
       collectAttachmentBlobs(deletedShas);
       notifyTodosChanged();
       return { removed: count };
+    }
+
+    case "todo.delete": {
+      const id = requireTodoId(data, "todo.delete");
+      const existing = listTodos({ id });
+      if (existing.length === 0) throw new Error(`No todo #${id}.`);
+      const todo = existing[0]!;
+
+      // Case-sensitive, untrimmed match against the real title. The message below must not echo
+      // that title -- doing so would turn a failed delete into a way to read a title the caller
+      // does not already have, which defeats the point of asking for it.
+      const confirmTitle = data.confirmTitle;
+      if (typeof confirmTitle !== "string" || confirmTitle !== todo.title) {
+        throw new Error(
+          `todo.delete: 'confirmTitle' did not match todo #${id}'s title. Read it with todo_list first.`,
+        );
+      }
+
+      // Read before the delete: deleteTodo lifts children to the top level but does not report
+      // how many, and TODO_SELECT already carries that count on the row we just read.
+      const childrenLifted = todo.childCount;
+      const deletedShas = deleteTodo(id);
+      collectAttachmentBlobs(deletedShas);
+      notifyTodosChanged();
+      return { id, title: todo.title, childrenLifted };
     }
 
     // Taxonomy writes. Each is keyed by name rather than id: names are what the read commands

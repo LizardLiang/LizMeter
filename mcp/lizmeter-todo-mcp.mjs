@@ -18,7 +18,7 @@ const DEFAULT_PIPE_PATH = process.platform === "win32" ? "\\\\.\\pipe\\lizmeter"
 const PIPE_PATH = process.env.LIZMETER_PIPE_PATH || DEFAULT_PIPE_PATH;
 const REQUEST_TIMEOUT_MS = 5000;
 const SERVER_NAME = "lizmeter-todo";
-const SERVER_VERSION = "1.2.0";
+const SERVER_VERSION = "1.3.0";
 const DEFAULT_PROTOCOL_VERSION = "2024-11-05";
 
 // Sent once in the `initialize` result. The MCP client injects it into the model's system
@@ -245,7 +245,11 @@ const TOOLS = [
     name: "todo_list",
     description:
       "List the user's LizMeter todos. Use this before adding a todo to avoid duplicates, when the "
-      + "user asks what is on their list, or to discover which state labels exist.",
+      + "user asks what is on their list, or to discover which state labels exist. Results are "
+      + "capped at 50 per call by default -- when the reply's trailing line says there are more, "
+      + "pass offset to page through the rest rather than assuming you saw everything. Pass id to "
+      + "fetch exactly one todo by number instead of a page; every other field here (including "
+      + "limit and offset) is then ignored. An unknown id is an error, not an empty result.",
     inputSchema: {
       type: "object",
       properties: {
@@ -254,23 +258,45 @@ const TOOLS = [
           enum: ["all", "active", "done", "ai"],
           description:
             "Which todos to return. 'active' = not in a completed state, 'ai' = only ones added by an AI. "
-            + "Defaults to 'all'.",
+            + "Defaults to 'all'. Ignored when id is set.",
         },
         project: {
           type: "string",
-          description: "Optional: only todos in this project, by name. An unknown name lists the valid ones.",
+          description:
+            "Optional: only todos in this project, by name. An unknown name lists the valid ones. "
+            + "Ignored when id is set.",
         },
         label: {
           type: "string",
-          description: "Optional: only todos carrying this label, by name. An unknown name lists the valid ones.",
+          description:
+            "Optional: only todos carrying this label, by name. An unknown name lists the valid ones. "
+            + "Ignored when id is set.",
         },
         state: {
           type: "string",
-          description: "Optional: only todos in this state, by label. An unknown label lists the valid ones.",
+          description:
+            "Optional: only todos in this state, by label. An unknown label lists the valid ones. "
+            + "Ignored when id is set.",
         },
         parentId: {
           type: "number",
-          description: "Optional: only the direct sub-issues of this todo id.",
+          description: "Optional: only the direct sub-issues of this todo id. Ignored when id is set.",
+        },
+        id: {
+          type: "number",
+          description:
+            "Fetch exactly this todo by its numeric id instead of a filtered page. When set, every "
+            + "other field on this tool is ignored. An unknown id returns an error, not an empty list.",
+        },
+        limit: {
+          type: "number",
+          description: "Max todos to return in one page. Defaults to 50. Ignored when id is set.",
+        },
+        offset: {
+          type: "number",
+          description:
+            "Todos to skip before applying limit, for paging past the first page. Defaults to 0. "
+            + "Ignored when id is set.",
         },
       },
     },
@@ -365,6 +391,29 @@ const TOOLS = [
       required: ["id"],
     },
   },
+  {
+    name: "todo_delete",
+    description:
+      "Permanently delete one LizMeter todo by its numeric id. This cannot be undone. If the user "
+      + "just finished the work, use todo_complete instead -- that marks it done and keeps it in "
+      + "the list. Deleting a todo with sub-issues does not delete them: they are lifted to the "
+      + "top level and keep their own state untouched. As a safety check you must pass "
+      + "confirmTitle set to the todo's exact current title -- call todo_list first to read it; "
+      + "guessing or approximating it refuses the delete.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "number", description: "The todo's numeric id. Get it from todo_list." },
+        confirmTitle: {
+          type: "string",
+          description:
+            "The todo's exact current title, matched case-sensitively with no trimming. Read it "
+            + "with todo_list first -- an approximate or stale title fails the check.",
+        },
+      },
+      required: ["id", "confirmTitle"],
+    },
+  },
 ];
 
 // --- Tool execution ---
@@ -393,6 +442,12 @@ function requireArg(args, key, action) {
 function detachSuffix(count) {
   if (!count) return " It was not on any todo.";
   return " Removed from " + count + (count === 1 ? " todo." : " todos.");
+}
+
+/** Says how many sub-issues a todo_delete lifted to the top level, so the agent does not guess. */
+function childrenLiftedSuffix(count) {
+  if (!count) return "";
+  return " " + count + (count === 1 ? " sub-issue" : " sub-issues") + " lifted to the top level.";
 }
 
 /**
@@ -491,16 +546,33 @@ async function callTool(name, args = {}) {
     }
 
     case "todo_list": {
+      if (args.id !== undefined) {
+        if (typeof args.id !== "number" || !Number.isInteger(args.id)) {
+          throw new Error("'id' must be an integer");
+        }
+        // 'todoId' on the wire, not 'id': sendCommand's envelope already owns 'id' as the
+        // request's correlation field, and a payload key of the same name would overwrite it.
+        const result = await sendCommand("todo.list", { todoId: args.id });
+        const todos = result.todos ?? [];
+        rememberListedTodos(todos);
+        return formatTodo(todos[0]);
+      }
+
       const payload = { filter: args.filter ?? "all" };
       if (args.project !== undefined) payload.project = args.project;
       if (args.label !== undefined) payload.label = args.label;
       if (args.state !== undefined) payload.state = args.state;
       if (args.parentId !== undefined) payload.parentId = args.parentId;
+      if (args.limit !== undefined) payload.limit = args.limit;
+      if (args.offset !== undefined) payload.offset = args.offset;
       const result = await sendCommand("todo.list", payload);
       const todos = result.todos ?? [];
+      const total = result.total ?? todos.length;
       rememberListedTodos(todos);
       if (todos.length === 0) return "No todos match that filter.";
-      return todos.map(formatTodo).join("\n");
+      const listing = todos.map(formatTodo).join("\n");
+      if (todos.length >= total) return listing;
+      return listing + "\n\nShowing " + todos.length + " of " + total + " matches. Pass offset to page.";
     }
 
     case "todo_update": {
@@ -620,6 +692,18 @@ async function callTool(name, args = {}) {
       }
       const result = await sendCommand("todo.complete", withIdentityGuard({ todoId: args.id }, args.id));
       return "Completed todo #" + result.todo.id + ": " + result.todo.title;
+    }
+
+    case "todo_delete": {
+      if (typeof args.id !== "number" || !Number.isInteger(args.id)) {
+        throw new Error("'id' is required and must be an integer");
+      }
+      if (typeof args.confirmTitle !== "string" || args.confirmTitle.length === 0) {
+        throw new Error("'confirmTitle' is required: pass the todo's exact title to confirm the delete.");
+      }
+      const payload = withIdentityGuard({ todoId: args.id, confirmTitle: args.confirmTitle }, args.id);
+      const result = await sendCommand("todo.delete", payload);
+      return "Deleted todo #" + result.id + ": " + result.title + "." + childrenLiftedSuffix(result.childrenLifted);
     }
 
     default:

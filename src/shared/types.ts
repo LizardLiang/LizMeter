@@ -320,6 +320,16 @@ export interface ListTodosInput {
   labelId?: number;
   /** Only the direct children of this todo. Ignores `filter`-style narrowing of the parent itself. */
   parentId?: number;
+  /**
+   * Fetch exactly this todo by id instead of a filtered list. When set, every field above --
+   * and `limit`/`offset` below -- is ignored: a single-id lookup and a filtered page are two
+   * different questions, and honouring both at once would be ambiguous.
+   */
+  id?: number;
+  /** Caps the number of rows returned. Omitted means no cap, the historical behaviour. */
+  limit?: number;
+  /** Rows to skip before `limit` is applied. Has no effect unless `limit` is also set. */
+  offset?: number;
 }
 
 // --- Todo Attachment Types ---

@@ -9,10 +9,20 @@ vi.mock("../index.ts", () => ({
   getMainWindow: () => null,
 }));
 
+// attachment-store.ts pulls in data-location.ts, which calls Electron's `app.getPath` -- real
+// only inside the Electron main process. collectAttachmentBlobs is a no-op loop whenever the sha
+// list it is called with is empty, which is every existing test, so this mock only starts to
+// matter for the new todo.delete tests that exercise a non-empty sha list.
+vi.mock("../attachment-store.ts", () => ({
+  collectAttachmentBlobs: vi.fn(),
+}));
+
 import {
+  createTodoAttachment,
   createTodoLabel,
   createTodoProject,
   findTodoStateByLabel,
+  getDb,
   initDatabase,
   listNvimActivityByDate,
   listTodoLabels,
@@ -20,6 +30,7 @@ import {
   listTodos,
   listTodoStates,
 } from "../database.ts";
+import { collectAttachmentBlobs } from "../attachment-store.ts";
 import { processLine } from "../pipe-server.ts";
 
 /** Runs one line through the protocol and returns the parsed reply, if any. */
@@ -751,5 +762,209 @@ describe("todo.state.delete", () => {
     expect(reply?.ok).toBe(false);
     expect(String(reply?.error)).toMatch(/Unknown state 'Nope'/);
     expect(listTodoStates().some((s) => s.label === "Backlog")).toBe(true);
+  });
+});
+
+// --- todo.list paging ---------------------------------------------------------
+
+describe("todo.list paging", () => {
+  /** Adds `count` todos titled "t0".."t(count-1)" and returns their ids in creation order. */
+  function addMany(count: number): number[] {
+    const ids: number[] = [];
+    for (let i = 0; i < count; i++) {
+      const reply = send({ id: 1000 + i, type: "todo.add", title: `t${i}` });
+      ids.push((reply?.result as { todo: { id: number; }; }).todo.id);
+    }
+    return ids;
+  }
+
+  it("caps at 50 by default and reports the total", () => {
+    addMany(55);
+
+    const reply = send({ id: 1, type: "todo.list" });
+    const result = reply?.result as { todos: unknown[]; total: number; };
+    expect(result.todos).toHaveLength(50);
+    expect(result.total).toBe(55);
+  });
+
+  it("honours an explicit limit and offset", () => {
+    addMany(10);
+    const fullReply = send({ id: 1, type: "todo.list", limit: 100 });
+    const fullOrder = (fullReply?.result as { todos: Array<{ id: number; }>; }).todos.map((t) => t.id);
+
+    const page = send({ id: 2, type: "todo.list", limit: 4, offset: 4 });
+    const result = page?.result as { todos: Array<{ id: number; }>; total: number; };
+    expect(result.todos).toHaveLength(4);
+    expect(result.total).toBe(10);
+    // Offset 4 for a limit of 4 is the 5th-to-8th row of the same order an unpaged call returns.
+    expect(result.todos.map((t) => t.id)).toEqual(fullOrder.slice(4, 8));
+  });
+
+  it("pages without dropping or repeating rows even when every sort key ties", () => {
+    const ids = addMany(12);
+    // Force a tie on every field the ORDER BY uses before the id tiebreaker: same state
+    // (none completed), no due dates, and now the same created_at. Without an explicit `t.id
+    // ASC` tiebreaker this is exactly the shape that can make a LIMIT/OFFSET page nondeterministic.
+    const db = getDb();
+    const tie = "2026-01-01T00:00:00.000Z";
+    for (const id of ids) db.prepare("UPDATE todos SET created_at = ? WHERE id = ?").run(tie, id);
+
+    const fullReply = send({ id: 1, type: "todo.list", limit: 100 });
+    const fullOrder = (fullReply?.result as { todos: Array<{ id: number; }>; }).todos.map((t) => t.id);
+    expect(fullOrder).toEqual([...ids].sort((a, b) => a - b)); // id ASC is the pinned tiebreaker
+
+    const page1 = send({ id: 2, type: "todo.list", limit: 5, offset: 0 });
+    const page2 = send({ id: 3, type: "todo.list", limit: 5, offset: 5 });
+    const page3 = send({ id: 4, type: "todo.list", limit: 5, offset: 10 });
+    const paged = [
+      ...(page1?.result as { todos: Array<{ id: number; }>; }).todos,
+      ...(page2?.result as { todos: Array<{ id: number; }>; }).todos,
+      ...(page3?.result as { todos: Array<{ id: number; }>; }).todos,
+    ].map((t) => t.id);
+
+    expect(paged).toEqual(fullOrder);
+  });
+
+  it("rejects a non-integer limit", () => {
+    const reply = send({ id: 1, type: "todo.list", limit: "lots" });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/'limit'/);
+  });
+
+  it("rejects a negative offset", () => {
+    const reply = send({ id: 1, type: "todo.list", offset: -1 });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/'offset'/);
+  });
+});
+
+// --- todo.list by id -----------------------------------------------------------
+
+describe("todo.list by id", () => {
+  it("returns exactly the one todo", () => {
+    send({ id: 1, type: "todo.add", title: "a" });
+    const added = send({ id: 2, type: "todo.add", title: "b" });
+    const todoId = (added?.result as { todo: { id: number; }; }).todo.id;
+
+    const reply = send({ id: 3, type: "todo.list", todoId });
+    const result = reply?.result as { todos: Array<{ id: number; title: string; }>; total: number; };
+    expect(result.todos).toEqual([expect.objectContaining({ id: todoId, title: "b" })]);
+    expect(result.total).toBe(1);
+  });
+
+  it("ignores other filters once todoId is set", () => {
+    createTodoProject({ name: "LizMeter" });
+    const added = send({ id: 1, type: "todo.add", title: "a" });
+    const todoId = (added?.result as { todo: { id: number; }; }).todo.id;
+
+    // 'project' names a project this todo does not belong to -- todoId still wins.
+    const reply = send({ id: 2, type: "todo.list", todoId, project: "LizMeter" });
+    expect(reply?.ok).toBe(true);
+    const result = reply?.result as { todos: Array<{ id: number; }>; };
+    expect(result.todos).toHaveLength(1);
+  });
+
+  it("reports a clear error for an unknown id, not an empty list", () => {
+    const reply = send({ id: 1, type: "todo.list", todoId: 9999 });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toBe("No todo #9999.");
+  });
+});
+
+// --- todo.delete -----------------------------------------------------------------
+
+describe("todo.delete", () => {
+  function addOne(title = "delete me"): number {
+    const added = send({ id: 1, type: "todo.add", title });
+    return (added?.result as { todo: { id: number; }; }).todo.id;
+  }
+
+  it("deletes the todo when confirmTitle matches exactly", () => {
+    const id = addOne("delete me");
+
+    const reply = send({ id: 2, type: "todo.delete", todoId: id, confirmTitle: "delete me" });
+
+    expect(reply?.ok).toBe(true);
+    expect(reply?.result).toMatchObject({ id, title: "delete me", childrenLifted: 0 });
+    expect(listTodos()).toHaveLength(0);
+  });
+
+  it("refuses a mismatched confirmTitle without echoing the stored title", () => {
+    const id = addOne("secret exact title");
+
+    const reply = send({ id: 2, type: "todo.delete", todoId: id, confirmTitle: "wrong title" });
+
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).not.toMatch(/secret exact title/);
+    expect(listTodos()).toHaveLength(1);
+  });
+
+  it("refuses a confirmTitle that only differs by case or whitespace", () => {
+    const id = addOne("Exact Title");
+
+    const caseReply = send({ id: 2, type: "todo.delete", todoId: id, confirmTitle: "exact title" });
+    expect(caseReply?.ok).toBe(false);
+
+    const trimReply = send({ id: 3, type: "todo.delete", todoId: id, confirmTitle: "Exact Title " });
+    expect(trimReply?.ok).toBe(false);
+
+    expect(listTodos()).toHaveLength(1);
+  });
+
+  it("lifts children to the top level and reports how many", () => {
+    const parentId = addOne("parent");
+    send({ id: 2, type: "todo.add", title: "child a", parentId });
+    send({ id: 3, type: "todo.add", title: "child b", parentId });
+
+    const reply = send({ id: 4, type: "todo.delete", todoId: parentId, confirmTitle: "parent" });
+
+    expect(reply?.result).toMatchObject({ childrenLifted: 2 });
+    const survivors = listTodos();
+    expect(survivors).toHaveLength(2);
+    expect(survivors.every((t) => t.parentId === null)).toBe(true);
+  });
+
+  it("passes the deleted todo's attachment shas to collectAttachmentBlobs", () => {
+    const id = addOne("with attachment");
+    createTodoAttachment({
+      todoId: id,
+      sha256: "a".repeat(64),
+      fileName: "shot.png",
+      mimeType: "image/png",
+      sizeBytes: 100,
+      kind: "image",
+    });
+
+    const reply = send({ id: 2, type: "todo.delete", todoId: id, confirmTitle: "with attachment" });
+
+    expect(reply?.ok).toBe(true);
+    expect(vi.mocked(collectAttachmentBlobs)).toHaveBeenCalledWith(["a".repeat(64)]);
+  });
+
+  it("requires an integer todoId", () => {
+    const reply = send({ id: 1, type: "todo.delete", todoId: "abc", confirmTitle: "x" });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toMatch(/integer 'todoId'/);
+  });
+
+  it("reports an unknown id as 'No todo #N', not a silent no-op", () => {
+    const reply = send({ id: 1, type: "todo.delete", todoId: 9999, confirmTitle: "x" });
+    expect(reply?.ok).toBe(false);
+    expect(String(reply?.error)).toBe("No todo #9999.");
+  });
+
+  it("refuses a stale delete the same way todo.update and todo.complete do", () => {
+    const id = addOne("a");
+
+    const reply = send({
+      id: 2,
+      type: "todo.delete",
+      todoId: id,
+      confirmTitle: "a",
+      expectUuid: "00000000-0000-0000-0000-000000000000",
+    });
+
+    expect(String(reply?.error)).toContain("renumbered");
+    expect(listTodos()).toHaveLength(1); // the delete really did not land
   });
 });
