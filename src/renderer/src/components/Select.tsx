@@ -96,18 +96,19 @@ export function Select({ value, options, onChange, ariaLabel, placeholder, class
       if (listRef.current?.contains(target) || triggerRef.current?.contains(target)) return;
       setOpen(false);
     };
-    const onScrollOrResize = () => setOpen(false);
 
     document.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("resize", onScrollOrResize);
-    // Capture phase so scrolling any ancestor container closes it too.
-    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", place);
+    // The popup is portalled, so keep it anchored when either the list or one
+    // of the trigger's scrollable ancestors moves. Closing here is unreliable:
+    // Chromium can attribute a wheel over the popup to the page scroller.
+    window.addEventListener("scroll", place, true);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("resize", onScrollOrResize);
-      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
     };
-  }, [open]);
+  }, [open, place]);
 
   function onTriggerKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Enter" || e.key === " ") {
