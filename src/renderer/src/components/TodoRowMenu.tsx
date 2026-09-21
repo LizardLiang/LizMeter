@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Todo, TodoState } from "../../../shared/types.ts";
-import { copyFeedbackLabel, useCopyFeedback } from "../hooks/useCopyFeedback.ts";
+import { copyFeedbackIsFailed, copyFeedbackLabel, useCopyFeedback } from "../hooks/useCopyFeedback.ts";
 import { formatTodoAgentPrompt, formatTodoId } from "../utils/todoClipboard.ts";
 import styles from "./TodoRowMenu.module.scss";
 
@@ -72,6 +72,12 @@ export function TodoActionMenu(props: MenuProps) {
    * label. The feedback window closes the menu when it expires -- unlike the detail page's
    * overflow menu, which only reverts its label and stays open. */
   const { feedback: copyFeedback, trigger: triggerCopyFeedback } = useCopyFeedback<"id" | "prompt">(close);
+  /** True while a `handleCopyPrompt` fetch-then-copy chain is in flight. The feedback window only
+   * closes the menu once the copy has already resolved, so a double-click before then is not
+   * blocked by that -- without this flag a second click fires a second `todo.list({ parentId })`
+   * call, and whichever response lands last wins the clipboard instead of whichever click was
+   * last (same exposure as `TodoDetailPage.handleCopyPrompt`, fixed the same way). */
+  const [copyPromptPending, setCopyPromptPending] = useState(false);
 
   const pos = useMemo(() => {
     const height = (states.length + FIXED_ROWS + (hasParent ? 1 : 0)) * ROW_HEIGHT;
@@ -127,8 +133,10 @@ export function TodoActionMenu(props: MenuProps) {
 
   function handleCopyPrompt(e: React.MouseEvent) {
     e.stopPropagation();
+    if (copyPromptPending) return;
+    setCopyPromptPending(true);
     const parent = todo.parentId !== null
-      ? { id: todo.parentId, title: todo.parentTitle ?? `#${todo.parentId}` }
+      ? { id: todo.parentId, title: todo.parentTitle ?? formatTodoId(todo.parentId) }
       : null;
     // `todo` here only carries `childCount`, not the child rows themselves, and the list's own
     // `todos` array is filtered by the active view -- so the direct children are fetched fresh
@@ -153,7 +161,8 @@ export function TodoActionMenu(props: MenuProps) {
       .catch((err: unknown) => {
         console.error("Failed to copy agent prompt", err);
         triggerCopyFeedback("prompt", "failed");
-      });
+      })
+      .finally(() => setCopyPromptPending(false));
   }
 
   return createPortal(
@@ -179,10 +188,21 @@ export function TodoActionMenu(props: MenuProps) {
       }
       <div className={styles.divider} />
       <p className={styles.sectionLabel}>Copy</p>
-      <button className={styles.item} type="button" role="menuitem" onClick={handleCopyId}>
+      <button
+        className={copyFeedbackIsFailed(copyFeedback, "id") ? styles.itemFailed : styles.item}
+        type="button"
+        role="menuitem"
+        onClick={handleCopyId}
+      >
         {copyFeedbackLabel(copyFeedback, "id", "Copy id")}
       </button>
-      <button className={styles.item} type="button" role="menuitem" onClick={handleCopyPrompt}>
+      <button
+        className={copyFeedbackIsFailed(copyFeedback, "prompt") ? styles.itemFailed : styles.item}
+        type="button"
+        role="menuitem"
+        disabled={copyPromptPending}
+        onClick={handleCopyPrompt}
+      >
         {copyFeedbackLabel(copyFeedback, "prompt", "Copy agent prompt")}
       </button>
 

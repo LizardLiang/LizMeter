@@ -1,5 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { formatTodoAgentPrompt, formatTodoId } from "../todoClipboard.ts";
+import { collapseLineBreaks, formatTodoAgentPrompt, formatTodoId } from "../todoClipboard.ts";
+
+describe("collapseLineBreaks", () => {
+  it("collapses a single newline to a single space", () => {
+    expect(collapseLineBreaks("Line one\nLine two")).toBe("Line one Line two");
+  });
+
+  it("collapses a run of line breaks to one space, not one per line break", () => {
+    expect(collapseLineBreaks("Line one \r\n\n  Line two")).toBe("Line one Line two");
+  });
+
+  it(
+    "also eats whitespace surrounding the line break, not just the break itself -- the behavior "
+      + "TodoDetailPage's title field now shares with this module (item 3, Hermes re-review)",
+    () => {
+      expect(collapseLineBreaks("foo  \n  bar")).toBe("foo bar");
+    },
+  );
+});
 
 describe("formatTodoId", () => {
   it("TC-01: prefixes the id with a hash", () => {

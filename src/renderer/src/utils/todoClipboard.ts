@@ -30,14 +30,20 @@ export function formatTodoId(id: number): string {
 }
 
 /**
- * A newline in the title would break the `# ${title}` heading below. The MCP `todo_add`/
- * `todo_update` schema only describes a single-line title, it does not enforce one, so an
- * AI-agent write can still put a newline (or several) there -- same hazard a multi-line paste
- * would smuggle in through the UI (see `collapseLineBreaks` in `TodoDetailPage.tsx`). Any run of
- * line breaks, and the whitespace immediately around it, collapses to a single space.
+ * Collapses any run of line breaks -- and the whitespace immediately around it -- to a single
+ * space. Shared by two callers that each face the same hazard from a different direction:
+ * - `formatTodoAgentPrompt` below, where a newline in the title would break the `# ${title}`
+ *   heading. The MCP `todo_add`/`todo_update` schema only describes a single-line title, it does
+ *   not enforce one, so an AI-agent write can still put a newline (or several) there.
+ * - `TodoDetailPage`'s title field, a `<textarea>` that only wraps visually -- Enter never
+ *   inserts a newline, but a paste can still smuggle one in.
+ *
+ * Lives here rather than in each caller (476f49a duplicated the whole copy-feedback timer this
+ * same way, see `useCopyFeedback.ts`'s header comment) -- one regex, one behavior, everywhere a
+ * title needs to render or auto-save as a single line.
  */
-function collapseTitleForHeading(title: string): string {
-  return title.replace(/\s*(?:\r\n|\r|\n)\s*/g, " ");
+export function collapseLineBreaks(value: string): string {
+  return value.replace(/\s*(?:\r\n|\r|\n)\s*/g, " ");
 }
 
 /**
@@ -65,7 +71,7 @@ export function formatTodoAgentPrompt(
   parent: ClipboardParent | null,
   children: ClipboardChild[],
 ): string {
-  const sections: string[] = [`# ${collapseTitleForHeading(todo.title)}`];
+  const sections: string[] = [`# ${collapseLineBreaks(todo.title)}`];
 
   const notes = todo.notes?.trim() ?? "";
   if (notes.length > 0) {

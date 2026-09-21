@@ -1173,6 +1173,31 @@ describe("TodosPage row menu copy actions", () => {
     expect(screen.getByRole("menu", { name: "Actions for Fix misc code quality issues" })).toBeInTheDocument();
   });
 
+  it(
+    "a second click on \"Copy agent prompt\" while the first fetch is still in flight is ignored, so only one todo.list({ parentId }) call is made (item 2, Hermes re-review) -- the feedback window that would otherwise guard re-entry only starts after the first click's fetch resolves",
+    async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+      await renderPage();
+
+      openRowMenu("Old prod to new prod migration");
+      const callsBeforeClicks = mockTodoAPI.list.mock.calls.length;
+
+      // Neither click awaits anything in between -- both land while the first click's
+      // `todo.list({ parentId })` call is still unresolved (nothing here ever calls
+      // `mockResolvedValue` synchronously, so the returned promise is still pending at this point).
+      const promptItem = () => screen.getByRole("menuitem", { name: "Copy agent prompt" });
+      fireEvent.click(promptItem());
+      fireEvent.click(promptItem());
+
+      // With the bug, the second click fires its own `todo.list` call before the first resolves --
+      // two calls instead of one.
+      expect(mockTodoAPI.list.mock.calls.length - callsBeforeClicks).toBe(1);
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    },
+  );
+
   it("shows \"Copy failed\" instead of \"Copied ✓\" and logs it when the clipboard write for \"Copy id\" rejects, still closing the menu once the window expires", async () => {
     const writeText = vi.fn().mockRejectedValue(new Error("denied"));
     Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });

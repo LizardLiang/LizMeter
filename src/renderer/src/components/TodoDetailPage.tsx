@@ -7,8 +7,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Todo, TodoProject } from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS } from "../../../shared/types.ts";
 import { useTodosContext } from "../contexts/TodosContext.tsx";
-import { copyFeedbackLabel, useCopyFeedback } from "../hooks/useCopyFeedback.ts";
-import { formatTodoAgentPrompt, formatTodoId } from "../utils/todoClipboard.ts";
+import { copyFeedbackIsFailed, copyFeedbackLabel, useCopyFeedback } from "../hooks/useCopyFeedback.ts";
+import { collapseLineBreaks, formatTodoAgentPrompt, formatTodoId } from "../utils/todoClipboard.ts";
 import { Combobox } from "./Combobox.tsx";
 import { DatePicker } from "./DatePicker.tsx";
 import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor.tsx";
@@ -20,16 +20,6 @@ import { SubProgressRing } from "./TodosPage.tsx";
 
 /** Title and notes save this long after the user stops typing (F10). */
 const DEBOUNCE_MS = 600;
-
-/**
- * The title is single-line TEXT that merely wraps on screen (a `<textarea>` with
- * `field-sizing: content`, not a multi-line field) -- Enter never inserts a newline, but a paste
- * can still smuggle one in. Every run of line breaks collapses to one space before the value
- * reaches the draft, matching how a plain `<input>` would have silently eaten them.
- */
-function collapseLineBreaks(value: string): string {
-  return value.replace(/(\r\n|\r|\n)+/g, " ");
-}
 
 interface Props {
   todoId: number;
@@ -242,6 +232,12 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
    * normal label. Unlike the row menu's copy items, the feedback window's expiry here only
    * reverts the label -- the overflow menu stays open (no `onExpire` passed). */
   const { feedback: copyFeedback, trigger: triggerCopyFeedback } = useCopyFeedback<"id" | "prompt">();
+  /** True while a `handleCopyPrompt` fetch-then-copy chain is in flight. The overflow menu stays
+   * open after a copy (unlike the row menu), so nothing else stops a second click from firing a
+   * second `todo.list({ parentId })` call before the first resolves -- whichever response landed
+   * last would silently win the clipboard instead of whichever click was last. Same shape as
+   * `deleting` below: a flag checked at handler entry and reflected on the button's `disabled`. */
+  const [copyPromptPending, setCopyPromptPending] = useState(false);
 
   const loadChildren = useCallback(async () => {
     try {
@@ -481,7 +477,13 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
   };
 
   const handleCopyPrompt = () => {
-    const parentInfo = parentId !== null ? { id: parentId, title: todo.parentTitle ?? `#${parentId}` } : null;
+    // This handler is async (the `todo.list` fetch below) and the overflow menu deliberately
+    // stays open after a copy -- so without this guard a second click before the first fetch
+    // resolves fires a second `todo.list` call, and whichever response lands last wins the
+    // clipboard instead of whichever click was last (silent wrong result, no crash).
+    if (copyPromptPending) return;
+    setCopyPromptPending(true);
+    const parentInfo = parentId !== null ? { id: parentId, title: todo.parentTitle ?? formatTodoId(parentId) } : null;
     // The local `children` state only reflects the last successful `loadChildren` call (its catch
     // block is empty by design -- a failed load simply leaves it stale), so it cannot be trusted
     // as "the current sub-issues" at copy time. Fetched fresh here instead, mirroring
@@ -505,7 +507,8 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
       .catch((err: unknown) => {
         console.error("Failed to copy agent prompt", err);
         triggerCopyFeedback("prompt", "failed");
-      });
+      })
+      .finally(() => setCopyPromptPending(false));
   };
 
   return (
@@ -560,7 +563,9 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
               {overflowOpen && (
                 <div className={styles.overflowMenu} role="menu" aria-label={`Actions for ${todo.title}`}>
                   <button
-                    className={styles.overflowItemNeutral}
+                    className={copyFeedbackIsFailed(copyFeedback, "id")
+                      ? styles.overflowItemFailed
+                      : styles.overflowItemNeutral}
                     type="button"
                     role="menuitem"
                     onClick={handleCopyId}
@@ -568,9 +573,12 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
                     {copyFeedbackLabel(copyFeedback, "id", "Copy id")}
                   </button>
                   <button
-                    className={styles.overflowItemNeutral}
+                    className={copyFeedbackIsFailed(copyFeedback, "prompt")
+                      ? styles.overflowItemFailed
+                      : styles.overflowItemNeutral}
                     type="button"
                     role="menuitem"
+                    disabled={copyPromptPending}
                     onClick={handleCopyPrompt}
                   >
                     {copyFeedbackLabel(copyFeedback, "prompt", "Copy agent prompt")}
@@ -632,7 +640,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
                       title="Go to parent"
                     >
                       <span className={styles.chipId}>#{parentId}</span>
-                      Sub-issue of {todo.parentTitle ?? `#${parentId}`}
+                      Sub-issue of {todo.parentTitle ?? formatTodoId(parentId)}
                     </button>
                     <button
                       className={styles.chipChangeParent}

@@ -59,6 +59,13 @@ export function useCopyFeedback<TAction extends string>(
   });
 
   useEffect(() => {
+    // Re-armed on every setup, not just initialized once via `useRef(true)` above -- StrictMode's
+    // dev-only double-invoke (setup -> cleanup -> setup) runs the cleanup below once before this
+    // component is ever interacted with, and without this line that first cleanup would leave
+    // `aliveRef` permanently false: `trigger`'s entry guard would then bail forever, so every copy
+    // still writes the clipboard but never shows "Copied ✓"/"Copy failed" in `bun run dev`
+    // (production is unaffected -- StrictMode only double-invokes in development).
+    aliveRef.current = true;
     return () => {
       aliveRef.current = false;
       // A stale timer must never touch state -- or call `onExpire` -- once this is gone.
@@ -97,4 +104,16 @@ export function copyFeedbackLabel<TAction extends string>(
 ): string {
   if (feedback === null || feedback.action !== action) return normalLabel;
   return feedback.status === "failed" ? "Copy failed" : "Copied ✓";
+}
+
+/**
+ * True when `feedback` belongs to `action` and reads "Copy failed" -- the same comparison
+ * `copyFeedbackLabel` makes internally, pulled out so a call site can pick a failed-state class
+ * for the same label slot without duplicating the `action`/`status` check.
+ */
+export function copyFeedbackIsFailed<TAction extends string>(
+  feedback: CopyFeedbackState<TAction> | null,
+  action: TAction,
+): boolean {
+  return feedback !== null && feedback.action === action && feedback.status === "failed";
 }

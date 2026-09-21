@@ -664,6 +664,20 @@ describe("TodoDetailPage auto-save", () => {
     expect(title).toHaveValue("Line one Line two");
   });
 
+  it(
+    "also collapses the whitespace surrounding a pasted line break, not just the break itself -- "
+      + "the title field now shares `collapseLineBreaks` with todoClipboard.ts's heading formatter "
+      + "(item 3, Hermes re-review), which already collapsed surrounding whitespace too",
+    async () => {
+      await renderDetail(100);
+
+      const title = screen.getByLabelText("Title");
+      fireEvent.change(title, { target: { value: "foo  \n  bar" } });
+
+      expect(title).toHaveValue("foo bar");
+    },
+  );
+
   it("flushes a pending title write on unmount, so navigating away never loses it", async () => {
     const { unmount } = await renderDetail(100);
     // Freezes the clock so the 600ms debounce timer can never fire on its own -- without this,
@@ -772,6 +786,31 @@ describe("TodoDetailPage overflow menu copy actions", () => {
     expect(prompt).toContain("## Sub-issues");
     expect(prompt).toContain("#500 Newly linked child");
   });
+
+  it(
+    "a second click on \"Copy agent prompt\" while the first fetch is still in flight is ignored, so only one todo.list({ parentId }) call is made (item 2, Hermes re-review) -- the overflow menu deliberately stays open after a copy, so nothing else guards a double-click here",
+    async () => {
+      const writeText = vi.fn().mockResolvedValue(undefined);
+      Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+      await renderDetail(100);
+
+      fireEvent.click(screen.getByLabelText("More actions"));
+      const callsBeforeClicks = mockTodoAPI.list.mock.calls.length;
+
+      // Neither click awaits anything in between -- both land while the first click's
+      // `todo.list({ parentId })` call is still unresolved.
+      const promptItem = () => screen.getByRole("menuitem", { name: "Copy agent prompt" });
+      fireEvent.click(promptItem());
+      fireEvent.click(promptItem());
+
+      // With the bug, the second click fires its own `todo.list` call before the first resolves --
+      // two calls instead of one.
+      expect(mockTodoAPI.list.mock.calls.length - callsBeforeClicks).toBe(1);
+
+      await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    },
+  );
 
   it("shows \"Copy failed\" instead of \"Copied ✓\" and logs it when the clipboard write for \"Copy id\" rejects, without closing the overflow menu", async () => {
     const writeText = vi.fn().mockRejectedValue(new Error("denied"));

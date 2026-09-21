@@ -57,6 +57,18 @@
   }
 }
 
+// The failed-state color for a copy item -- same red as `.itemDanger`, but this one swaps back
+// to `.item` on the next attempt instead of staying red permanently. Without this, "Copy failed"
+// rendered through the same uncolored slot as "Copied ✓" and read exactly like a success.
+.itemFailed {
+  composes: item;
+  color: #f7768e;
+
+  &:hover:not(:disabled) {
+    background: rgba(247, 118, 142, 0.14);
+  }
+}
+
 .sectionLabel {
   display: flex;
   align-items: center;

@@ -1,7 +1,8 @@
 // useCopyFeedback hook tests
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { copyFeedbackLabel, useCopyFeedback } from "../useCopyFeedback.ts";
+import { copyFeedbackIsFailed, copyFeedbackLabel, useCopyFeedback } from "../useCopyFeedback.ts";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -93,6 +94,23 @@ describe("useCopyFeedback", () => {
     expect(() => act(() => result.current.trigger("id"))).not.toThrow();
     expect(result.current.feedback).toBeNull();
   });
+
+  it(
+    "still produces feedback after StrictMode's dev-only double-invoke (mount, cleanup, mount) -- aliveRef must be re-armed on setup, not just initialized once (regression, bun run dev)",
+    () => {
+      // Mounting under <StrictMode> is what makes React 18 run this hook's cleanup effect once
+      // (setup -> cleanup -> setup) before anything ever calls `trigger`. Without re-arming
+      // `aliveRef` in the effect's setup body, that first cleanup leaves it permanently false, so
+      // `trigger`'s entry guard bails forever -- exactly what happened in `bun run dev` (StrictMode
+      // is on there; RTL does not wrap in StrictMode by default, which is why no existing test
+      // caught this).
+      const { result } = renderHook(() => useCopyFeedback<"id" | "prompt">(), { wrapper: StrictMode });
+
+      act(() => result.current.trigger("id"));
+
+      expect(result.current.feedback).toEqual({ action: "id", status: "copied" });
+    },
+  );
 });
 
 describe("copyFeedbackLabel", () => {
@@ -110,5 +128,23 @@ describe("copyFeedbackLabel", () => {
 
   it("returns \"Copy failed\" when feedback matches the action with a \"failed\" status", () => {
     expect(copyFeedbackLabel({ action: "id", status: "failed" }, "id", "Copy id")).toBe("Copy failed");
+  });
+});
+
+describe("copyFeedbackIsFailed", () => {
+  it("returns false when there is no feedback armed", () => {
+    expect(copyFeedbackIsFailed<"id" | "prompt">(null, "id")).toBe(false);
+  });
+
+  it("returns false when the armed feedback belongs to a different action", () => {
+    expect(copyFeedbackIsFailed({ action: "prompt", status: "failed" }, "id")).toBe(false);
+  });
+
+  it("returns false when the matching feedback succeeded", () => {
+    expect(copyFeedbackIsFailed({ action: "id", status: "copied" }, "id")).toBe(false);
+  });
+
+  it("returns true when the matching feedback failed", () => {
+    expect(copyFeedbackIsFailed({ action: "id", status: "failed" }, "id")).toBe(true);
   });
 });
