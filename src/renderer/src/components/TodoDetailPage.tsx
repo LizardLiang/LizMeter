@@ -9,7 +9,7 @@ import { TODO_PRIORITY_LABELS } from "../../../shared/types.ts";
 import { useTodosContext } from "../contexts/TodosContext.tsx";
 import { Combobox } from "./Combobox.tsx";
 import { DatePicker } from "./DatePicker.tsx";
-import { MarkdownEditor } from "./MarkdownEditor.tsx";
+import { MarkdownEditor, type MarkdownEditorHandle } from "./MarkdownEditor.tsx";
 import { Select } from "./Select.tsx";
 import { TodoAttachments } from "./TodoAttachments.tsx";
 import styles from "./TodoDetailPage.module.scss";
@@ -18,6 +18,16 @@ import { SubProgressRing } from "./TodosPage.tsx";
 
 /** Title and notes save this long after the user stops typing (F10). */
 const DEBOUNCE_MS = 600;
+
+/**
+ * The title is single-line TEXT that merely wraps on screen (a `<textarea>` with
+ * `field-sizing: content`, not a multi-line field) -- Enter never inserts a newline, but a paste
+ * can still smuggle one in. Every run of line breaks collapses to one space before the value
+ * reaches the draft, matching how a plain `<input>` would have silently eaten them.
+ */
+function collapseLineBreaks(value: string): string {
+  return value.replace(/(\r\n|\r|\n)+/g, " ");
+}
 
 interface Props {
   todoId: number;
@@ -224,6 +234,8 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
   const overflowWrapRef = useRef<HTMLDivElement>(null);
   /** De-dupes a repeat commit (Enter, then blur) for a name still being created (BLOCKER 3). */
   const projectCreateRef = useRef<Map<string, Promise<TodoProject>>>(new Map());
+  /** Enter in the title moves focus here, caret at the very start -- see `handleTitleKeyDown`. */
+  const notesEditorRef = useRef<MarkdownEditorHandle>(null);
 
   const loadChildren = useCallback(async () => {
     try {
@@ -249,6 +261,19 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
   }, [todoId, updateTodoQuiet]);
 
   const titleDraft = useQuietDraft(todo?.title ?? "", commitTitle);
+
+  /**
+   * Enter is "done with the title," not "add a line" -- the field is single-line text that only
+   * wraps visually. `preventDefault` stops the textarea from ever seeing the newline, `onBlur`
+   * flushes the debounce exactly the way a real blur would (same function, same behaviour), and
+   * focus moves into notes with the caret at the very start rather than wherever it last was.
+   */
+  function handleTitleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    titleDraft.onBlur();
+    notesEditorRef.current?.focusStart();
+  }
 
   const commitNotes = useCallback((value: string): Promise<void> => {
     return updateTodoQuiet({ id: todoId, notes: value.trim().length > 0 ? value.trim() : null });
@@ -510,14 +535,16 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
         }
         <div className={styles.layout}>
           <div className={styles.mainHeader}>
-            <input
+            <textarea
               className={styles.titleInput}
               value={titleDraft.value}
-              onChange={(e) => titleDraft.onChange(e.target.value)}
+              onChange={(e) => titleDraft.onChange(collapseLineBreaks(e.target.value))}
               onFocus={titleDraft.onFocus}
               onBlur={titleDraft.onBlur}
+              onKeyDown={handleTitleKeyDown}
               maxLength={500}
               aria-label="Title"
+              rows={1}
             />
 
             <div className={styles.metaLine}>
@@ -686,6 +713,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
             <div className={styles.notesField} onFocus={notesDraft.onFocus} onBlur={notesDraft.onBlur}>
               <span className={styles.visuallyHidden} id="todo-detail-notes-label">Notes</span>
               <MarkdownEditor
+                ref={notesEditorRef}
                 value={notesDraft.value}
                 onChange={notesDraft.onChange}
                 ariaLabelledBy="todo-detail-notes-label"

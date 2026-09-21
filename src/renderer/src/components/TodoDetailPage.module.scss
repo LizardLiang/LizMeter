@@ -228,6 +228,10 @@
 
 /* --- Title + meta line --- */
 
+// A `<textarea>`, not an `<input>`: the title is single-line TEXT that only wraps visually (Enter
+// commits and moves on, never inserts a newline -- see `handleTitleKeyDown` in the component).
+// `field-sizing: content` (Electron 40/Chromium ships it) grows the box with its content with no
+// JS resize logic; `rows={1}` on the element is what keeps an empty title exactly one line tall.
 .titleInput {
   display: block;
   width: 100%;
@@ -239,7 +243,11 @@
   font-size: 1.5rem;
   font-weight: 700;
   font-family: inherit;
+  line-height: 1.3;
   outline: none;
+  resize: none;
+  overflow: hidden;
+  field-sizing: content;
 
   &:focus {
     outline: none;

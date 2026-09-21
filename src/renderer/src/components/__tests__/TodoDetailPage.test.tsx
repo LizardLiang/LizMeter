@@ -1,9 +1,22 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Todo, TodoLabel, TodoProject, TodoState, UpdateTodoInput } from "../../../../shared/types.ts";
 import { TodosProvider } from "../../contexts/TodosContext.tsx";
 import { TodoDetailPage } from "../TodoDetailPage.tsx";
 import { TodosPage } from "../TodosPage.tsx";
+
+// jsdom implements no layout, so `Range#getClientRects` is missing. Focusing the notes
+// MarkdownEditor (`handleTitleKeyDown`'s Enter path) makes CodeMirror schedule an async measure
+// pass on the next animation frame; unlike the synchronous mount-time measure CodeMirror already
+// swallows internally, that rAF-scheduled pass throws with nothing left to catch it, and Vitest
+// reports it as a genuine unhandled exception rather than the usual stderr noise. Same stub
+// `MarkdownEditor.test.tsx` uses -- nothing here asserts on geometry.
+beforeAll(() => {
+  if (typeof Range.prototype.getClientRects !== "function") {
+    Range.prototype.getClientRects = () => Object.assign([], { item: () => null }) as unknown as DOMRectList;
+    Range.prototype.getBoundingClientRect = () => new DOMRect();
+  }
+});
 
 const todoState: TodoState = {
   id: 1,
@@ -576,6 +589,31 @@ describe("TodoDetailPage auto-save", () => {
     fireEvent.blur(input);
 
     await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, title: "Renamed on blur" }));
+  });
+
+  it("Enter in the title inserts no newline, commits immediately, and moves focus into notes", async () => {
+    await renderDetail(100);
+
+    const title = screen.getByLabelText("Title");
+    fireEvent.change(title, { target: { value: "Renamed via Enter" } });
+    fireEvent.keyDown(title, { key: "Enter" });
+
+    // No debounce wait -- Enter flushes the same way blur does, not on the 600ms timer.
+    expect(title).toHaveValue("Renamed via Enter");
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, title: "Renamed via Enter" }));
+    await waitFor(() => expect(screen.getByLabelText("Notes")).toHaveFocus());
+  });
+
+  it("collapses a line break typed or pasted into the title into a single space", async () => {
+    await renderDetail(100);
+
+    const title = screen.getByLabelText("Title");
+    // `fireEvent.change` with an embedded newline stands in for both a typed Enter that somehow
+    // reaches the textarea's value and a paste carrying multiple lines -- jsdom cannot synthesize
+    // a real OS paste, but the component sanitizes the resulting value identically either way.
+    fireEvent.change(title, { target: { value: "Line one\nLine two" } });
+
+    expect(title).toHaveValue("Line one Line two");
   });
 
   it("flushes a pending title write on unmount, so navigating away never loses it", async () => {

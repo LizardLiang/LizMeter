@@ -5,11 +5,22 @@ import { EditorState, Facet, Prec, StateEffect, StateField } from "@codemirror/s
 import { EditorView, keymap } from "@codemirror/view";
 import { classHighlighter } from "@lezer/highlight";
 import CodeMirror from "@uiw/react-codemirror";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { forwardRef, useCallback, useEffect, useId, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { NOTES_MAX_LENGTH, type TodoAttachment } from "../../../shared/types.ts";
 import { livePreviewPlugin, tablePreviewField } from "../editor/livePreviewPlugin.ts";
 import styles from "./MarkdownEditor.module.scss";
+
+/**
+ * Imperative escape hatch for the one thing a controlled `value`/`onChange` pair cannot drive:
+ * moving focus into the editor with the caret at a specific position. `TodoDetailPage` uses it so
+ * Enter in the title field lands the caret at the very start of the notes, not wherever it last
+ * was.
+ */
+export interface MarkdownEditorHandle {
+  /** Focuses the inline editor and places the caret at the very start of the document. */
+  focusStart: () => void;
+}
 
 interface MarkdownEditorProps {
   value: string;
@@ -530,140 +541,159 @@ function ModalEditor(
  * reconciles a changed `value` prop by itself -- which is why applying a draft needs no
  * imperative sync of the kind `RichTextInput.handleModalSave` performs for TipTap.
  */
-export function MarkdownEditor(
-  {
-    value,
-    onChange,
-    placeholder,
-    minHeight = 160,
-    maxHeight = 320,
-    variant = "framed",
-    disabled = false,
-    // Defaulted here rather than at the create dialog's (TodoEditDialog) call site: the dialog
-    // is owned by another change in flight, and every caller of this editor wants live preview anyway.
-    livePreview = true,
-    ariaLabelledBy,
-    expandable = false,
-    modalTitle = "Edit Notes",
-    onModalOpenChange,
-    autoFocus = false,
-    fillHeight = false,
-    todoId = null,
-  }: MarkdownEditorProps,
-) {
-  const [modalOpen, setModalOpen] = useState(false);
-  // `seq` makes the object identity change even when the same message is shown twice, which is
-  // what re-arms the dismissal timer below. Holding the timer handle in a ref instead would be
-  // the obvious shape, but a ref read during render is rejected outright by the React Compiler
-  // lint rules -- and this version gets unmount cleanup for free.
-  const [hint, setHint] = useState<{ message: string; seq: number; } | null>(null);
+export const MarkdownEditor = forwardRef<MarkdownEditorHandle, MarkdownEditorProps>(
+  function MarkdownEditor(
+    {
+      value,
+      onChange,
+      placeholder,
+      minHeight = 160,
+      maxHeight = 320,
+      variant = "framed",
+      disabled = false,
+      // Defaulted here rather than at the create dialog's (TodoEditDialog) call site: the dialog
+      // is owned by another change in flight, and every caller of this editor wants live preview anyway.
+      livePreview = true,
+      ariaLabelledBy,
+      expandable = false,
+      modalTitle = "Edit Notes",
+      onModalOpenChange,
+      autoFocus = false,
+      fillHeight = false,
+      todoId = null,
+    }: MarkdownEditorProps,
+    ref,
+  ) {
+    const [modalOpen, setModalOpen] = useState(false);
+    // Populated by `onCreateEditor` below. Not read during render -- only from the imperative
+    // handle, which always runs from an event handler -- so a ref here is the React Compiler's
+    // preferred shape, not the rejected "ref read during render" one.
+    const viewRef = useRef<EditorView | null>(null);
 
-  const showHint = useCallback((message: string) => {
-    setHint((prev) => ({ message, seq: (prev?.seq ?? 0) + 1 }));
-  }, []);
+    useImperativeHandle(ref, () => ({
+      focusStart: () => {
+        const view = viewRef.current;
+        if (view === null) return;
+        view.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
+        view.focus();
+      },
+    }), []);
+    // `seq` makes the object identity change even when the same message is shown twice, which is
+    // what re-arms the dismissal timer below. Holding the timer handle in a ref instead would be
+    // the obvious shape, but a ref read during render is rejected outright by the React Compiler
+    // lint rules -- and this version gets unmount cleanup for free.
+    const [hint, setHint] = useState<{ message: string; seq: number; } | null>(null);
 
-  useEffect(() => {
-    if (hint === null) return;
-    const timer = window.setTimeout(() => setHint(null), 5000);
-    return () => clearTimeout(timer);
-  }, [hint]);
+    const showHint = useCallback((message: string) => {
+      setHint((prev) => ({ message, seq: (prev?.seq ?? 0) + 1 }));
+    }, []);
 
-  const extensions = useMemo(() => [
-    // `base: markdownLanguage` is GFM. The commonmark default has no Strikethrough node at
-    // all, so `~~gone~~` would never reach the live-preview walker. `codeLanguages: languages`
-    // is what lets a fenced ```ts / ```json / ```bash block get its own nested parser --
-    // lazily, on first paint of that block, from `@codemirror/language-data` -- so its tokens
-    // reach `syntaxHighlighting(classHighlighter)` below instead of rendering as plain text.
-    markdown({ base: markdownLanguage, codeLanguages: languages }),
-    syntaxHighlighting(classHighlighter),
-    EditorView.lineWrapping,
-    EditorView.contentAttributes.of(ariaLabelledBy === undefined ? {} : { "aria-labelledby": ariaLabelledBy }),
-    lengthCap,
-    modEnterGuard,
-    uploadMarks,
-    attachmentConfig.of({ todoId, disabled, notify: showHint }),
-    attachmentHandlers,
-    // Highlighting stays underneath: it still colours the revealed line, and the constructs
-    // live preview leaves alone (setext headings) keep their token colours.
-    //
-    // `tablePreviewField` rides alongside `livePreviewPlugin` rather than inside it: CodeMirror
-    // refuses a block decoration from a `ViewPlugin`, and a table is the one construct that
-    // needs one.
-    ...(livePreview ? [livePreviewPlugin, tablePreviewField] : []),
-  ], [ariaLabelledBy, livePreview, todoId, disabled, showHint]);
+    useEffect(() => {
+      if (hint === null) return;
+      const timer = window.setTimeout(() => setHint(null), 5000);
+      return () => clearTimeout(timer);
+    }, [hint]);
 
-  // The modal cannot silence the dialog's own native Escape listener from inside itself, so
-  // the dialog is told when to stand down instead. See the comment in ModalEditor.
-  useEffect(() => {
-    onModalOpenChange?.(modalOpen);
-  }, [modalOpen, onModalOpenChange]);
+    const extensions = useMemo(() => [
+      // `base: markdownLanguage` is GFM. The commonmark default has no Strikethrough node at
+      // all, so `~~gone~~` would never reach the live-preview walker. `codeLanguages: languages`
+      // is what lets a fenced ```ts / ```json / ```bash block get its own nested parser --
+      // lazily, on first paint of that block, from `@codemirror/language-data` -- so its tokens
+      // reach `syntaxHighlighting(classHighlighter)` below instead of rendering as plain text.
+      markdown({ base: markdownLanguage, codeLanguages: languages }),
+      syntaxHighlighting(classHighlighter),
+      EditorView.lineWrapping,
+      EditorView.contentAttributes.of(ariaLabelledBy === undefined ? {} : { "aria-labelledby": ariaLabelledBy }),
+      lengthCap,
+      modEnterGuard,
+      uploadMarks,
+      attachmentConfig.of({ todoId, disabled, notify: showHint }),
+      attachmentHandlers,
+      // Highlighting stays underneath: it still colours the revealed line, and the constructs
+      // live preview leaves alone (setext headings) keep their token colours.
+      //
+      // `tablePreviewField` rides alongside `livePreviewPlugin` rather than inside it: CodeMirror
+      // refuses a block decoration from a `ViewPlugin`, and a table is the one construct that
+      // needs one.
+      ...(livePreview ? [livePreviewPlugin, tablePreviewField] : []),
+    ], [ariaLabelledBy, livePreview, todoId, disabled, showHint]);
 
-  // `@uiw` writes these as inline styles on `.cm-editor`, so the three shapes are exclusive: in
-  // the modal the flex body owns the height and any min/max here would fight it, and bare mode
-  // deliberately passes no `maxHeight` at all -- the editor grows with its content and the page
-  // scrolls, rather than scrolling inside a fixed box.
-  const sizing = fillHeight
-    ? { height: "100%" }
-    : variant === "bare"
-    ? { minHeight: `${BARE_MIN_HEIGHT}px` }
-    : { minHeight: `${minHeight}px`, maxHeight: `${maxHeight}px` };
+    // The modal cannot silence the dialog's own native Escape listener from inside itself, so
+    // the dialog is told when to stand down instead. See the comment in ModalEditor.
+    useEffect(() => {
+      onModalOpenChange?.(modalOpen);
+    }, [modalOpen, onModalOpenChange]);
 
-  const wrapperClassName = fillHeight
-    ? `${styles.wrapper} ${styles.wrapperFill}`
-    : variant === "bare"
-    ? `${styles.wrapper} ${styles.wrapperBare}`
-    : styles.wrapper;
+    // `@uiw` writes these as inline styles on `.cm-editor`, so the three shapes are exclusive: in
+    // the modal the flex body owns the height and any min/max here would fight it, and bare mode
+    // deliberately passes no `maxHeight` at all -- the editor grows with its content and the page
+    // scrolls, rather than scrolling inside a fixed box.
+    const sizing = fillHeight
+      ? { height: "100%" }
+      : variant === "bare"
+      ? { minHeight: `${BARE_MIN_HEIGHT}px` }
+      : { minHeight: `${minHeight}px`, maxHeight: `${maxHeight}px` };
 
-  return (
-    <>
-      <div className={wrapperClassName}>
-        <CodeMirror
-          value={value}
-          onChange={onChange}
-          extensions={extensions}
-          basicSetup={BASIC_SETUP}
-          theme="none"
-          editable={!disabled}
-          // The wrapper defaults this to true. Tab has to keep moving focus through the dialog
-          // form rather than indenting, so it is turned off explicitly.
-          indentWithTab={false}
-          placeholder={placeholder}
-          autoFocus={autoFocus}
-          {...sizing}
-        />
-        {expandable && !disabled && (
-          <button
-            type="button"
-            className={styles.expandBtn}
-            onClick={() => setModalOpen(true)}
-            // Out of the tab order on purpose: Tab moves through the dialog's form fields.
-            tabIndex={-1}
-            title="Expand editor"
-            aria-label="Open full editor"
-          >
-            <IconExpand />
-          </button>
-        )}
+    const wrapperClassName = fillHeight
+      ? `${styles.wrapper} ${styles.wrapperFill}`
+      : variant === "bare"
+      ? `${styles.wrapper} ${styles.wrapperBare}`
+      : styles.wrapper;
 
-        {
-          /* `role="status"` rather than an alert: a refused drop is informational, and an
+    return (
+      <>
+        <div className={wrapperClassName}>
+          <CodeMirror
+            value={value}
+            onChange={onChange}
+            extensions={extensions}
+            basicSetup={BASIC_SETUP}
+            theme="none"
+            editable={!disabled}
+            // The wrapper defaults this to true. Tab has to keep moving focus through the dialog
+            // form rather than indenting, so it is turned off explicitly.
+            indentWithTab={false}
+            placeholder={placeholder}
+            autoFocus={autoFocus}
+            onCreateEditor={(view) => {
+              viewRef.current = view;
+            }}
+            {...sizing}
+          />
+          {expandable && !disabled && (
+            <button
+              type="button"
+              className={styles.expandBtn}
+              onClick={() => setModalOpen(true)}
+              // Out of the tab order on purpose: Tab moves through the dialog's form fields.
+              tabIndex={-1}
+              title="Expand editor"
+              aria-label="Open full editor"
+            >
+              <IconExpand />
+            </button>
+          )}
+
+          {
+            /* `role="status"` rather than an alert: a refused drop is informational, and an
             assertive live region would cut across whatever the screen reader is mid-sentence. */
-        }
-        {hint !== null && <p className={styles.dropHint} role="status">{hint.message}</p>}
-      </div>
+          }
+          {hint !== null && <p className={styles.dropHint} role="status">{hint.message}</p>}
+        </div>
 
-      {modalOpen && createPortal(
-        <ModalEditor
-          initialValue={value}
-          placeholder={placeholder}
-          title={modalTitle}
-          livePreview={livePreview}
-          todoId={todoId}
-          onApply={onChange}
-          onClose={() => setModalOpen(false)}
-        />,
-        document.body,
-      )}
-    </>
-  );
-}
+        {modalOpen && createPortal(
+          <ModalEditor
+            initialValue={value}
+            placeholder={placeholder}
+            title={modalTitle}
+            livePreview={livePreview}
+            todoId={todoId}
+            onApply={onChange}
+            onClose={() => setModalOpen(false)}
+          />,
+          document.body,
+        )}
+      </>
+    );
+  },
+);
