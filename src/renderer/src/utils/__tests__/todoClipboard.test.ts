@@ -26,8 +26,8 @@ describe("formatTodoAgentPrompt", () => {
         "Some context about the task.",
         "",
         "---",
-        "This task is LizMeter todo #1004. To re-read it or check its sub-issues,",
-        "call the lizmeter-todo MCP server: `todo_list` with `id: 1004`.",
+        "This task is LizMeter todo #1004. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 1004`. List its sub-issues with `todo_list` and `parentId: 1004`.",
         "Mark it done with `todo_complete`, or update it with `todo_update`.",
       ].join("\n"),
     );
@@ -80,11 +80,18 @@ describe("formatTodoAgentPrompt", () => {
     expect(result).not.toContain("## Sub-issues");
   });
 
-  it("TC-09: the trailing hint always uses #<id> next to 'LizMeter todo' and bare id in the MCP call", () => {
+  it("TC-09: the trailing hint separates re-read (id) from listing sub-issues (parentId), each a correct MCP call", () => {
     const result = formatTodoAgentPrompt({ id: 1004, title: "Any task", notes: null }, null, []);
 
-    expect(result).toContain("This task is LizMeter todo #1004.");
-    expect(result).toContain("`todo_list` with `id: 1004`.");
+    const hint = result.slice(result.indexOf("---"));
+    expect(hint).toBe(
+      [
+        "---",
+        "This task is LizMeter todo #1004. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 1004`. List its sub-issues with `todo_list` and `parentId: 1004`.",
+        "Mark it done with `todo_complete`, or update it with `todo_update`.",
+      ].join("\n"),
+    );
   });
 
   it("TC-10: assembles parent + children + notes together, each section separated by a blank line", () => {
@@ -107,8 +114,8 @@ describe("formatTodoAgentPrompt", () => {
         "- [ ] #9 Kid (In progress)",
         "",
         "---",
-        "This task is LizMeter todo #8. To re-read it or check its sub-issues,",
-        "call the lizmeter-todo MCP server: `todo_list` with `id: 8`.",
+        "This task is LizMeter todo #8. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 8`. List its sub-issues with `todo_list` and `parentId: 8`.",
         "Mark it done with `todo_complete`, or update it with `todo_update`.",
       ].join("\n"),
     );

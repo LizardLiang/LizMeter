@@ -66,8 +66,8 @@ export function formatTodoAgentPrompt(
   sections.push(
     [
       "---",
-      `This task is LizMeter todo ${formatTodoId(todo.id)}. To re-read it or check its sub-issues,`,
-      `call the lizmeter-todo MCP server: \`todo_list\` with \`id: ${todo.id}\`.`,
+      `This task is LizMeter todo ${formatTodoId(todo.id)}. Re-read it with the lizmeter-todo MCP server:`,
+      `\`todo_list\` with \`id: ${todo.id}\`. List its sub-issues with \`todo_list\` and \`parentId: ${todo.id}\`.`,
       "Mark it done with `todo_complete`, or update it with `todo_update`.",
     ].join("\n"),
   );

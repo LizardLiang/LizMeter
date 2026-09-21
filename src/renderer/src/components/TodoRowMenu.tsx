@@ -63,9 +63,14 @@ export function TodoActionMenu(props: MenuProps) {
   /** Which "Copy" item (if either) currently reads "Copied ✓" instead of its normal label. */
   const [copiedItem, setCopiedItem] = useState<"id" | "prompt" | null>(null);
   const copyTimeoutRef = useRef<number | null>(null);
+  /** Flipped false by the unmount cleanup below so a copy chain that resolves after the menu is
+   * gone (Escape or an outside click fired while `navigator.clipboard.writeText` was still
+   * pending) can tell it is too late to arm a timer or call `close()`. */
+  const aliveRef = useRef(true);
 
   useEffect(() => {
     return () => {
+      aliveRef.current = false;
       // A stale timer must never fire `close()` -- and never touch state -- on a menu that is
       // already gone (the row menu is unmounted, not merely hidden, once `onClose` fires).
       if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
@@ -115,9 +120,18 @@ export function TodoActionMenu(props: MenuProps) {
    * on a delay instead of immediately.
    */
   function finishCopy(item: "id" | "prompt") {
+    // The clipboard write is async -- by the time it resolves the menu may already be unmounted
+    // (Escape / outside click), so this must never touch state or arm a timer for a menu that is
+    // gone.
+    if (!aliveRef.current) return;
     setCopiedItem(item);
+    // Clear any timer still armed from a previous copy click before replacing the ref, or that
+    // first timer becomes unreachable and fires late, closing whatever menu (possibly a different
+    // row's) happens to be open when it does.
+    if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
     copyTimeoutRef.current = window.setTimeout(() => {
       copyTimeoutRef.current = null;
+      if (!aliveRef.current) return;
       close();
     }, COPIED_FEEDBACK_MS);
   }

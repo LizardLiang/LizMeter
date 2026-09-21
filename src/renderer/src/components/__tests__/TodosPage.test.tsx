@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Todo, TodoLabel, TodoProject, TodoState } from "../../../../shared/types.ts";
 import { TodosProvider } from "../../contexts/TodosContext.tsx";
@@ -1095,5 +1095,81 @@ describe("TodosPage highlight-on-navigate", () => {
 
     resolveList(sampleTodos);
     await waitFor(() => expect(onHighlightConsumed).toHaveBeenCalledTimes(1));
+  });
+});
+
+describe("TodosPage row menu copy actions", () => {
+  const originalClipboard = navigator.clipboard;
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(navigator, "clipboard", { value: originalClipboard, configurable: true });
+  });
+
+  it("clearing the first copy's timer before arming the second leaves only one live timer, so it fires on the second click's own schedule, not the first's", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await renderPage();
+    vi.useFakeTimers();
+
+    openRowMenu("Old prod to new prod migration");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy id" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(screen.getByRole("menuitem", { name: "Copied ✓" })).toBeInTheDocument();
+    expect(vi.getTimerCount()).toBe(1);
+
+    // Still inside the first copy's 1200ms feedback window.
+    await vi.advanceTimersByTimeAsync(600);
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy agent prompt" }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The first click's timer must be cleared, not merely overwritten by the second's ref
+    // assignment -- exactly one timer alive, not two.
+    expect(vi.getTimerCount()).toBe(1);
+
+    // 1200ms after the FIRST click is the stale timer's original deadline. With the bug, that
+    // timer is unreachable but still fires here and closes the menu early.
+    await vi.advanceTimersByTimeAsync(600);
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+
+    // 1200ms after the SECOND click is the surviving timer's real deadline.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(600);
+    });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+  });
+
+  it("an alive guard stops a copy chain that resolves after the menu unmounts from arming a timer that would later close an unrelated menu", async () => {
+    let resolveWrite: () => void = () => {};
+    const writeText = vi.fn().mockImplementation(() =>
+      new Promise<void>((resolve) => {
+        resolveWrite = resolve;
+      })
+    );
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    await renderPage();
+    vi.useFakeTimers();
+
+    openRowMenu("Old prod to new prod migration");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy agent prompt" }));
+    // Flushes `electronAPI.todo.list` and reaches the still-pending `clipboard.writeText` call.
+    await vi.advanceTimersByTimeAsync(0);
+
+    // The menu is conditionally rendered, so Escape unmounts it -- not merely hides it -- while
+    // the clipboard write above is still pending.
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    // The write resolves only now, after unmount. The late `.then()` must not arm a timer.
+    resolveWrite();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+
+    // Opening a different row's menu and clearing the first copy's 1200ms window proves no stale
+    // callback reaches back in to close whatever menu the user has since opened.
+    openRowMenu("Fix misc code quality issues");
+    await vi.advanceTimersByTimeAsync(1200);
+    expect(screen.getByRole("menu", { name: "Actions for Fix misc code quality issues" })).toBeInTheDocument();
   });
 });
