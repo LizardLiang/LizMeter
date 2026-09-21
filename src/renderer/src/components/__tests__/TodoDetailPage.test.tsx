@@ -494,6 +494,30 @@ describe("TodoDetailPage sub-issues", () => {
     expect(mockTodoAPI.delete).not.toHaveBeenCalled();
   });
 
+  it("clicking the parent chip body navigates to the parent, without opening the picker", async () => {
+    sampleTodos = sampleTodos.map((t) =>
+      t.id === 100 ? { ...t, parentId: 152, parentTitle: "Old prod to new prod migration" } : t
+    );
+    await renderDetail(100);
+
+    fireEvent.click(screen.getByTitle("Go to parent"));
+
+    expect(mockOnNavigate).toHaveBeenCalledWith(152);
+    expect(screen.queryByRole("dialog", { name: "Nest this todo under" })).not.toBeInTheDocument();
+  });
+
+  it("clicking Change parent opens the picker, without navigating", async () => {
+    sampleTodos = sampleTodos.map((t) =>
+      t.id === 100 ? { ...t, parentId: 152, parentTitle: "Old prod to new prod migration" } : t
+    );
+    await renderDetail(100);
+
+    fireEvent.click(screen.getByRole("button", { name: "Change parent" }));
+
+    expect(await screen.findByRole("dialog", { name: "Nest this todo under" })).toBeInTheDocument();
+    expect(mockOnNavigate).not.toHaveBeenCalled();
+  });
+
   it("setting a parent from the picker writes immediately, with no save step", async () => {
     await renderDetail(100);
 

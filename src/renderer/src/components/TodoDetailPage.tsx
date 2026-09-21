@@ -456,6 +456,11 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
       : null;
   }
 
+  // Bound once so the `number` narrowing (todo.parentId !== null) survives into the onClick
+  // closures below -- narrowing a property access does not persist across a closure boundary,
+  // narrowing a plain const does.
+  const parentId = todo.parentId;
+
   return (
     <div className={styles.page}>
       {
@@ -548,7 +553,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
             />
 
             <div className={styles.metaLine}>
-              {todo.parentId === null
+              {parentId === null
                 ? (
                   <button className={styles.linkBtn} type="button" onClick={() => setPicking("parent")}>
                     + Set parent
@@ -559,11 +564,20 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
                     <button
                       className={styles.parentChipBody}
                       type="button"
+                      onClick={() => onNavigate(parentId)}
+                      title="Go to parent"
+                    >
+                      <span className={styles.chipId}>#{parentId}</span>
+                      Sub-issue of {todo.parentTitle ?? `#${parentId}`}
+                    </button>
+                    <button
+                      className={styles.chipChangeParent}
+                      type="button"
                       onClick={() => setPicking("parent")}
+                      aria-label="Change parent"
                       title="Change parent"
                     >
-                      <span className={styles.chipId}>#{todo.parentId}</span>
-                      Sub-issue of {todo.parentTitle ?? `#${todo.parentId}`}
+                      &#8646;
                     </button>
                     <button
                       className={styles.chipClear}

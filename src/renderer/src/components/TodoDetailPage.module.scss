@@ -316,6 +316,26 @@
   color: #8b93b8;
 }
 
+.chipChangeParent {
+  padding: 3px 7px;
+  border: none;
+  border-left: 1px solid rgba(122, 162, 247, 0.28);
+  background: transparent;
+  color: #a3abc9;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    color: #7aa2f7;
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+}
+
 .chipClear {
   padding: 3px 7px;
   border: none;
