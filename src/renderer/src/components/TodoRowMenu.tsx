@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Todo, TodoState } from "../../../shared/types.ts";
+import { formatTodoAgentPrompt, formatTodoId } from "../utils/todoClipboard.ts";
 import styles from "./TodoRowMenu.module.scss";
 
 /** The single-key menus the page already owns. An item here just hands off to one of them. */
@@ -31,8 +32,10 @@ interface MenuProps {
 const MENU_WIDTH = 216;
 /** Only feeds the flip-up decision, so an estimate from the row count is close enough. */
 const ROW_HEIGHT = 26;
-/** The fixed items plus the three section labels and the dividers between them. */
-const FIXED_ROWS = 13;
+/** The fixed items plus the four section labels and the dividers between them. */
+const FIXED_ROWS = 17;
+/** "Copied ✓" shows on the clicked item for this long, then the menu closes. */
+const COPIED_FEEDBACK_MS = 1200;
 
 /**
  * Electron reports the real platform, so this is the modifier the user actually presses.
@@ -57,6 +60,17 @@ export function TodoActionMenu(props: MenuProps) {
   const { onEdit, onQuickMenu, onAddSubIssue, onLinkChild, onSetParent, onClearParent, onSetState, onDelete } = props;
   const menuRef = useRef<HTMLDivElement>(null);
   const hasParent = todo.parentId !== null;
+  /** Which "Copy" item (if either) currently reads "Copied ✓" instead of its normal label. */
+  const [copiedItem, setCopiedItem] = useState<"id" | "prompt" | null>(null);
+  const copyTimeoutRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      // A stale timer must never fire `close()` -- and never touch state -- on a menu that is
+      // already gone (the row menu is unmounted, not merely hidden, once `onClose` fires).
+      if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
+    };
+  }, []);
 
   const pos = useMemo(() => {
     const height = (states.length + FIXED_ROWS) * ROW_HEIGHT;
@@ -95,6 +109,59 @@ export function TodoActionMenu(props: MenuProps) {
     };
   }
 
+  /**
+   * `pick()` closes the menu the instant it is clicked, which would hide the "Copied ✓" feedback
+   * before it ever showed -- so the two copy items go around it: copy, flip the label, then close
+   * on a delay instead of immediately.
+   */
+  function finishCopy(item: "id" | "prompt") {
+    setCopiedItem(item);
+    copyTimeoutRef.current = window.setTimeout(() => {
+      copyTimeoutRef.current = null;
+      close();
+    }, COPIED_FEEDBACK_MS);
+  }
+
+  function handleCopyId(e: React.MouseEvent) {
+    e.stopPropagation();
+    navigator.clipboard
+      .writeText(formatTodoId(todo.id))
+      .then(() => finishCopy("id"))
+      .catch((err: unknown) => {
+        console.error("Failed to copy todo id", err);
+      });
+  }
+
+  function handleCopyPrompt(e: React.MouseEvent) {
+    e.stopPropagation();
+    const parent = todo.parentId !== null
+      ? { id: todo.parentId, title: todo.parentTitle ?? `#${todo.parentId}` }
+      : null;
+    // `todo` here only carries `childCount`, not the child rows themselves, and the list's own
+    // `todos` array is filtered by the active view -- so the direct children are fetched fresh
+    // through the same IPC call `TodoDetailPage` already uses, and only right now, not on every
+    // render of this menu.
+    window.electronAPI.todo
+      .list({ parentId: todo.id })
+      .then((rows) => {
+        const prompt = formatTodoAgentPrompt(
+          todo,
+          parent,
+          rows.map((row) => ({
+            id: row.id,
+            title: row.title,
+            stateLabel: row.state.label,
+            isCompleted: row.state.isCompleted,
+          })),
+        );
+        return navigator.clipboard.writeText(prompt);
+      })
+      .then(() => finishCopy("prompt"))
+      .catch((err: unknown) => {
+        console.error("Failed to copy agent prompt", err);
+      });
+  }
+
   return createPortal(
     <div
       ref={menuRef}
@@ -108,6 +175,21 @@ export function TodoActionMenu(props: MenuProps) {
       <button className={styles.item} type="button" role="menuitem" onClick={pick(onEdit)}>
         Edit
         <Hint keys={["Enter"]} />
+      </button>
+
+      {
+        /* No `<Hint>` on either item below: the natural key for "Copy id" would be the plain "C"
+        TodosPage's global keymap already binds to "New todo" (see the `case "c"` there), so
+        pairing it with "⇧C" for the prompt would half-steal a binding rather than add a clean
+        one -- both items go keyless instead. */
+      }
+      <div className={styles.divider} />
+      <p className={styles.sectionLabel}>Copy</p>
+      <button className={styles.item} type="button" role="menuitem" onClick={handleCopyId}>
+        {copiedItem === "id" ? "Copied ✓" : "Copy id"}
+      </button>
+      <button className={styles.item} type="button" role="menuitem" onClick={handleCopyPrompt}>
+        {copiedItem === "prompt" ? "Copied ✓" : "Copy agent prompt"}
       </button>
 
       <div className={styles.divider} />

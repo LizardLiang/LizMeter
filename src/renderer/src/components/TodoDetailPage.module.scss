@@ -149,6 +149,23 @@
   }
 }
 
+// Non-destructive overflow items (Copy id, Copy agent prompt) -- `.overflowItem` is styled for
+// Delete specifically, the same split as TodoRowMenu's `.item`/`.itemDanger`.
+.overflowItemNeutral {
+  composes: overflowItem;
+  color: #c0caf5;
+
+  &:hover:not(:disabled) {
+    background: rgba(122, 162, 247, 0.12);
+  }
+}
+
+.overflowDivider {
+  height: 1px;
+  margin: 4px 2px;
+  background: rgba(86, 95, 137, 0.25);
+}
+
 /* --- Layout: header + properties rail + body --- */
 
 // Three DOM siblings -- `.mainHeader` (title + meta line), `.rail` (properties), `.mainBody`
