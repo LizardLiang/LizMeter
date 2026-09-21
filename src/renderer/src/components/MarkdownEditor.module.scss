@@ -383,8 +383,19 @@ $li-max-depth: 6;
   // Zero horizontal padding, same as the title input above it (`padding: 4px 0` in
   // TodoDetailPage.module.scss), so the two fields' text lines up on the same left edge.
   // Vertical padding stays -- it only affects caret/line spacing, never the left edge.
+  //
+  // `min-width` is what keeps a wide note inside its column. CodeMirror lays `.cm-content` out as
+  // a flex item of `.cm-scroller` and never gives it a `min-width`, so its automatic minimum size
+  // is its own min-content width. A table widget holds every cell on one line (`white-space:
+  // nowrap` on `.cm-md-table`), which pushes that min-content width past the column; the framed variant
+  // absorbs the excess in the scroller's own `overflow-x: auto`, but bare mode turned that off
+  // just above, so the content box itself grew instead -- widening the wrap width of every
+  // paragraph with it and painting the whole note across the properties rail beside it. At `0`
+  // the flex item shrinks back to the column and the table scrolls sideways inside
+  // `.cm-md-table-wrapper`, which is where that overflow was always meant to land.
   :global(.cm-content) {
     padding: 4px 0;
+    min-width: 0;
   }
 
   :global(.cm-line) {
