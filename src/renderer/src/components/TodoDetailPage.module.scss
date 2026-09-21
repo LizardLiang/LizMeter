@@ -430,6 +430,21 @@
   }
 }
 
+.subRowBody {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .subDot {
   flex-shrink: 0;
   width: 9px;

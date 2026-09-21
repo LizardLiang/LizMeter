@@ -494,6 +494,30 @@ describe("TodoDetailPage sub-issues", () => {
     expect(mockTodoAPI.delete).not.toHaveBeenCalled();
   });
 
+  it("clicking a sub-issue row body navigates to that sub-issue", async () => {
+    sampleTodos = sampleTodos.map((t) =>
+      t.id === 100 ? { ...t, parentId: 152, parentTitle: "Old prod to new prod migration" } : t
+    );
+    await renderDetail(152);
+
+    fireEvent.click(await screen.findByTitle("Go to #100"));
+
+    expect(mockOnNavigate).toHaveBeenCalledWith(100);
+  });
+
+  it("clicking a sub-issue row's remove button does not navigate, and still re-parents it", async () => {
+    sampleTodos = sampleTodos.map((t) =>
+      t.id === 100 ? { ...t, parentId: 152, parentTitle: "Old prod to new prod migration" } : t
+    );
+    await renderDetail(152);
+
+    const unlink = await screen.findByLabelText("Remove Fix misc code quality issues from this todo");
+    fireEvent.click(unlink);
+
+    await waitFor(() => expect(mockTodoAPI.update).toHaveBeenCalledWith({ id: 100, parentId: null }));
+    expect(mockOnNavigate).not.toHaveBeenCalled();
+  });
+
   it("clicking the parent chip body navigates to the parent, without opening the picker", async () => {
     sampleTodos = sampleTodos.map((t) =>
       t.id === 100 ? { ...t, parentId: 152, parentTitle: "Old prod to new prod migration" } : t

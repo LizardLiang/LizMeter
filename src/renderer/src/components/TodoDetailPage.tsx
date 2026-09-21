@@ -759,19 +759,26 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
                 <ul className={styles.subList}>
                   {children.map((child) => (
                     <li key={child.id} className={styles.subRow}>
-                      <span className={styles.chipId}>#{child.id}</span>
-                      <span
-                        className={styles.subDot}
-                        style={{
-                          borderColor: child.state.color,
-                          background: child.state.isCompleted ? child.state.color : "transparent",
-                        }}
-                        aria-hidden="true"
-                      />
-                      <span className={child.state.isCompleted ? styles.subTitleDone : styles.subTitle}>
-                        {child.title}
-                      </span>
-                      <span className={styles.subState}>{child.state.label}</span>
+                      <button
+                        className={styles.subRowBody}
+                        type="button"
+                        onClick={() => onNavigate(child.id)}
+                        title={`Go to #${child.id}`}
+                      >
+                        <span className={styles.chipId}>#{child.id}</span>
+                        <span
+                          className={styles.subDot}
+                          style={{
+                            borderColor: child.state.color,
+                            background: child.state.isCompleted ? child.state.color : "transparent",
+                          }}
+                          aria-hidden="true"
+                        />
+                        <span className={child.state.isCompleted ? styles.subTitleDone : styles.subTitle}>
+                          {child.title}
+                        </span>
+                        <span className={styles.subState}>{child.state.label}</span>
+                      </button>
                       <button
                         className={styles.chipClear}
                         type="button"
