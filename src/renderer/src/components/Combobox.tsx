@@ -88,17 +88,16 @@ export function Combobox(
       if (listRef.current?.contains(target) || wrapRef.current?.contains(target)) return;
       setOpen(false);
     };
-    const close = () => setOpen(false);
 
     document.addEventListener("mousedown", onPointerDown);
-    window.addEventListener("resize", close);
-    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
-      window.removeEventListener("resize", close);
-      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
     };
-  }, [open]);
+  }, [open, place]);
 
   const pick = useCallback((next: string) => {
     onChange(next);
