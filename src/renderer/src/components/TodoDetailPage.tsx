@@ -7,6 +7,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Todo, TodoProject } from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS } from "../../../shared/types.ts";
 import { useTodosContext } from "../contexts/TodosContext.tsx";
+import { copyFeedbackLabel, useCopyFeedback } from "../hooks/useCopyFeedback.ts";
 import { formatTodoAgentPrompt, formatTodoId } from "../utils/todoClipboard.ts";
 import { Combobox } from "./Combobox.tsx";
 import { DatePicker } from "./DatePicker.tsx";
@@ -19,8 +20,6 @@ import { SubProgressRing } from "./TodosPage.tsx";
 
 /** Title and notes save this long after the user stops typing (F10). */
 const DEBOUNCE_MS = 600;
-/** "Copied ✓" shows on the clicked overflow item for this long, then reverts to its normal label. */
-const COPIED_FEEDBACK_MS = 1200;
 
 /**
  * The title is single-line TEXT that merely wraps on screen (a `<textarea>` with
@@ -239,17 +238,10 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
   const projectCreateRef = useRef<Map<string, Promise<TodoProject>>>(new Map());
   /** Enter in the title moves focus here, caret at the very start -- see `handleTitleKeyDown`. */
   const notesEditorRef = useRef<MarkdownEditorHandle>(null);
-  /** Which overflow copy item (if either) currently reads "Copied ✓" instead of its normal label. */
-  const [copiedAction, setCopiedAction] = useState<"id" | "prompt" | null>(null);
-  const copyTimeoutRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    return () => {
-      // A stale timer must never touch state once this page has unmounted (prev/next remounts it
-      // by id, and navigating back unmounts it entirely -- same hazard `useQuietDraft` guards against).
-      if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
-    };
-  }, []);
+  /** Which overflow copy item (if either) currently reads "Copied ✓"/"Copy failed" instead of its
+   * normal label. Unlike the row menu's copy items, the feedback window's expiry here only
+   * reverts the label -- the overflow menu stays open (no `onExpire` passed). */
+  const { feedback: copyFeedback, trigger: triggerCopyFeedback } = useCopyFeedback<"id" | "prompt">();
 
   const loadChildren = useCallback(async () => {
     try {
@@ -478,41 +470,41 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
   // Arrow functions bound to `const`, not `function` declarations: a hoisted declaration loses
   // the `todo !== null` narrowing from the check above (same closure-boundary pitfall as
   // `parentId`'s own comment), an arrow expression created after the check keeps it.
-  const triggerCopiedFeedback = (action: "id" | "prompt") => {
-    if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
-    setCopiedAction(action);
-    copyTimeoutRef.current = window.setTimeout(() => {
-      copyTimeoutRef.current = null;
-      setCopiedAction(null);
-    }, COPIED_FEEDBACK_MS);
-  };
-
   const handleCopyId = () => {
     navigator.clipboard
       .writeText(formatTodoId(todo.id))
-      .then(() => triggerCopiedFeedback("id"))
+      .then(() => triggerCopyFeedback("id"))
       .catch((err: unknown) => {
         console.error("Failed to copy todo id", err);
+        triggerCopyFeedback("id", "failed");
       });
   };
 
   const handleCopyPrompt = () => {
     const parentInfo = parentId !== null ? { id: parentId, title: todo.parentTitle ?? `#${parentId}` } : null;
-    const prompt = formatTodoAgentPrompt(
-      todo,
-      parentInfo,
-      children.map((child) => ({
-        id: child.id,
-        title: child.title,
-        stateLabel: child.state.label,
-        isCompleted: child.state.isCompleted,
-      })),
-    );
-    navigator.clipboard
-      .writeText(prompt)
-      .then(() => triggerCopiedFeedback("prompt"))
+    // The local `children` state only reflects the last successful `loadChildren` call (its catch
+    // block is empty by design -- a failed load simply leaves it stale), so it cannot be trusted
+    // as "the current sub-issues" at copy time. Fetched fresh here instead, mirroring
+    // `TodoRowMenu`'s `handleCopyPrompt`, which never had a local `children` state to begin with.
+    window.electronAPI.todo
+      .list({ parentId: todo.id })
+      .then((rows) => {
+        const prompt = formatTodoAgentPrompt(
+          todo,
+          parentInfo,
+          rows.map((row) => ({
+            id: row.id,
+            title: row.title,
+            stateLabel: row.state.label,
+            isCompleted: row.state.isCompleted,
+          })),
+        );
+        return navigator.clipboard.writeText(prompt);
+      })
+      .then(() => triggerCopyFeedback("prompt"))
       .catch((err: unknown) => {
         console.error("Failed to copy agent prompt", err);
+        triggerCopyFeedback("prompt", "failed");
       });
   };
 
@@ -573,7 +565,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
                     role="menuitem"
                     onClick={handleCopyId}
                   >
-                    {copiedAction === "id" ? "Copied ✓" : "Copy id"}
+                    {copyFeedbackLabel(copyFeedback, "id", "Copy id")}
                   </button>
                   <button
                     className={styles.overflowItemNeutral}
@@ -581,7 +573,7 @@ export function TodoDetailPage({ todoId, onBack, onNavigate }: Props) {
                     role="menuitem"
                     onClick={handleCopyPrompt}
                   >
-                    {copiedAction === "prompt" ? "Copied ✓" : "Copy agent prompt"}
+                    {copyFeedbackLabel(copyFeedback, "prompt", "Copy agent prompt")}
                   </button>
                   <div className={styles.overflowDivider} />
                   <button

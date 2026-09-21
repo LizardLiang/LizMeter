@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { Todo, TodoState } from "../../../shared/types.ts";
+import { copyFeedbackLabel, useCopyFeedback } from "../hooks/useCopyFeedback.ts";
 import { formatTodoAgentPrompt, formatTodoId } from "../utils/todoClipboard.ts";
 import styles from "./TodoRowMenu.module.scss";
 
@@ -32,10 +33,14 @@ interface MenuProps {
 const MENU_WIDTH = 216;
 /** Only feeds the flip-up decision, so an estimate from the row count is close enough. */
 const ROW_HEIGHT = 26;
-/** The fixed items plus the four section labels and the dividers between them. */
-const FIXED_ROWS = 17;
-/** "Copied ✓" shows on the clicked item for this long, then the menu closes. */
-const COPIED_FEEDBACK_MS = 1200;
+/**
+ * Every row except the per-state "Move to" buttons (added separately via `states.length`) and
+ * "Remove from parent" (added separately via `hasParent` below): Edit, the four section labels,
+ * the four dividers that precede them, Copy id, Copy agent prompt, Priority, Due date, Project,
+ * Labels, Add sub-issue, Add existing sub-issue, Change parent, and Delete -- 20 rows, counted
+ * directly against the JSX below.
+ */
+const FIXED_ROWS = 20;
 
 /**
  * Electron reports the real platform, so this is the modifier the user actually presses.
@@ -60,33 +65,22 @@ export function TodoActionMenu(props: MenuProps) {
   const { onEdit, onQuickMenu, onAddSubIssue, onLinkChild, onSetParent, onClearParent, onSetState, onDelete } = props;
   const menuRef = useRef<HTMLDivElement>(null);
   const hasParent = todo.parentId !== null;
-  /** Which "Copy" item (if either) currently reads "Copied ✓" instead of its normal label. */
-  const [copiedItem, setCopiedItem] = useState<"id" | "prompt" | null>(null);
-  const copyTimeoutRef = useRef<number | null>(null);
-  /** Flipped false by the unmount cleanup below so a copy chain that resolves after the menu is
-   * gone (Escape or an outside click fired while `navigator.clipboard.writeText` was still
-   * pending) can tell it is too late to arm a timer or call `close()`. */
-  const aliveRef = useRef(true);
 
-  useEffect(() => {
-    return () => {
-      aliveRef.current = false;
-      // A stale timer must never fire `close()` -- and never touch state -- on a menu that is
-      // already gone (the row menu is unmounted, not merely hidden, once `onClose` fires).
-      if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
-    };
-  }, []);
+  const close = useCallback(() => onClose(), [onClose]);
+
+  /** Which "Copy" item (if either) currently reads "Copied ✓"/"Copy failed" instead of its normal
+   * label. The feedback window closes the menu when it expires -- unlike the detail page's
+   * overflow menu, which only reverts its label and stays open. */
+  const { feedback: copyFeedback, trigger: triggerCopyFeedback } = useCopyFeedback<"id" | "prompt">(close);
 
   const pos = useMemo(() => {
-    const height = (states.length + FIXED_ROWS) * ROW_HEIGHT;
+    const height = (states.length + FIXED_ROWS + (hasParent ? 1 : 0)) * ROW_HEIGHT;
     const left = Math.max(8, Math.min(anchor.left, window.innerWidth - MENU_WIDTH - 8));
     const top = anchor.bottom + 2 + height > window.innerHeight
       ? Math.max(8, anchor.top - height - 2)
       : anchor.bottom + 2;
     return { top, left };
-  }, [anchor, states.length]);
-
-  const close = useCallback(() => onClose(), [onClose]);
+  }, [anchor, states.length, hasParent]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -115,34 +109,19 @@ export function TodoActionMenu(props: MenuProps) {
   }
 
   /**
-   * `pick()` closes the menu the instant it is clicked, which would hide the "Copied ✓" feedback
-   * before it ever showed -- so the two copy items go around it: copy, flip the label, then close
-   * on a delay instead of immediately.
+   * `pick()` closes the menu the instant it is clicked, which would hide the "Copied ✓"/"Copy
+   * failed" feedback before it ever showed -- so the two copy items go around it: copy, flip the
+   * label via `triggerCopyFeedback`, and let the feedback window's own expiry close the menu
+   * instead of closing it immediately.
    */
-  function finishCopy(item: "id" | "prompt") {
-    // The clipboard write is async -- by the time it resolves the menu may already be unmounted
-    // (Escape / outside click), so this must never touch state or arm a timer for a menu that is
-    // gone.
-    if (!aliveRef.current) return;
-    setCopiedItem(item);
-    // Clear any timer still armed from a previous copy click before replacing the ref, or that
-    // first timer becomes unreachable and fires late, closing whatever menu (possibly a different
-    // row's) happens to be open when it does.
-    if (copyTimeoutRef.current !== null) window.clearTimeout(copyTimeoutRef.current);
-    copyTimeoutRef.current = window.setTimeout(() => {
-      copyTimeoutRef.current = null;
-      if (!aliveRef.current) return;
-      close();
-    }, COPIED_FEEDBACK_MS);
-  }
-
   function handleCopyId(e: React.MouseEvent) {
     e.stopPropagation();
     navigator.clipboard
       .writeText(formatTodoId(todo.id))
-      .then(() => finishCopy("id"))
+      .then(() => triggerCopyFeedback("id"))
       .catch((err: unknown) => {
         console.error("Failed to copy todo id", err);
+        triggerCopyFeedback("id", "failed");
       });
   }
 
@@ -170,9 +149,10 @@ export function TodoActionMenu(props: MenuProps) {
         );
         return navigator.clipboard.writeText(prompt);
       })
-      .then(() => finishCopy("prompt"))
+      .then(() => triggerCopyFeedback("prompt"))
       .catch((err: unknown) => {
         console.error("Failed to copy agent prompt", err);
+        triggerCopyFeedback("prompt", "failed");
       });
   }
 
@@ -200,10 +180,10 @@ export function TodoActionMenu(props: MenuProps) {
       <div className={styles.divider} />
       <p className={styles.sectionLabel}>Copy</p>
       <button className={styles.item} type="button" role="menuitem" onClick={handleCopyId}>
-        {copiedItem === "id" ? "Copied ✓" : "Copy id"}
+        {copyFeedbackLabel(copyFeedback, "id", "Copy id")}
       </button>
       <button className={styles.item} type="button" role="menuitem" onClick={handleCopyPrompt}>
-        {copiedItem === "prompt" ? "Copied ✓" : "Copy agent prompt"}
+        {copyFeedbackLabel(copyFeedback, "prompt", "Copy agent prompt")}
       </button>
 
       <div className={styles.divider} />

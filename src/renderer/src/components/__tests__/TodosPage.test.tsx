@@ -1172,4 +1172,43 @@ describe("TodosPage row menu copy actions", () => {
     await vi.advanceTimersByTimeAsync(1200);
     expect(screen.getByRole("menu", { name: "Actions for Fix misc code quality issues" })).toBeInTheDocument();
   });
+
+  it("shows \"Copy failed\" instead of \"Copied ✓\" and logs it when the clipboard write for \"Copy id\" rejects, still closing the menu once the window expires", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderPage();
+    vi.useFakeTimers();
+
+    openRowMenu("Old prod to new prod migration");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy id" }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(screen.getByRole("menuitem", { name: "Copy failed" })).toBeInTheDocument();
+    expect(consoleError).toHaveBeenCalledWith("Failed to copy todo id", expect.any(Error));
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+
+    consoleError.mockRestore();
+  });
+
+  it("shows \"Copy failed\" instead of \"Copied ✓\" and logs it when the clipboard write for \"Copy agent prompt\" rejects", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    await renderPage();
+    vi.useFakeTimers();
+
+    openRowMenu("Old prod to new prod migration");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy agent prompt" }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(screen.getByRole("menuitem", { name: "Copy failed" })).toBeInTheDocument();
+    expect(consoleError).toHaveBeenCalledWith("Failed to copy agent prompt", expect.any(Error));
+
+    consoleError.mockRestore();
+  });
 });

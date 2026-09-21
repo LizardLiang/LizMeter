@@ -36,16 +36,31 @@ describe("formatTodoAgentPrompt", () => {
   it("TC-04: null notes are omitted -- no stray blank heading, no leading blank line", () => {
     const result = formatTodoAgentPrompt({ id: 5, title: "No notes here", notes: null }, null, []);
 
-    expect(result.startsWith("# No notes here\n\n---")).toBe(true);
-    expect(result).not.toContain("##");
-    expect(result.startsWith("\n")).toBe(false);
+    expect(result).toBe(
+      [
+        "# No notes here",
+        "",
+        "---",
+        "This task is LizMeter todo #5. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 5`. List its sub-issues with `todo_list` and `parentId: 5`.",
+        "Mark it done with `todo_complete`, or update it with `todo_update`.",
+      ].join("\n"),
+    );
   });
 
   it("TC-05: whitespace-only notes are treated as empty and omitted", () => {
     const result = formatTodoAgentPrompt({ id: 5, title: "Whitespace notes", notes: "   \n  " }, null, []);
 
-    expect(result.startsWith("# Whitespace notes\n\n---")).toBe(true);
-    expect(result).not.toContain("##");
+    expect(result).toBe(
+      [
+        "# Whitespace notes",
+        "",
+        "---",
+        "This task is LizMeter todo #5. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 5`. List its sub-issues with `todo_list` and `parentId: 5`.",
+        "Mark it done with `todo_complete`, or update it with `todo_update`.",
+      ].join("\n"),
+    );
   });
 
   it("TC-06: includes the parent section when the todo has a parent", () => {
@@ -55,8 +70,19 @@ describe("formatTodoAgentPrompt", () => {
       [],
     );
 
-    expect(result).toContain("## Parent\n#10 Umbrella task");
-    expect(result).not.toContain("## Sub-issues");
+    expect(result).toBe(
+      [
+        "# Sub task",
+        "",
+        "## Parent",
+        "#10 Umbrella task",
+        "",
+        "---",
+        "This task is LizMeter todo #42. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 42`. List its sub-issues with `todo_list` and `parentId: 42`.",
+        "Mark it done with `todo_complete`, or update it with `todo_update`.",
+      ].join("\n"),
+    );
   });
 
   it("TC-07: includes direct sub-issues with correct checkbox state", () => {
@@ -69,8 +95,19 @@ describe("formatTodoAgentPrompt", () => {
       ],
     );
 
-    expect(result).toContain(
-      "## Sub-issues\n- [x] #2 Done child (Done)\n- [ ] #3 Open child (Todo)",
+    expect(result).toBe(
+      [
+        "# Parent task",
+        "",
+        "## Sub-issues",
+        "- [x] #2 Done child (Done)",
+        "- [ ] #3 Open child (Todo)",
+        "",
+        "---",
+        "This task is LizMeter todo #1. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 1`. List its sub-issues with `todo_list` and `parentId: 1`.",
+        "Mark it done with `todo_complete`, or update it with `todo_update`.",
+      ].join("\n"),
     );
   });
 
@@ -121,7 +158,7 @@ describe("formatTodoAgentPrompt", () => {
     );
   });
 
-  it("TC-11: notes markdown survives verbatim -- a fenced code block and a table", () => {
+  it("TC-11: notes markdown survives verbatim -- a fenced code block and a table, joined exactly like every other section", () => {
     const notes = [
       "Here is the fix:",
       "",
@@ -139,6 +176,86 @@ describe("formatTodoAgentPrompt", () => {
 
     const result = formatTodoAgentPrompt({ id: 3, title: "With markdown", notes }, null, []);
 
-    expect(result).toContain(notes);
+    expect(result).toBe(
+      [
+        "# With markdown",
+        "",
+        notes,
+        "",
+        "---",
+        "This task is LizMeter todo #3. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 3`. List its sub-issues with `todo_list` and `parentId: 3`.",
+        "Mark it done with `todo_complete`, or update it with `todo_update`.",
+      ].join("\n"),
+    );
+  });
+
+  it("TC-12: a newline in the title (an AI-agent write through the MCP tools, or a smuggled paste) collapses to a single space in the heading", () => {
+    const result = formatTodoAgentPrompt({ id: 6, title: "Line one\nLine two", notes: null }, null, []);
+
+    expect(result.startsWith("# Line one Line two\n\n---")).toBe(true);
+  });
+
+  it("TC-13: a run of newlines and surrounding whitespace in the title collapses to one space, not one per line break", () => {
+    const result = formatTodoAgentPrompt({ id: 6, title: "Line one \r\n\n  Line two", notes: null }, null, []);
+
+    expect(result.startsWith("# Line one Line two\n\n---")).toBe(true);
+  });
+
+  it("TC-14: an unbalanced fence in notes is closed before the next section, instead of swallowing it", () => {
+    const notes = ["Before the fence.", "", "```ts", "const x = 1;"].join("\n");
+
+    const result = formatTodoAgentPrompt(
+      { id: 4, title: "Broken fence", notes },
+      { id: 1, title: "Root" },
+      [],
+    );
+
+    expect(result).toBe(
+      [
+        "# Broken fence",
+        "",
+        `${notes}\n\`\`\``,
+        "",
+        "## Parent",
+        "#1 Root",
+        "",
+        "---",
+        "This task is LizMeter todo #4. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 4`. List its sub-issues with `todo_list` and `parentId: 4`.",
+        "Mark it done with `todo_complete`, or update it with `todo_update`.",
+      ].join("\n"),
+    );
+  });
+
+  it("TC-15: a fence marker appearing mid-sentence (not at the start of a line) does not count toward the balance check", () => {
+    const notes = ["Run `echo ```` ` in a shell to see it print the backticks literally."].join("\n");
+
+    const result = formatTodoAgentPrompt({ id: 4, title: "Inline backticks", notes }, null, []);
+
+    // Not closed with an extra fence -- the notes block passes through unchanged, since no line
+    // in it starts with ``` .
+    expect(result).toBe(
+      [
+        "# Inline backticks",
+        "",
+        notes,
+        "",
+        "---",
+        "This task is LizMeter todo #4. Re-read it with the lizmeter-todo MCP server:",
+        "`todo_list` with `id: 4`. List its sub-issues with `todo_list` and `parentId: 4`.",
+        "Mark it done with `todo_complete`, or update it with `todo_update`.",
+      ].join("\n"),
+    );
+  });
+
+  it("TC-16: a child's stateLabel with nested parens (e.g. \"Blocked (external)\") renders unescaped -- markdown does not treat parens specially outside link syntax", () => {
+    const result = formatTodoAgentPrompt(
+      { id: 1, title: "Parent task", notes: null },
+      null,
+      [{ id: 2, title: "Stuck child", stateLabel: "Blocked (external)", isCompleted: false }],
+    );
+
+    expect(result).toContain("- [ ] #2 Stuck child (Blocked (external))");
   });
 });

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Todo, TodoLabel, TodoProject, TodoState, UpdateTodoInput } from "../../../../shared/types.ts";
 import { TodosProvider } from "../../contexts/TodosContext.tsx";
@@ -741,5 +741,76 @@ describe("TodoDetailPage shares state with TodosPage", () => {
     expect(await screen.findByText("Renamed via quiet write")).toBeInTheDocument();
     expect(screen.queryByText("Fix misc code quality issues")).not.toBeInTheDocument();
     expect(mockTodoAPI.list.mock.calls.length).toBe(listCallsBeforeEdit);
+  });
+});
+
+describe("TodoDetailPage overflow menu copy actions", () => {
+  const originalClipboard = navigator.clipboard;
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(navigator, "clipboard", { value: originalClipboard, configurable: true });
+  });
+
+  it("re-fetches children at click time for \"Copy agent prompt\", so a child linked since the last loadChildren still appears (mirrors TodoRowMenu)", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+
+    await renderDetail(100);
+
+    // Linked directly into the fixture, bypassing `updateTodo` -- `loadChildren`'s effect deps
+    // are `[loadChildren, todo?.childCount, todo?.completedChildCount]`, so this must not touch
+    // todo 100's own `childCount`, or the existing on-mount refetch would pick it up too and this
+    // test would no longer prove anything about the *click-time* fetch.
+    sampleTodos = [...sampleTodos, makeTodo(500, "Newly linked child", todoState, { parentId: 100 })];
+
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy agent prompt" }));
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const prompt = writeText.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain("## Sub-issues");
+    expect(prompt).toContain("#500 Newly linked child");
+  });
+
+  it("shows \"Copy failed\" instead of \"Copied ✓\" and logs it when the clipboard write for \"Copy id\" rejects, without closing the overflow menu", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await renderDetail(100);
+    vi.useFakeTimers();
+
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy id" }));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(screen.getByRole("menuitem", { name: "Copy failed" })).toBeInTheDocument();
+    expect(consoleError).toHaveBeenCalledWith("Failed to copy todo id", expect.any(Error));
+
+    // Unlike the row menu, the overflow menu stays open once the feedback window expires -- it
+    // only reverts the label.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+    expect(screen.getByRole("menuitem", { name: "Copy id" })).toBeInTheDocument();
+
+    consoleError.mockRestore();
+  });
+
+  it("shows \"Copy failed\" instead of \"Copied ✓\" and logs it when the clipboard write for \"Copy agent prompt\" rejects", async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error("denied"));
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await renderDetail(100);
+
+    fireEvent.click(screen.getByLabelText("More actions"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy agent prompt" }));
+
+    expect(await screen.findByRole("menuitem", { name: "Copy failed" })).toBeInTheDocument();
+    await waitFor(() => expect(consoleError).toHaveBeenCalledWith("Failed to copy agent prompt", expect.any(Error)));
+
+    consoleError.mockRestore();
   });
 });

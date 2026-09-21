@@ -30,6 +30,28 @@ export function formatTodoId(id: number): string {
 }
 
 /**
+ * A newline in the title would break the `# ${title}` heading below. The MCP `todo_add`/
+ * `todo_update` schema only describes a single-line title, it does not enforce one, so an
+ * AI-agent write can still put a newline (or several) there -- same hazard a multi-line paste
+ * would smuggle in through the UI (see `collapseLineBreaks` in `TodoDetailPage.tsx`). Any run of
+ * line breaks, and the whitespace immediately around it, collapses to a single space.
+ */
+function collapseTitleForHeading(title: string): string {
+  return title.replace(/\s*(?:\r\n|\r|\n)\s*/g, " ");
+}
+
+/**
+ * True when `text` contains an odd number of ``` fence markers that start a line (leading
+ * whitespace of up to 3 spaces still counts, matching how CommonMark itself recognizes an
+ * indented fence) -- meaning a fence opened partway through never closes. A ``` that merely
+ * appears mid-sentence is not a fence delimiter in markdown either, so it is not counted here.
+ */
+function hasUnbalancedFence(text: string): boolean {
+  const fenceLines = text.split(/\r\n|\r|\n/).filter((line) => /^ {0,3}```/.test(line));
+  return fenceLines.length % 2 !== 0;
+}
+
+/**
  * Markdown document for "Copy agent prompt": title, notes (verbatim, omitted when empty), the
  * parent (omitted when there is none), direct sub-issues (omitted when there are none), and a
  * trailing hint that always tells the reader how to look this todo up again through the
@@ -43,11 +65,14 @@ export function formatTodoAgentPrompt(
   parent: ClipboardParent | null,
   children: ClipboardChild[],
 ): string {
-  const sections: string[] = [`# ${todo.title}`];
+  const sections: string[] = [`# ${collapseTitleForHeading(todo.title)}`];
 
   const notes = todo.notes?.trim() ?? "";
   if (notes.length > 0) {
-    sections.push(notes);
+    // An odd number of fence markers means a code fence in the notes was left open -- without
+    // closing it here, every later section (Parent, Sub-issues, the locate hint) would render as
+    // part of that one open code block instead of its own section.
+    sections.push(hasUnbalancedFence(notes) ? `${notes}\n\`\`\`` : notes);
   }
 
   if (parent !== null) {
@@ -57,6 +82,9 @@ export function formatTodoAgentPrompt(
   if (children.length > 0) {
     const rows = children
       .map((child) =>
+        // `child.stateLabel` can itself contain parens (e.g. "Blocked (external)"). Markdown only
+        // gives `)` special meaning directly after a `]` (link syntax) -- outside that, a literal
+        // `)` renders as plain text, so this is intentionally left unescaped.
         `- [${child.isCompleted ? "x" : " "}] ${formatTodoId(child.id)} ${child.title} (${child.stateLabel})`
       )
       .join("\n");
