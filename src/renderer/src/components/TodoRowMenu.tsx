@@ -35,10 +35,11 @@ const MENU_WIDTH = 216;
 const ROW_HEIGHT = 26;
 /**
  * Every row except the per-state "Move to" buttons (added separately via `states.length`) and
- * "Remove from parent" (added separately via `hasParent` below): Edit, the four section labels,
- * the four dividers that precede them, Copy id, Copy agent prompt, Priority, Due date, Project,
- * Labels, Add sub-issue, Add existing sub-issue, Change parent, and Delete -- 20 rows, counted
- * directly against the JSX below.
+ * "Remove from parent" (added separately via `hasParent` below): Edit, the four section labels
+ * (Copy, Properties, Nesting, Move to), the five dividers -- one before each section label plus
+ * one before Delete, which has no section label of its own -- Copy id, Copy agent prompt,
+ * Priority, Due date, Project, Labels, Add sub-issue, Add existing sub-issue, Change parent, and
+ * Delete -- 20 rows, counted directly against the JSX below.
  */
 const FIXED_ROWS = 20;
 

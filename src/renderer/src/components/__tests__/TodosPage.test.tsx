@@ -777,17 +777,64 @@ describe("TodosPage copy shortcuts", () => {
     expect(prompt).toContain("lizmeter-todo MCP server");
   });
 
-  it("a second `Shift+C` while the first `todo.list` fetch is in flight fires only one call", async () => {
+  it("a second `Shift+C` on the same row while the first `todo.list` fetch is in flight supersedes it, so only the second call's fetch reaches the clipboard", async () => {
     const writeText = stubClipboard();
     await renderPage();
     cursorTo(1);
-    const callsBefore = mockTodoAPI.list.mock.calls.length;
+    const resolvers: Array<(rows: unknown[]) => void> = [];
+    mockTodoAPI.list.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
 
     fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
     fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
 
-    expect(mockTodoAPI.list.mock.calls.length - callsBefore).toBe(1);
+    expect(resolvers).toHaveLength(2);
+
+    // The first press's fetch resolving must not reach the clipboard -- a second press already
+    // started before it did.
+    await act(async () => {
+      resolvers[0]?.([]);
+      await Promise.resolve();
+    });
+    expect(writeText).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolvers[1]?.([]);
+      await Promise.resolve();
+    });
+
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+  });
+
+  it("`Shift+C` on one row, then on a different row while the first row's fetch is in flight, writes the second row's prompt", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+    const resolvers: Array<(rows: unknown[]) => void> = [];
+    mockTodoAPI.list.mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
+
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
+    cursorTo(1);
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
+
+    expect(resolvers).toHaveLength(2);
+
+    // The first row's fetch resolves after the cursor already moved and fired a second copy --
+    // its response is stale and must not reach the clipboard.
+    await act(async () => {
+      resolvers[0]?.([]);
+      await Promise.resolve();
+    });
+    expect(writeText).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolvers[1]?.([]);
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const prompt = writeText.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain("# Fix misc code quality issues");
+    expect(prompt).not.toContain("# Old prod to new prod migration");
   });
 
   it("neither `Ctrl+C` nor `Shift+C` fires while a dialog is open", async () => {
@@ -832,6 +879,47 @@ describe("TodosPage copy shortcuts", () => {
       await vi.advanceTimersByTimeAsync(1200);
     });
     expect(screen.queryByText("Copied id")).not.toBeInTheDocument();
+  });
+
+  it("an OS auto-repeat `Ctrl+C` keydown (held key) does not re-copy", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+
+    fireEvent.keyDown(document.body, { key: "c", ctrlKey: true, repeat: true });
+
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it("an OS auto-repeat `Shift+C` keydown (held key) does not re-fetch or re-copy", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+    const callsBefore = mockTodoAPI.list.mock.calls.length;
+
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
+    await waitFor(() => expect(mockTodoAPI.list.mock.calls.length - callsBefore).toBe(1));
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true, repeat: true });
+
+    expect(mockTodoAPI.list.mock.calls.length - callsBefore).toBe(1);
+    expect(writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it("holding `ArrowDown` (repeated keydowns) keeps moving the cursor", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+
+    fireEvent.keyDown(document.body, { key: "ArrowDown" });
+    fireEvent.keyDown(document.body, { key: "ArrowDown", repeat: true });
+
+    fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("#100"));
   });
 });
 

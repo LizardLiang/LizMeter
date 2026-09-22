@@ -54,7 +54,7 @@ describe("useCopyFeedback", () => {
   });
 
   it(
-    "clears a timer still armed from a previous trigger before arming the next, so only the later call's timer fires (476f49a)",
+    "clears a timer still armed from a previous trigger before arming the next, so only the later call's timer fires",
     () => {
       vi.useFakeTimers();
       const onExpire = vi.fn();

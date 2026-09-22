@@ -75,11 +75,21 @@ function formatDay(iso: string): string {
 
 /**
  * The one-line confirmation for the `Ctrl+C`/`Shift+C` keymap bindings, which act with no menu
- * open and so have no "Copied ✓" label slot to swap the way `TodoRowMenu`'s copy items do.
+ * open and so have no "Copied ✓" label slot to swap the way `TodoRowMenu`'s copy items do. Empty
+ * string when nothing is armed -- the pill stays mounted at all times (see the render below) and
+ * this is its idle content.
  */
-function copyPillLabel(feedback: CopyFeedbackState<TodoCopyAction>): string {
+function copyPillLabel(feedback: CopyFeedbackState<TodoCopyAction> | null): string {
+  if (feedback === null) return "";
   if (feedback.status === "failed") return "Copy failed";
   return feedback.action === "id" ? "Copied id" : "Copied prompt";
+}
+
+/** Which pill class matches the current feedback: transparent while idle, or the failed/copied
+ * styling for `feedback.status`. */
+function copyPillClassName(feedback: CopyFeedbackState<TodoCopyAction> | null): string {
+  if (feedback === null) return styles.copyPillIdle;
+  return feedback.status === "failed" ? styles.copyPillFailed : styles.copyPill;
 }
 
 /** A project reads as a box, the way Linear draws one. A coloured dot would say "label". */
@@ -839,6 +849,13 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
       // Ctrl+Shift+C or Ctrl+Alt+C, and a live text selection is left alone so the browser's own
       // copy still runs -- without that check this would steal a plain text-selection copy too.
       if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "c") {
+        // Every other single-key binding here opens a dialog or quick menu, so `dialogOpen` above
+        // swallows its own OS auto-repeat once it is up. This binding and `Shift+C` below open
+        // nothing, so holding either key would otherwise re-run the write (and, for `Shift+C`,
+        // refetch and re-arm the pill) on every repeat tick. The check sits on these two branches
+        // rather than at the top of `onKey` so held-ArrowDown/ArrowUp cursor movement keeps
+        // repeating.
+        if (event.repeat) return;
         const selection = window.getSelection();
         if (selection !== null && !selection.isCollapsed) return;
         event.preventDefault();
@@ -908,6 +925,9 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
           setReparenting(focusedTodo);
           break;
         case "C":
+          // See the Ctrl+C guard above for why `event.repeat` is checked here rather than at the
+          // top of `onKey`.
+          if (event.repeat) return;
           event.preventDefault();
           copyPrompt(focusedTodo);
           break;
@@ -1308,14 +1328,21 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
         />
       )}
 
-      {copyFeedback !== null && (
-        <div
-          className={copyFeedback.status === "failed" ? styles.copyPillFailed : styles.copyPill}
-          aria-live="polite"
-        >
-          {copyPillLabel(copyFeedback)}
-        </div>
-      )}
+      {
+        /*
+        Kept mounted at all times, text swapped rather than mounted/unmounted per copy: an
+        `aria-live` region registers with assistive tech on mount, and a mutation inside an
+        already-registered node is what triggers an announcement. A region that appears already
+        populated reads as ordinary content instead of one, which would leave a screen-reader
+        user with no confirmation at all for a keyboard copy -- this pill is its only one.
+        `styles.copyPillIdle` keeps it out of view without `display: none` or `visibility: hidden`
+        on the region itself, since assistive tech can treat either as suppressing the
+        announcement too.
+      */
+      }
+      <div className={copyPillClassName(copyFeedback)} aria-live="polite" aria-atomic="true">
+        {copyPillLabel(copyFeedback)}
+      </div>
     </div>
   );
 }

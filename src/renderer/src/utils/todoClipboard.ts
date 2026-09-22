@@ -38,9 +38,9 @@ export function formatTodoId(id: number): string {
  * - `TodoDetailPage`'s title field, a `<textarea>` that only wraps visually -- Enter never
  *   inserts a newline, but a paste can still smuggle one in.
  *
- * Lives here rather than in each caller (476f49a duplicated the whole copy-feedback timer this
- * same way, see `useCopyFeedback.ts`'s header comment) -- one regex, one behavior, everywhere a
- * title needs to render or auto-save as a single line.
+ * Lives here, once, rather than duplicated in each caller -- the same reason `useCopyFeedback.ts`
+ * centralizes its timer machinery in one hook instead of one copy per call site: one regex, one
+ * behavior, everywhere a title needs to render or auto-save as a single line.
  */
 export function collapseLineBreaks(value: string): string {
   return value.replace(/\s*(?:\r\n|\r|\n)\s*/g, " ");

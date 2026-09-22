@@ -751,3 +751,15 @@
   composes: copyPill;
   color: #f7768e;
 }
+
+// The idle state: the pill stays mounted (see TodosPage.tsx) so its `aria-live` region is
+// registered with assistive tech before the first mutation, rather than mounting already
+// populated -- a screen reader commonly treats the latter as ordinary content instead of an
+// announcement. Opacity keeps it out of view without `display: none` or `visibility: hidden` on
+// the live region itself, since assistive tech can treat either as suppressing the announcement
+// too.
+.copyPillIdle {
+  composes: copyPill;
+  opacity: 0;
+  animation: none;
+}
