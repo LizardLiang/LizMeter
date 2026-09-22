@@ -57,9 +57,9 @@ const DEFAULT_PIPE_PATH = IS_DEV
 
 const PIPE_PATH = process.env.LIZMETER_PIPE_PATH || DEFAULT_PIPE_PATH;
 
-// A todo may carry up to NOTES_MAX_LENGTH (32 000) characters of markdown notes. At 64 KB a
-// note that long could overflow this buffer once JSON escaping is applied and the write would
-// fail silently, so the ceiling is 256 KB.
+// A todo may carry up to NOTES_MAX_LENGTH (32 000) characters of markdown notes. At roughly
+// 64 000 characters a note that long could overflow this buffer once JSON escaping is applied
+// and the write would fail silently, so the ceiling is 262 144 characters.
 const MAX_BUFFER_SIZE = 262_144;
 
 // How much of a malformed line to keep in the log -- long enough to identify what a client sent,
@@ -628,8 +628,15 @@ export function processLine(line: string, reply: (text: string) => void): void {
  */
 export function handleConnection(socket: net.Socket): void {
   let buffer = "";
+  // Set once the connection has overflowed. socket.end() only half-closes the write side, so a
+  // peer that keeps sending after tripping the limit would otherwise still get every further
+  // message fully parsed and dispatched on a connection the server already declared over --
+  // this flag stops that regardless of what the socket itself is doing.
+  let terminated = false;
 
   socket.on("data", (chunk) => {
+    if (terminated) return;
+
     const incoming = chunk.toString("utf8");
 
     // Guard against oversized payloads before the chunk joins the buffer, so a single large
@@ -638,8 +645,9 @@ export function handleConnection(socket: net.Socket): void {
       const overflowReply = JSON.stringify({
         id: null,
         ok: false,
-        error: `Message exceeds the ${MAX_BUFFER_SIZE}-byte limit`,
+        error: `Message exceeds the ${MAX_BUFFER_SIZE}-character limit`,
       }) + "\n";
+      terminated = true;
       socket.write(overflowReply);
       socket.end();
       buffer = "";

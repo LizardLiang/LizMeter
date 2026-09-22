@@ -51,16 +51,19 @@ class FakeSocket extends EventEmitter {
   writable = true;
 
   write(data: string): boolean {
+    if (!this.writable) return false;
     this.written.push(data);
     return true;
   }
 
   end(): void {
     this.ended = true;
+    this.writable = false;
   }
 
   destroy(): void {
     this.destroyed = true;
+    this.writable = false;
   }
 }
 
@@ -69,6 +72,9 @@ function connect(): FakeSocket {
   handleConnection(socket as unknown as net.Socket);
   return socket;
 }
+
+// One character past pipe-server's MAX_BUFFER_SIZE (262_144).
+const OVERSIZED_CHUNK = "x".repeat(262_144 + 1);
 
 function today(): string {
   return new Date().toISOString().slice(0, 10);
@@ -1046,9 +1052,6 @@ describe("todo.delete", () => {
 // --- handleConnection: buffer overflow ---------------------------------------
 
 describe("handleConnection buffer overflow", () => {
-  // One byte past pipe-server's MAX_BUFFER_SIZE (262_144).
-  const OVERSIZED_CHUNK = "x".repeat(262_144 + 1);
-
   it("rejects an oversized single chunk before concatenating it into the buffer", () => {
     const socket = connect();
 
@@ -1069,17 +1072,39 @@ describe("handleConnection buffer overflow", () => {
     expect(socket.destroyed).toBe(false);
   });
 
-  it("resets the buffer so a follow-up chunk cannot resume mid-message", () => {
+  it("resets the buffer so a leftover fragment cannot resurface once the connection closes", () => {
     const socket = connect();
+
+    // A partial message with no terminating newline leaves genuine leftover content in the
+    // buffer for the overflow below to discard.
+    socket.emit("data", Buffer.from('{"id":1,"type":"todo.add","title":"orphan', "utf8"));
     socket.emit("data", Buffer.from(OVERSIZED_CHUNK, "utf8"));
-    socket.written = [];
 
-    // A well-formed, small message arriving right after the overflow starts from an empty
-    // buffer, not from whatever was left over from the rejected chunk.
-    socket.emit("data", Buffer.from(JSON.stringify({ id: 1, type: "ping" }) + "\n", "utf8"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    socket.emit("end");
 
-    expect(socket.written).toHaveLength(1);
-    expect(JSON.parse(socket.written[0]!)).toMatchObject({ id: 1, ok: true });
+    // A discarded buffer leaves nothing to parse when the connection closes -- no parse
+    // attempt, no warning, and no side effect from the orphaned fragment.
+    expect(warnSpy).not.toHaveBeenCalled();
+    expect(listTodos()).toHaveLength(0);
+
+    warnSpy.mockRestore();
+  });
+});
+
+// --- handleConnection: overflow stops further processing ---------------------
+
+describe("handleConnection overflow terminates the connection", () => {
+  it("does not dispatch a state-mutating command that arrives after the connection has overflowed", () => {
+    const socket = connect();
+
+    socket.emit("data", Buffer.from(OVERSIZED_CHUNK, "utf8"));
+    socket.emit(
+      "data",
+      Buffer.from(JSON.stringify({ id: 2, type: "todo.add", title: "sneaked in" }) + "\n", "utf8"),
+    );
+
+    expect(listTodos()).toHaveLength(0);
   });
 });
 
