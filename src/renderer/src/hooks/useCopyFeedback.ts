@@ -1,21 +1,17 @@
 // src/renderer/src/hooks/useCopyFeedback.ts
 // Shared timer machinery behind a "Copied ✓" (or "Copy failed") label that reverts on its own.
-// Extracted out of TodoRowMenu and TodoDetailPage, which each carried a byte-identical copy of
-// this state + ref + unmount-cleanup effect. 476f49a fixed two bugs in exactly that duplicated
-// code: a stale timer left armed by an earlier copy that fires late and acts on whatever is on
-// screen by then, and a clipboard write that resolves after unmount touching state or arming a
-// timer on a dead component. Both guards live here now, once, so a future call site cannot lose
-// them the way the two duplicates nearly did.
+// Two guards live here, once, for every call site: a `trigger` call clears any timer an earlier
+// one left armed, so a stale timer never fires late against whatever is on screen by then; and a
+// clipboard write that resolves after unmount touches neither state nor a new timer.
 //
-// What is deliberately NOT folded in here, because it differs per call site:
+// What differs per call site and stays with the caller:
 // - what happens when the feedback window expires naturally (`onExpire` -- the row menu closes,
 //   the detail page's overflow menu stays open and only reverts its label);
 // - how the caller gathers the data to copy (this hook only owns showing the result of the copy).
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-/** "Copied ✓" (or "Copy failed") shows for this long before it reverts. Both call sites this was
- * extracted from used this same value under their own, separately duplicated constant. */
+/** "Copied ✓" (or "Copy failed") shows for this long before it reverts. */
 export const DEFAULT_COPY_FEEDBACK_MS = 1200;
 
 export type CopyFeedbackStatus = "copied" | "failed";
@@ -29,8 +25,8 @@ export interface UseCopyFeedbackResult<TAction extends string> {
   /** The action currently showing feedback, and whether it succeeded -- `null` when nothing is. */
   feedback: CopyFeedbackState<TAction> | null;
   /** Arms feedback for `action`. Clears any timer still running from a previous call before
-   * arming this one -- skipping that would leave the previous timer unreachable but still alive,
-   * so it fires late and (through `onExpire`) acts on whatever is on screen by then (476f49a). */
+   * arming this one -- an uncleared timer stays alive but unreachable, fires late, and (through
+   * `onExpire`) acts on whatever is on screen by then. */
   trigger: (action: TAction, status?: CopyFeedbackStatus) => void;
 }
 
@@ -94,8 +90,7 @@ export function useCopyFeedback<TAction extends string>(
 
 /**
  * The label a "Copy ..." menu item should render: its normal label, or the feedback label when
- * `feedback` belongs to this `action`. Pulled out of the two call sites alongside the hook since
- * both rendered this exact same swap.
+ * `feedback` belongs to this `action`.
  */
 export function copyFeedbackLabel<TAction extends string>(
   feedback: CopyFeedbackState<TAction> | null,
@@ -108,8 +103,8 @@ export function copyFeedbackLabel<TAction extends string>(
 
 /**
  * True when `feedback` belongs to `action` and reads "Copy failed" -- the same comparison
- * `copyFeedbackLabel` makes internally, pulled out so a call site can pick a failed-state class
- * for the same label slot without duplicating the `action`/`status` check.
+ * `copyFeedbackLabel` makes internally, exposed so a call site can pick a failed-state class for
+ * that label slot without repeating the `action`/`status` check.
  */
 export function copyFeedbackIsFailed<TAction extends string>(
   feedback: CopyFeedbackState<TAction> | null,

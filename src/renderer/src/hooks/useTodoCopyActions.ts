@@ -1,12 +1,11 @@
 // src/renderer/src/hooks/useTodoCopyActions.ts
 // The impure chain behind "Copy id" and "Copy agent prompt": the clipboard writes, the
 // `todo.list({ parentId })` fetch for direct children, and the in-flight guard on the prompt
-// fetch. Extracted out of TodoRowMenu and TodoDetailPage, which each carried a byte-identical
-// copy of this chain, and backs TodosPage's `Ctrl+C`/`Shift+C` keymap bindings too.
+// fetch. One copy for all three call sites -- TodoRowMenu, TodoDetailPage, and TodosPage's
+// `Ctrl+C`/`Shift+C` keymap bindings.
 //
-// Pairs with `useCopyFeedback`, which owns showing the result of a copy -- this hook only owns
-// producing that result. The caller still supplies `onExpire` and the todo to copy; see
-// `useCopyFeedback.ts`'s header for why that split exists.
+// Pairs with `useCopyFeedback`, which owns showing the result of a copy -- this hook owns
+// producing that result. The caller supplies `onExpire` and the todo to copy.
 
 import { useCallback, useState } from "react";
 import type { Todo } from "../../../shared/types.ts";
@@ -24,9 +23,8 @@ export interface UseTodoCopyActionsResult {
   copyId: (id: number) => void;
   /**
    * Fetches `todo`'s direct children, builds the agent-prompt markdown, and writes it to the
-   * clipboard. A call that arrives while a previous one is still in flight is dropped -- without
-   * this, whichever `todo.list` response lands last would silently win the clipboard over
-   * whichever call was last (476f49a).
+   * clipboard. A call that arrives while a previous one is still in flight is dropped, so the
+   * clipboard carries the last call's todo rather than whichever `todo.list` response lands last.
    */
   copyPrompt: (todo: Todo) => void;
 }
