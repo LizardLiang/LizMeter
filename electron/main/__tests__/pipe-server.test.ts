@@ -2,6 +2,8 @@
 // Exercises processLine directly so no real pipe is opened -- the pipe path is
 // hardcoded and shared with the running app.
 
+import { EventEmitter } from "node:events";
+import type net from "node:net";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // pipe-server imports getMainWindow from index.ts, which pulls in electron.
@@ -31,7 +33,7 @@ import {
   listTodoStates,
 } from "../database.ts";
 import { collectAttachmentBlobs } from "../attachment-store.ts";
-import { processLine } from "../pipe-server.ts";
+import { handleConnection, processLine } from "../pipe-server.ts";
 
 /** Runs one line through the protocol and returns the parsed reply, if any. */
 function send(message: unknown): Record<string, unknown> | null {
@@ -39,6 +41,33 @@ function send(message: unknown): Record<string, unknown> | null {
   processLine(JSON.stringify(message), (text) => replies.push(text));
   if (replies.length === 0) return null;
   return JSON.parse(replies[0]!) as Record<string, unknown>;
+}
+
+/** A socket stand-in for driving handleConnection without opening a real pipe. */
+class FakeSocket extends EventEmitter {
+  written: string[] = [];
+  ended = false;
+  destroyed = false;
+  writable = true;
+
+  write(data: string): boolean {
+    this.written.push(data);
+    return true;
+  }
+
+  end(): void {
+    this.ended = true;
+  }
+
+  destroy(): void {
+    this.destroyed = true;
+  }
+}
+
+function connect(): FakeSocket {
+  const socket = new FakeSocket();
+  handleConnection(socket as unknown as net.Socket);
+  return socket;
 }
 
 function today(): string {
@@ -90,6 +119,32 @@ describe("malformed input", () => {
     processLine("null", (t) => replies.push(t));
     expect(replies).toHaveLength(0);
   });
+
+  it("counts and logs malformed JSON while still sending no reply", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const callsBefore = warnSpy.mock.calls.length;
+    const replies: string[] = [];
+
+    processLine("{not valid json", (t) => replies.push(t));
+
+    expect(replies).toHaveLength(0);
+    expect(warnSpy.mock.calls.length).toBe(callsBefore + 1);
+    expect(String(warnSpy.mock.calls[callsBefore]![0])).toMatch(/^\[pipe\]/);
+
+    warnSpy.mockRestore();
+  });
+
+  it("truncates a long malformed payload before logging it", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const junk = "{" + "x".repeat(5000);
+
+    processLine(junk, () => {});
+
+    const logged = String(warnSpy.mock.calls[warnSpy.mock.calls.length - 1]![0]);
+    expect(logged.length).toBeLessThan(junk.length);
+
+    warnSpy.mockRestore();
+  });
 });
 
 // --- Reply framing ----------------------------------------------------------
@@ -114,6 +169,25 @@ describe("reply framing", () => {
     const reply = send({ id: 2, type: "todo.explode" });
     expect(reply).toMatchObject({ id: 2, ok: false });
     expect(String(reply?.error)).toMatch(/Unknown command type/);
+  });
+
+  it("logs a rejected command that carries an id", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    send({ id: 2, type: "todo.explode" });
+
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/^\[pipe\].*todo\.explode/));
+    warnSpy.mockRestore();
+  });
+
+  it("also logs a rejected command with no id, where the failure would otherwise be invisible", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const reply = send({ type: "todo.explode" });
+
+    expect(reply).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/^\[pipe\].*todo\.explode/));
+    warnSpy.mockRestore();
   });
 });
 
@@ -966,5 +1040,80 @@ describe("todo.delete", () => {
 
     expect(String(reply?.error)).toContain("renumbered");
     expect(listTodos()).toHaveLength(1); // the delete really did not land
+  });
+});
+
+// --- handleConnection: buffer overflow ---------------------------------------
+
+describe("handleConnection buffer overflow", () => {
+  // One byte past pipe-server's MAX_BUFFER_SIZE (262_144).
+  const OVERSIZED_CHUNK = "x".repeat(262_144 + 1);
+
+  it("rejects an oversized single chunk before concatenating it into the buffer", () => {
+    const socket = connect();
+
+    socket.emit("data", Buffer.from(OVERSIZED_CHUNK, "utf8"));
+
+    expect(socket.written).toHaveLength(1);
+    const reply = JSON.parse(socket.written[0]!) as Record<string, unknown>;
+    expect(reply).toMatchObject({ id: null, ok: false });
+    expect(String(reply.error)).toMatch(/\d/); // names the size limit
+  });
+
+  it("closes the socket cleanly rather than destroying it", () => {
+    const socket = connect();
+
+    socket.emit("data", Buffer.from(OVERSIZED_CHUNK, "utf8"));
+
+    expect(socket.ended).toBe(true);
+    expect(socket.destroyed).toBe(false);
+  });
+
+  it("resets the buffer so a follow-up chunk cannot resume mid-message", () => {
+    const socket = connect();
+    socket.emit("data", Buffer.from(OVERSIZED_CHUNK, "utf8"));
+    socket.written = [];
+
+    // A well-formed, small message arriving right after the overflow starts from an empty
+    // buffer, not from whatever was left over from the rejected chunk.
+    socket.emit("data", Buffer.from(JSON.stringify({ id: 1, type: "ping" }) + "\n", "utf8"));
+
+    expect(socket.written).toHaveLength(1);
+    expect(JSON.parse(socket.written[0]!)).toMatchObject({ id: 1, ok: true });
+  });
+});
+
+// --- handleConnection: end of stream -------------------------------------------
+
+describe("handleConnection end of stream", () => {
+  it("writes the trailing reply when the socket is still writable", () => {
+    const socket = connect();
+
+    socket.emit("data", Buffer.from(JSON.stringify({ id: 1, type: "ping" }), "utf8"));
+    socket.emit("end");
+
+    expect(socket.written).toHaveLength(1);
+    expect(JSON.parse(socket.written[0]!)).toMatchObject({ id: 1, ok: true });
+  });
+
+  it("still applies the trailing message's side effects when the socket is no longer writable", () => {
+    const socket = connect();
+
+    socket.emit("data", Buffer.from(JSON.stringify({ id: 1, type: "todo.add", title: "trailing" }), "utf8"));
+    socket.writable = false;
+    socket.emit("end");
+
+    expect(listTodos()).toHaveLength(1);
+    expect(listTodos()[0]?.title).toBe("trailing");
+  });
+
+  it("drops the trailing reply when the socket is no longer writable", () => {
+    const socket = connect();
+
+    socket.emit("data", Buffer.from(JSON.stringify({ id: 1, type: "ping" }), "utf8"));
+    socket.writable = false;
+    socket.emit("end");
+
+    expect(socket.written).toHaveLength(0);
   });
 });

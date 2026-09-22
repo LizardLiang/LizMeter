@@ -62,6 +62,10 @@ const PIPE_PATH = process.env.LIZMETER_PIPE_PATH || DEFAULT_PIPE_PATH;
 // fail silently, so the ceiling is 256 KB.
 const MAX_BUFFER_SIZE = 262_144;
 
+// How much of a malformed line to keep in the log -- long enough to identify what a client sent,
+// short enough that a large junk payload cannot flood the log.
+const MALFORMED_LINE_LOG_LENGTH = 200;
+
 const VALID_TODO_FILTERS = new Set<TodoFilter>(["all", "active", "done", "ai"]);
 
 // An unfiltered todo.list can run into the thousands of rows, which blows past an MCP client's
@@ -73,6 +77,9 @@ const DEFAULT_TODO_LIST_LIMIT = 50;
 // --- Module-level singleton state ---
 
 let pipeServer: net.Server | null = null;
+
+// Count of lines that failed JSON.parse. Backs the [pipe] warning logged for each one below.
+let malformedLineCount = 0;
 
 // --- Renderer notification ---
 
@@ -571,7 +578,13 @@ export function processLine(line: string, reply: (text: string) => void): void {
   try {
     payload = JSON.parse(line) as unknown;
   } catch {
-    // Malformed JSON -- discard silently, matching the original behaviour.
+    // A failed parse has no id to key a reply to, so the client could never match one up --
+    // the wire stays silent. Still counted and logged so a run of bad input is visible here.
+    malformedLineCount++;
+    const preview = line.length > MALFORMED_LINE_LOG_LENGTH
+      ? `${line.slice(0, MALFORMED_LINE_LOG_LENGTH)}...`
+      : line;
+    console.warn(`[pipe] Discarding malformed JSON (#${malformedLineCount}): ${preview}`);
     return;
   }
 
@@ -595,8 +608,11 @@ export function processLine(line: string, reply: (text: string) => void): void {
       reply(JSON.stringify({ id, ok: true, result }) + "\n");
     }
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Logged unconditionally -- an id-less failing command would otherwise be invisible from
+    // this side, since no reply goes out for it either.
+    console.warn(`[pipe] Rejected command '${data.type}': ${message}`);
     if (id !== undefined) {
-      const message = err instanceof Error ? err.message : String(err);
       reply(JSON.stringify({ id, ok: false, error: message }) + "\n");
     }
   }
@@ -604,17 +620,33 @@ export function processLine(line: string, reply: (text: string) => void): void {
 
 // --- Connection Handler ---
 
-function handleConnection(socket: net.Socket): void {
+/**
+ * Handles one accepted socket for the lifetime of the connection.
+ *
+ * Exported so the protocol can be tested without opening a real pipe -- the
+ * hardcoded pipe path is shared with the running app.
+ */
+export function handleConnection(socket: net.Socket): void {
   let buffer = "";
 
   socket.on("data", (chunk) => {
-    buffer += chunk.toString("utf8");
+    const incoming = chunk.toString("utf8");
 
-    // Guard against oversized payloads
-    if (buffer.length > MAX_BUFFER_SIZE) {
-      socket.destroy();
+    // Guard against oversized payloads before the chunk joins the buffer, so a single large
+    // chunk never sits fully in memory just to fail the check.
+    if (buffer.length + incoming.length > MAX_BUFFER_SIZE) {
+      const overflowReply = JSON.stringify({
+        id: null,
+        ok: false,
+        error: `Message exceeds the ${MAX_BUFFER_SIZE}-byte limit`,
+      }) + "\n";
+      socket.write(overflowReply);
+      socket.end();
+      buffer = "";
       return;
     }
+
+    buffer += incoming;
 
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
@@ -627,10 +659,14 @@ function handleConnection(socket: net.Socket): void {
   });
 
   socket.on("end", () => {
-    // Process any remaining buffered data when the connection closes
+    // Process any remaining buffered data when the connection closes. The socket may already be
+    // half-closed by the time this fires, so a reply is only written while it is still writable
+    // -- the side effect (e.g. the todo write) still happens either way.
     const trimmed = buffer.trim();
     if (!trimmed) return;
-    processLine(trimmed, (text) => socket.write(text));
+    processLine(trimmed, (text) => {
+      if (socket.writable) socket.write(text);
+    });
   });
 
   socket.on("error", () => {
