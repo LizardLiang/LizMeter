@@ -24,6 +24,8 @@ export type SyncNoticeKind =
   | "adopted-backup"
   /** A todo's visible number changed because another machine had already claimed it. */
   | "todo-id-reassigned"
+  /** One or more peer oplog entries were unreadable or require a newer schema version. */
+  | "oplog-entry-skipped"
   /** A merge pass failed for a reason with no dedicated notice kind of its own (sync-manager.ts). */
   | "merge-failed";
 
