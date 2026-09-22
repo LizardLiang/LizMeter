@@ -708,6 +708,7 @@ export type MusicErrorCode =
   | "CACHE_FULL"
   | "CACHE_FILE_BUSY"
   | "FORMAT_ERROR"
+  | "CHECKSUM_UNAVAILABLE"
   | "HASH_MISMATCH"
   | "PLAYLIST_NOT_FOUND"
   | "TRACK_NOT_FOUND";

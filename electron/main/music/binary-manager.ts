@@ -27,6 +27,15 @@ const FFMPEG_API_URL = "https://api.github.com/repos/yt-dlp/FFmpeg-Builds/releas
 // User-Agent required by GitHub API
 const GITHUB_USER_AGENT = "LizMeter/1.0";
 
+const MAX_REDIRECTS = 5;
+const ALLOWED_REDIRECT_HOSTS = new Set([
+  "api.github.com",
+  "github.com",
+  "release-assets.githubusercontent.com",
+  "objects.githubusercontent.com",
+  "github-releases.githubusercontent.com",
+]);
+
 /**
  * Returns the directory where binaries are stored.
  * Creates the directory if it does not exist.
@@ -254,7 +263,7 @@ interface GitHubRelease {
   assets: GitHubAsset[];
 }
 
-function fetchGitHubRelease(url: string): Promise<GitHubRelease> {
+function fetchGitHubRelease(url: string, redirectCount = 0): Promise<GitHubRelease> {
   return new Promise((resolve, reject) => {
     const req = https.get(
       url,
@@ -267,13 +276,16 @@ function fetchGitHubRelease(url: string): Promise<GitHubRelease> {
       },
       (res) => {
         if (res.statusCode === 301 || res.statusCode === 302 || res.statusCode === 307 || res.statusCode === 308) {
-          const redirectUrl = res.headers.location;
-          if (!redirectUrl) {
-            reject(new Error(`Redirect with no location header`));
+          let redirectUrl: string;
+          try {
+            redirectUrl = getRedirectUrl(url, res.headers.location, redirectCount);
+          } catch (error) {
+            reject(error);
+            res.resume();
             return;
           }
           res.resume();
-          fetchGitHubRelease(redirectUrl).then(resolve).catch(reject);
+          fetchGitHubRelease(redirectUrl, redirectCount + 1).then(resolve).catch(reject);
           return;
         }
 
@@ -357,7 +369,7 @@ function downloadFile(
   onProgress: (progress: Omit<BinaryDownloadProgress, "binary">) => void,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const doDownload = (downloadUrl: string) => {
+    const doDownload = (downloadUrl: string, redirectCount: number) => {
       const req = https.get(downloadUrl, { timeout: 60000 }, (res) => {
         // Follow redirects (GitHub asset downloads redirect to S3)
         if (
@@ -366,13 +378,16 @@ function downloadFile(
           res.statusCode === 307 ||
           res.statusCode === 308
         ) {
-          const redirectUrl = res.headers.location;
-          if (!redirectUrl) {
-            reject(new Error(`Redirect with no location header from ${downloadUrl}`));
+          let redirectUrl: string;
+          try {
+            redirectUrl = getRedirectUrl(downloadUrl, res.headers.location, redirectCount);
+          } catch (error) {
+            reject(error);
+            res.resume();
             return;
           }
           res.resume();
-          doDownload(redirectUrl);
+          doDownload(redirectUrl, redirectCount + 1);
           return;
         }
 
@@ -435,7 +450,7 @@ function downloadFile(
       req.on("error", reject);
     };
 
-    doDownload(url);
+    doDownload(url, 0);
   });
 }
 
@@ -450,9 +465,8 @@ async function verifyYtDlpChecksum(binaryUrl: string, filePath: string): Promise
   let checksumContent: string;
   try {
     checksumContent = await fetchText(checksumUrl);
-  } catch {
-    // If checksum file is not available, skip verification (soft fail)
-    return;
+  } catch (error) {
+    throw checksumUnavailable("yt-dlp", error);
   }
 
   // The tmp file is named e.g. "yt-dlp.exe.tmp" but the checksum file has entries
@@ -460,13 +474,19 @@ async function verifyYtDlpChecksum(binaryUrl: string, filePath: string): Promise
   const binaryFilename = path.basename(filePath).replace(/\.tmp$/, "");
   const expectedHash = parseChecksumFile(checksumContent, binaryFilename);
   if (!expectedHash) {
-    // Checksum entry not found for this binary — skip verification
-    return;
+    throw new MusicError(
+      `SHA256 verification unavailable for yt-dlp: no valid checksum entry for ${binaryFilename}`,
+      "CHECKSUM_UNAVAILABLE",
+    );
   }
 
-  const actualHash = computeSha256(filePath);
+  let actualHash: string;
+  try {
+    actualHash = await computeSha256(filePath);
+  } catch (error) {
+    throw checksumUnavailable("yt-dlp", error);
+  }
   if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
-    fs.unlinkSync(filePath);
     throw new MusicError(
       `SHA256 hash mismatch for yt-dlp: expected ${expectedHash}, got ${actualHash}`,
       "HASH_MISMATCH",
@@ -486,21 +506,34 @@ async function verifyFfmpegChecksum(archiveUrl: string, archivePath: string): Pr
   let checksumContent: string;
   try {
     checksumContent = await fetchText(checksumUrl);
-  } catch {
-    // If checksum file is not available, skip verification (soft fail)
-    return;
+  } catch (error) {
+    throw checksumUnavailable("ffmpeg archive", error);
   }
 
-  // FFmpeg checksum files typically contain: <hash>  <filename>
-  const archiveFilename = path.basename(archivePath);
-  const expectedHash = parseChecksumFile(checksumContent, archiveFilename)
-    ?? checksumContent.split(/\s/)[0]?.trim(); // fallback: first token
+  // The archive is downloaded to a generic temporary filename, so match the
+  // checksum entry against the release asset's filename from the trusted URL.
+  let archiveFilename: string;
+  try {
+    archiveFilename = decodeURIComponent(path.posix.basename(new URL(archiveUrl).pathname));
+  } catch (error) {
+    throw checksumUnavailable("ffmpeg archive", error);
+  }
+  const expectedHash = parseChecksumFile(checksumContent, archiveFilename);
 
-  if (!expectedHash) return;
+  if (!expectedHash) {
+    throw new MusicError(
+      `SHA256 verification unavailable for ffmpeg archive: no valid checksum entry for ${archiveFilename}`,
+      "CHECKSUM_UNAVAILABLE",
+    );
+  }
 
-  const actualHash = computeSha256(archivePath);
+  let actualHash: string;
+  try {
+    actualHash = await computeSha256(archivePath);
+  } catch (error) {
+    throw checksumUnavailable("ffmpeg archive", error);
+  }
   if (actualHash.toLowerCase() !== expectedHash.toLowerCase()) {
-    fs.unlinkSync(archivePath);
     throw new MusicError(
       `SHA256 hash mismatch for ffmpeg archive: expected ${expectedHash}, got ${actualHash}`,
       "HASH_MISMATCH",
@@ -583,7 +616,7 @@ async function extractFfmpegFromTarXz(archivePath: string, destPath: string): Pr
 
 function fetchText(url: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const doFetch = (fetchUrl: string) => {
+    const doFetch = (fetchUrl: string, redirectCount: number) => {
       const req = https.get(
         fetchUrl,
         {
@@ -597,13 +630,16 @@ function fetchText(url: string): Promise<string> {
             res.statusCode === 307 ||
             res.statusCode === 308
           ) {
-            const redirectUrl = res.headers.location;
-            if (!redirectUrl) {
-              reject(new Error("Redirect with no location header"));
+            let redirectUrl: string;
+            try {
+              redirectUrl = getRedirectUrl(fetchUrl, res.headers.location, redirectCount);
+            } catch (error) {
+              reject(error);
+              res.resume();
               return;
             }
             res.resume();
-            doFetch(redirectUrl);
+            doFetch(redirectUrl, redirectCount + 1);
             return;
           }
 
@@ -627,8 +663,35 @@ function fetchText(url: string): Promise<string> {
       req.on("error", reject);
     };
 
-    doFetch(url);
+    doFetch(url, 0);
   });
+}
+
+function getRedirectUrl(currentUrl: string, location: string | undefined, redirectCount: number): string {
+  if (redirectCount >= MAX_REDIRECTS) {
+    throw new Error(`Too many redirects (maximum ${MAX_REDIRECTS})`);
+  }
+  if (!location) {
+    throw new Error(`Redirect with no location header from ${currentUrl}`);
+  }
+
+  const redirectUrl = new URL(location, currentUrl);
+  if (redirectUrl.protocol !== "https:") {
+    throw new Error(`Redirect protocol is not permitted: ${redirectUrl.protocol}`);
+  }
+  if (!ALLOWED_REDIRECT_HOSTS.has(redirectUrl.hostname.toLowerCase())) {
+    throw new Error(`Redirect host is not permitted: ${redirectUrl.hostname}`);
+  }
+
+  return redirectUrl.toString();
+}
+
+function checksumUnavailable(binary: string, error: unknown): MusicError {
+  const reason = error instanceof Error ? error.message : String(error);
+  return new MusicError(
+    `SHA256 verification unavailable for ${binary}: ${reason}`,
+    "CHECKSUM_UNAVAILABLE",
+  );
 }
 
 /**
@@ -643,7 +706,7 @@ function parseChecksumFile(content: string, filename: string): string | null {
     if (parts.length >= 2) {
       const hash = parts[0]!;
       const name = parts[parts.length - 1]!;
-      if (name === filename || name.endsWith(`/${filename}`)) {
+      if (/^[a-f0-9]{64}$/i.test(hash) && (name === filename || name.endsWith(`/${filename}`))) {
         return hash;
       }
     }
@@ -654,9 +717,11 @@ function parseChecksumFile(content: string, filename: string): string | null {
 /**
  * Compute the SHA256 hex digest of a file.
  */
-function computeSha256(filePath: string): string {
+async function computeSha256(filePath: string): Promise<string> {
   const hash = crypto.createHash("sha256");
-  const data = fs.readFileSync(filePath);
-  hash.update(data);
+  const stream = fs.createReadStream(filePath);
+  for await (const chunk of stream) {
+    hash.update(chunk);
+  }
   return hash.digest("hex");
 }
