@@ -10,6 +10,7 @@ import type {
   TimerStatus,
   TimerType,
 } from "../../../shared/types.ts";
+import { MAX_DURATION, MAX_TITLE_LENGTH, MIN_DURATION } from "../../../shared/types.ts";
 import { stripHtml } from "../utils/html.ts";
 
 // --- State ---
@@ -49,8 +50,6 @@ type TimerAction =
       timerType: TimerType;
     };
   };
-
-const MAX_TITLE_LENGTH = 5000;
 
 function getDurationForType(settings: TimerSettings, timerType: TimerType): number {
   switch (timerType) {
@@ -95,7 +94,7 @@ export function timerReducer(state: TimerState, action: TimerAction): TimerState
     case "SET_REMAINING": {
       // Only allowed when idle — let the user pick a custom starting time
       if (state.status !== "idle") return state;
-      const clamped = Math.max(1, Math.min(7200, action.payload));
+      const clamped = Math.max(MIN_DURATION, Math.min(MAX_DURATION, action.payload));
       return { ...state, remainingSeconds: clamped };
     }
 

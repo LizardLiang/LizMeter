@@ -2,14 +2,8 @@
 // Root container for the Tomato Clock feature
 
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
-import type {
-  AppMode,
-  ClaudeCodeSessionData,
-  IssueRef,
-  Session,
-  StopwatchSettings,
-  TimerSettings,
-} from "../../../shared/types.ts";
+import type { AppMode, ClaudeCodeSessionData, IssueRef, Session, StopwatchSettings } from "../../../shared/types.ts";
+import { DEFAULT_SETTINGS } from "../../../shared/types.ts";
 import { MusicPlayerProvider, useMusicPlayer } from "../contexts/MusicPlayerContext.tsx";
 import { TodosProvider } from "../contexts/TodosContext.tsx";
 import { useClaudeTracker } from "../hooks/useClaudeTracker.ts";
@@ -44,12 +38,6 @@ const TagsPage = lazy(() => import("./TagsPage.tsx").then(m => ({ default: m.Tag
 const TodosPage = lazy(() => import("./TodosPage.tsx").then(m => ({ default: m.TodosPage })));
 const TodoDetailPage = lazy(() => import("./TodoDetailPage.tsx").then(m => ({ default: m.TodoDetailPage })));
 import styles from "./TomatoClock.module.scss";
-
-const DEFAULT_SETTINGS: TimerSettings = {
-  workDuration: 1500,
-  shortBreakDuration: 300,
-  longBreakDuration: 900,
-};
 
 const DEFAULT_STOPWATCH_SETTINGS: StopwatchSettings = {
   maxDurationSeconds: 28800, // 8 hours

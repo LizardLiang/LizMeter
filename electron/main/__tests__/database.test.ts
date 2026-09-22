@@ -1,5 +1,6 @@
 // @vitest-environment node
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_SETTINGS, MAX_DURATION, MAX_TITLE_LENGTH, MIN_DURATION } from "../../../src/shared/types.ts";
 import {
   closeDatabase,
   deleteSession,
@@ -176,9 +177,7 @@ describe("TC-308: deleteSession is a no-op for non-existent ID", () => {
 describe("TC-309: getSettings returns hardcoded defaults when table is empty", () => {
   it("returns default work/break durations", () => {
     const settings = getSettings();
-    expect(settings.workDuration).toBe(1500);
-    expect(settings.shortBreakDuration).toBe(300);
-    expect(settings.longBreakDuration).toBe(900);
+    expect(settings).toEqual(DEFAULT_SETTINGS);
   });
 });
 
@@ -216,7 +215,7 @@ describe("TC-312: Input validation — saveSession rejects invalid timerType", (
 
 describe("TC-313: Input validation — saveSettings rejects out-of-range durations", () => {
   it("throws for duration below minimum (1)", () => {
-    expect(() => saveSettings({ workDuration: 0, shortBreakDuration: 300, longBreakDuration: 900 })).toThrow();
+    expect(() => saveSettings({ ...DEFAULT_SETTINGS, workDuration: MIN_DURATION - 1 })).toThrow();
   });
 
   it("accepts sub-minute durations", () => {
@@ -228,7 +227,7 @@ describe("TC-313: Input validation — saveSettings rejects out-of-range duratio
   });
 
   it("throws for duration above maximum (7200)", () => {
-    expect(() => saveSettings({ workDuration: 9000, shortBreakDuration: 300, longBreakDuration: 900 })).toThrow();
+    expect(() => saveSettings({ ...DEFAULT_SETTINGS, workDuration: MAX_DURATION + 1 })).toThrow();
   });
 });
 
@@ -245,12 +244,12 @@ describe("TC-314: Input validation — session title is trimmed and length-cappe
 
   it("truncates title at 5000 characters", () => {
     const session = saveSession({
-      title: "a".repeat(5001),
+      title: "a".repeat(MAX_TITLE_LENGTH + 1),
       timerType: "work",
       plannedDurationSeconds: 1500,
       actualDurationSeconds: 1500,
     });
-    expect(session.title.length).toBeLessThanOrEqual(5000);
+    expect(session.title.length).toBe(MAX_TITLE_LENGTH);
   });
 });
 

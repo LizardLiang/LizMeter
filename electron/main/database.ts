@@ -44,8 +44,12 @@ import type {
   WorklogStatus,
 } from "../../src/shared/types.ts";
 import {
+  DEFAULT_SETTINGS,
   DEFAULT_TODO_COLOR,
+  MAX_DURATION,
+  MAX_TITLE_LENGTH,
   MAX_TODO_PRIORITY,
+  MIN_DURATION,
   NOTES_MAX_LENGTH,
   TODO_COLORS,
   TODO_PRIORITY_LABELS,
@@ -70,15 +74,6 @@ let db: Database.Database | null = null;
 const VALID_TIMER_TYPES: readonly TimerType[] = ["work", "short_break", "long_break", "stopwatch"];
 const VALID_ISSUE_PROVIDERS = new Set(["github", "linear", "jira", "todo"]);
 
-const DEFAULT_SETTINGS: TimerSettings = {
-  workDuration: 1500,
-  shortBreakDuration: 300,
-  longBreakDuration: 900,
-};
-
-const MIN_DURATION = 1;
-const MAX_DURATION = 7200;
-const MAX_TITLE_LENGTH = 5000;
 const MAX_NVIM_FIELD_LENGTH = 1000;
 
 export function initDatabase(dbPath?: string): void {

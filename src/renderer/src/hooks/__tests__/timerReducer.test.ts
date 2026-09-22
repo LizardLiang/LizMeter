@@ -1,13 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_SETTINGS, MAX_DURATION, MAX_TITLE_LENGTH, MIN_DURATION } from "../../../../shared/types.ts";
 import type { TimerSettings } from "../../../../shared/types.ts";
 import { getInitialTimerState, timerReducer } from "../useTimer.ts";
 import type { TimerState } from "../useTimer.ts";
 
-const defaultSettings: TimerSettings = {
-  workDuration: 1500,
-  shortBreakDuration: 300,
-  longBreakDuration: 900,
-};
+const defaultSettings: TimerSettings = DEFAULT_SETTINGS;
 
 let idleState: TimerState;
 let runningState: TimerState;
@@ -166,9 +163,9 @@ describe("TC-109: SET_TITLE works in idle, running, and paused states", () => {
 
 describe("TC-110: SET_TITLE enforces maximum length of 5000", () => {
   it("truncates title to 5000 characters", () => {
-    const longTitle = "a".repeat(5001);
+    const longTitle = "a".repeat(MAX_TITLE_LENGTH + 1);
     const result = timerReducer(idleState, { type: "SET_TITLE", payload: longTitle });
-    expect(result.title.length).toBeLessThanOrEqual(5000);
+    expect(result.title.length).toBe(MAX_TITLE_LENGTH);
   });
 });
 
@@ -308,13 +305,13 @@ describe("TC-116: UPDATE_SETTINGS updates remaining when idle and not restored",
 
 describe("TC-117: SET_REMAINING clamps values", () => {
   it("clamps value below 1 to 1", () => {
-    const result = timerReducer(idleState, { type: "SET_REMAINING", payload: 0 });
-    expect(result.remainingSeconds).toBe(1);
+    const result = timerReducer(idleState, { type: "SET_REMAINING", payload: MIN_DURATION - 1 });
+    expect(result.remainingSeconds).toBe(MIN_DURATION);
   });
 
   it("clamps value above 7200 to 7200", () => {
-    const result = timerReducer(idleState, { type: "SET_REMAINING", payload: 9999 });
-    expect(result.remainingSeconds).toBe(7200);
+    const result = timerReducer(idleState, { type: "SET_REMAINING", payload: MAX_DURATION + 1 });
+    expect(result.remainingSeconds).toBe(MAX_DURATION);
   });
 
   it("accepts valid value in range", () => {

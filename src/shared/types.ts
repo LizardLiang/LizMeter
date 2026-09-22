@@ -79,6 +79,16 @@ export interface TimerSettings {
   longBreakDuration: number; // seconds
 }
 
+export const DEFAULT_SETTINGS: TimerSettings = {
+  workDuration: 1500,
+  shortBreakDuration: 300,
+  longBreakDuration: 900,
+};
+
+export const MIN_DURATION = 1;
+export const MAX_DURATION = 7200;
+export const MAX_TITLE_LENGTH = 5000;
+
 export interface StopwatchSettings {
   maxDurationSeconds: number; // 0 = no limit, default 28800 (8h)
   promptForIssue: boolean;
