@@ -1,5 +1,7 @@
 branch=$(git rev-parse --abbrev-ref HEAD)
 
+bun run verify:real-db
+
 if [ "$branch" = "master" ] || [ "$branch" = "main" ]; then
   bun run test
 fi
