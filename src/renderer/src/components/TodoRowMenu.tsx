@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import type { Todo, TodoState } from "../../../shared/types.ts";
-import { copyFeedbackIsFailed, copyFeedbackLabel, useCopyFeedback } from "../hooks/useCopyFeedback.ts";
-import { formatTodoAgentPrompt, formatTodoId } from "../utils/todoClipboard.ts";
+import { copyFeedbackIsFailed, copyFeedbackLabel } from "../hooks/useCopyFeedback.ts";
+import { useTodoCopyActions } from "../hooks/useTodoCopyActions.ts";
 import styles from "./TodoRowMenu.module.scss";
 
 /** The single-key menus the page already owns. An item here just hands off to one of them. */
@@ -71,13 +71,7 @@ export function TodoActionMenu(props: MenuProps) {
   /** Which "Copy" item (if either) currently reads "Copied ✓"/"Copy failed" instead of its normal
    * label. The feedback window closes the menu when it expires -- unlike the detail page's
    * overflow menu, which only reverts its label and stays open. */
-  const { feedback: copyFeedback, trigger: triggerCopyFeedback } = useCopyFeedback<"id" | "prompt">(close);
-  /** True while a `handleCopyPrompt` fetch-then-copy chain is in flight. The feedback window only
-   * closes the menu once the copy has already resolved, so a double-click before then is not
-   * blocked by that -- without this flag a second click fires a second `todo.list({ parentId })`
-   * call, and whichever response lands last wins the clipboard instead of whichever click was
-   * last (same exposure as `TodoDetailPage.handleCopyPrompt`, fixed the same way). */
-  const [copyPromptPending, setCopyPromptPending] = useState(false);
+  const { feedback: copyFeedback, promptPending: copyPromptPending, copyId, copyPrompt } = useTodoCopyActions(close);
 
   const pos = useMemo(() => {
     const height = (states.length + FIXED_ROWS + (hasParent ? 1 : 0)) * ROW_HEIGHT;
@@ -116,53 +110,18 @@ export function TodoActionMenu(props: MenuProps) {
 
   /**
    * `pick()` closes the menu the instant it is clicked, which would hide the "Copied ✓"/"Copy
-   * failed" feedback before it ever showed -- so the two copy items go around it: copy, flip the
-   * label via `triggerCopyFeedback`, and let the feedback window's own expiry close the menu
-   * instead of closing it immediately.
+   * failed" feedback before it ever showed -- so the two copy items go around it: `copyId`/
+   * `copyPrompt` from `useTodoCopyActions` flip the label, and the feedback window's own expiry
+   * closes the menu instead of closing it immediately.
    */
   function handleCopyId(e: React.MouseEvent) {
     e.stopPropagation();
-    navigator.clipboard
-      .writeText(formatTodoId(todo.id))
-      .then(() => triggerCopyFeedback("id"))
-      .catch((err: unknown) => {
-        console.error("Failed to copy todo id", err);
-        triggerCopyFeedback("id", "failed");
-      });
+    copyId(todo.id);
   }
 
   function handleCopyPrompt(e: React.MouseEvent) {
     e.stopPropagation();
-    if (copyPromptPending) return;
-    setCopyPromptPending(true);
-    const parent = todo.parentId !== null
-      ? { id: todo.parentId, title: todo.parentTitle ?? formatTodoId(todo.parentId) }
-      : null;
-    // `todo` here only carries `childCount`, not the child rows themselves, and the list's own
-    // `todos` array is filtered by the active view -- so the direct children are fetched fresh
-    // through the same IPC call `TodoDetailPage` already uses, and only right now, not on every
-    // render of this menu.
-    window.electronAPI.todo
-      .list({ parentId: todo.id })
-      .then((rows) => {
-        const prompt = formatTodoAgentPrompt(
-          todo,
-          parent,
-          rows.map((row) => ({
-            id: row.id,
-            title: row.title,
-            stateLabel: row.state.label,
-            isCompleted: row.state.isCompleted,
-          })),
-        );
-        return navigator.clipboard.writeText(prompt);
-      })
-      .then(() => triggerCopyFeedback("prompt"))
-      .catch((err: unknown) => {
-        console.error("Failed to copy agent prompt", err);
-        triggerCopyFeedback("prompt", "failed");
-      })
-      .finally(() => setCopyPromptPending(false));
+    copyPrompt(todo);
   }
 
   return createPortal(
@@ -180,12 +139,6 @@ export function TodoActionMenu(props: MenuProps) {
         <Hint keys={["Enter"]} />
       </button>
 
-      {
-        /* No `<Hint>` on either item below: the natural key for "Copy id" would be the plain "C"
-        TodosPage's global keymap already binds to "New todo" (see the `case "c"` there), so
-        pairing it with "⇧C" for the prompt would half-steal a binding rather than add a clean
-        one -- both items go keyless instead. */
-      }
       <div className={styles.divider} />
       <p className={styles.sectionLabel}>Copy</p>
       <button
@@ -195,6 +148,7 @@ export function TodoActionMenu(props: MenuProps) {
         onClick={handleCopyId}
       >
         {copyFeedbackLabel(copyFeedback, "id", "Copy id")}
+        <Hint keys={[MOD, "C"]} />
       </button>
       <button
         className={copyFeedbackIsFailed(copyFeedback, "prompt") ? styles.itemFailed : styles.item}
@@ -204,6 +158,7 @@ export function TodoActionMenu(props: MenuProps) {
         onClick={handleCopyPrompt}
       >
         {copyFeedbackLabel(copyFeedback, "prompt", "Copy agent prompt")}
+        <Hint keys={["⇧", "C"]} />
       </button>
 
       <div className={styles.divider} />

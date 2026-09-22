@@ -17,6 +17,8 @@ import { createPortal } from "react-dom";
 import type { Todo, TodoFilter, TodoSource, TodoState } from "../../../shared/types.ts";
 import { TODO_PRIORITY_LABELS, todoPriorityLabel } from "../../../shared/types.ts";
 import { useTodosContext } from "../contexts/TodosContext.tsx";
+import type { CopyFeedbackState } from "../hooks/useCopyFeedback.ts";
+import { type TodoCopyAction, useTodoCopyActions } from "../hooks/useTodoCopyActions.ts";
 import { toPlainSummary } from "../utils/markdownPlain.ts";
 import { droppedStateId, stateDropId, todosToMove } from "../utils/todoDrag.ts";
 import { Select } from "./Select.tsx";
@@ -69,6 +71,15 @@ interface QuickMenuConfig {
 function formatDay(iso: string): string {
   // Parsed as UTC noon so a date-only string cannot slip a day in a negative timezone.
   return new Date(`${iso}T12:00:00Z`).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
+/**
+ * The one-line confirmation for the `Ctrl+C`/`Shift+C` keymap bindings, which act with no menu
+ * open and so have no "Copied ✓" label slot to swap the way `TodoRowMenu`'s copy items do.
+ */
+function copyPillLabel(feedback: CopyFeedbackState<TodoCopyAction>): string {
+  if (feedback.status === "failed") return "Copy failed";
+  return feedback.action === "id" ? "Copied id" : "Copied prompt";
 }
 
 /** A project reads as a box, the way Linear draws one. A coloured dot would say "label". */
@@ -589,6 +600,9 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
   const [linkingChild, setLinkingChild] = useState<Todo | null>(null);
   /** The `?` cheat sheet. */
   const [showingShortcuts, setShowingShortcuts] = useState(false);
+  /** Backs `Ctrl+C`/`Shift+C` on the cursor's row. `feedback` drives the transient pill below --
+   * there is no menu open for a keyboard copy, so it is the only confirmation surface. */
+  const { feedback: copyFeedback, copyId, copyPrompt } = useTodoCopyActions();
   /** Which single-key menu is open over the cursor, and the row rect it hangs off. */
   const [quickMenu, setQuickMenu] = useState<
     | { kind: QuickMenuKind; todo: Todo; anchor: MenuAnchor; }
@@ -770,8 +784,8 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
 
   /**
    * The page keymap, following Linear: arrows move a cursor, and a single letter acts on the row
-   * under it. Every binding here is deliberately unmodified except Ctrl+Shift+O, so the guards
-   * below have to let that one through before rejecting the modifier keys.
+   * under it. Every binding here is deliberately unmodified except Ctrl+Shift+O and Ctrl+C, so
+   * the guards below have to let those two through before rejecting the modifier keys.
    */
   // Attached once, reading through a ref, rather than re-subscribed whenever the cursor or the
   // selection changes. Re-subscribing leaves a window where React has committed a render but not
@@ -784,6 +798,8 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
     moveFocus,
     rowAnchor,
     onOpenDetail,
+    copyId,
+    copyPrompt,
   });
 
   useEffect(() => {
@@ -794,12 +810,15 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
       moveFocus,
       rowAnchor,
       onOpenDetail,
+      copyId,
+      copyPrompt,
     };
   });
 
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
-      const { dialogOpen, focusedTodo, selectedSize, moveFocus, rowAnchor, onOpenDetail } = keymap.current;
+      const { dialogOpen, focusedTodo, selectedSize, moveFocus, rowAnchor, onOpenDetail, copyId, copyPrompt } =
+        keymap.current;
 
       const target = event.target as HTMLElement | null;
       const tag = target?.tagName;
@@ -813,6 +832,17 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
         if (focusedTodo !== null) {
           setCreating({ stateId: null, parent: { id: focusedTodo.id, title: focusedTodo.title } });
         }
+        return;
+      }
+
+      // Ctrl/Cmd+C: copies the cursor's `#<id>`. `!shiftKey && !altKey` keeps this from swallowing
+      // Ctrl+Shift+C or Ctrl+Alt+C, and a live text selection is left alone so the browser's own
+      // copy still runs -- without that check this would steal a plain text-selection copy too.
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "c") {
+        const selection = window.getSelection();
+        if (selection !== null && !selection.isCollapsed) return;
+        event.preventDefault();
+        if (focusedTodo !== null) copyId(focusedTodo.id);
         return;
       }
 
@@ -876,6 +906,10 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
         case "L":
           event.preventDefault();
           setReparenting(focusedTodo);
+          break;
+        case "C":
+          event.preventDefault();
+          copyPrompt(focusedTodo);
           break;
         case "Enter":
           event.preventDefault();
@@ -1272,6 +1306,15 @@ export function TodosPage({ highlightTodoId = null, onHighlightConsumed, onOpenD
           onDeleteLabel={deleteLabel}
           onClose={() => setManaging(false)}
         />
+      )}
+
+      {copyFeedback !== null && (
+        <div
+          className={copyFeedback.status === "failed" ? styles.copyPillFailed : styles.copyPill}
+          aria-live="polite"
+        >
+          {copyPillLabel(copyFeedback)}
+        </div>
       )}
     </div>
   );

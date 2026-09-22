@@ -702,6 +702,139 @@ describe("TodosPage keyboard navigation", () => {
   });
 });
 
+describe("TodosPage copy shortcuts", () => {
+  const originalClipboard = navigator.clipboard;
+
+  function cursorTo(steps: number) {
+    for (let i = 0; i < steps; i++) fireEvent.keyDown(document.body, { key: "ArrowDown" });
+  }
+
+  function stubClipboard() {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    return writeText;
+  }
+
+  afterEach(() => {
+    vi.useRealTimers();
+    Object.defineProperty(navigator, "clipboard", { value: originalClipboard, configurable: true });
+  });
+
+  it("`Ctrl+C` copies the cursor's id", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith("#152"));
+  });
+
+  it("lets a live text selection fall through to the native copy instead of stealing it", async () => {
+    const writeText = stubClipboard();
+    const getSelection = vi.spyOn(window, "getSelection").mockReturnValue(
+      { isCollapsed: false } as unknown as Selection,
+    );
+    await renderPage();
+    cursorTo(1);
+
+    const notPrevented = fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+
+    expect(notPrevented).toBe(true);
+    expect(writeText).not.toHaveBeenCalled();
+    getSelection.mockRestore();
+  });
+
+  it("`Ctrl+C` with no cursor does nothing", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+
+    fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("`Ctrl+Shift+C` does not trigger copy id", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "c", ctrlKey: true, shiftKey: true });
+
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("`Shift+C` copies the cursor's agent prompt markdown", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
+
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    const prompt = writeText.mock.calls[0]?.[0] as string;
+    expect(prompt).toContain("# Old prod to new prod migration");
+    expect(prompt).toContain("lizmeter-todo MCP server");
+  });
+
+  it("a second `Shift+C` while the first `todo.list` fetch is in flight fires only one call", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+    const callsBefore = mockTodoAPI.list.mock.calls.length;
+
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
+
+    expect(mockTodoAPI.list.mock.calls.length - callsBefore).toBe(1);
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+  });
+
+  it("neither `Ctrl+C` nor `Shift+C` fires while a dialog is open", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+    fireEvent.keyDown(document.body, { key: "s" });
+    await screen.findByRole("dialog", { name: "Move to state" });
+
+    fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+    fireEvent.keyDown(document.body, { key: "C", shiftKey: true });
+
+    expect(writeText).not.toHaveBeenCalled();
+  });
+
+  it("neither `Ctrl+C` nor `Shift+C` fires from an INPUT target", async () => {
+    const writeText = stubClipboard();
+    await renderPage();
+    cursorTo(1);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+
+    fireEvent.keyDown(input, { key: "c", ctrlKey: true });
+    fireEvent.keyDown(input, { key: "C", shiftKey: true });
+
+    expect(writeText).not.toHaveBeenCalled();
+    input.remove();
+  });
+
+  it("shows a transient confirmation pill after a copy, which clears on its own", async () => {
+    stubClipboard();
+    await renderPage();
+    cursorTo(1);
+    vi.useFakeTimers();
+
+    fireEvent.keyDown(document.body, { key: "c", ctrlKey: true });
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(screen.getByText("Copied id")).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1200);
+    });
+    expect(screen.queryByText("Copied id")).not.toBeInTheDocument();
+  });
+});
+
 describe("TodosPage priority", () => {
   it("labels the priority glyph on every row, set or not", async () => {
     mockTodoAPI.list.mockResolvedValue([

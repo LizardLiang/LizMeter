@@ -725,3 +725,29 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+// The transient confirmation for `Ctrl+C`/`Shift+C`: a keyboard copy has no menu label slot to
+// swap the way TodoRowMenu's copy items do, so this is that feedback's only surface.
+.copyPill {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 1000;
+  padding: 8px 16px;
+  border-radius: 10px;
+  border: 1px solid rgba(122, 162, 247, 0.15);
+  background: rgba(16, 18, 36, 0.5);
+  backdrop-filter: blur(24px) saturate(1.5);
+  -webkit-backdrop-filter: blur(24px) saturate(1.5);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.4);
+  color: #c0caf5;
+  font-size: 12.5px;
+  font-weight: 500;
+  pointer-events: none;
+  animation: fade-in-up 0.15s ease-out;
+}
+
+.copyPillFailed {
+  composes: copyPill;
+  color: #f7768e;
+}

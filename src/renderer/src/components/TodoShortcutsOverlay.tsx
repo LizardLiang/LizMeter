@@ -38,6 +38,8 @@ const SECTIONS: Array<{ title: string; shortcuts: Shortcut[]; }> = [
       { keys: ["T"], label: "Toggle labels" },
       { keys: ["L"], label: "Link an existing todo as a sub-issue" },
       { keys: ["Shift", "L"], label: "Link a parent" },
+      { keys: [MOD, "C"], label: "Copy id" },
+      { keys: ["Shift", "C"], label: "Copy agent prompt" },
     ],
   },
   {
