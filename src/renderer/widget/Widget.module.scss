@@ -1,30 +1,13 @@
 // Widget — Holographic HUD style
-// Cyberpunk instrument panel with scan-line shimmer, angular chamfers,
+// Cyberpunk instrument panel with angular chamfers
 // and status-driven accent glow.
 
 // ---------- Keyframes ----------
 
-@keyframes scanline {
-  0% { transform: translateY(-100%); }
-  100% { transform: translateY(200%); }
-}
-
-@keyframes pulseGlow {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 1; }
-}
-
-@keyframes breathe {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 0.7; }
-}
-
-// Scrolls one full gradient tile. transform is compositor-animated; the
-// background-position version this replaced re-rastered the bar every frame.
-@keyframes statusBarRun {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
-}
+// Only one-shot animations here. The widget is an always-on-top transparent
+// window behind a blur(28px) backdrop-filter: any infinite animation makes
+// Chromium draw a frame every vsync and DWM recompose it, ~8% GPU plus DWM
+// load for a 260x80 widget. Status is shown with static color instead.
 
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(4px); }
@@ -109,29 +92,17 @@
     height: 100%;
   }
 
-  &.running {
-    background: transparent;
-    &::after {
-      // Four bar-widths wide, holding two copies of the same two-bar-wide
-      // gradient. translateX(-50%) shifts by exactly one copy, so the loop is
-      // seamless and the sweep speed matches the old background-position run.
-      width: 400%;
-      background-image: linear-gradient(90deg, transparent, #9ece6a, #7dcfff, #9ece6a, transparent);
-      background-size: 50% 100%;
-      background-repeat: repeat-x;
-      will-change: transform;
-      animation: statusBarRun 2s linear infinite;
-    }
+  &.running::after {
+    background: linear-gradient(90deg, transparent, #9ece6a, #7dcfff, #9ece6a, transparent);
   }
 
   &.paused::after {
     background: #e0af68;
-    animation: breathe 2.4s ease-in-out infinite;
+    opacity: 0.5;
   }
 
   &.completed::after {
     background: #7aa2f7;
-    animation: pulseGlow 1.6s ease-in-out infinite;
   }
 }
 
@@ -157,24 +128,6 @@
   // Hexagonal mask for the avatar viewport
   clip-path: polygon(50% 0%, 93% 25%, 93% 75%, 50% 100%, 7% 75%, 7% 25%);
   background: rgba(122, 162, 247, 0.06);
-
-  // Scan-line shimmer overlay
-  &::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      rgba(122, 162, 247, 0.06) 45%,
-      rgba(122, 162, 247, 0.12) 50%,
-      rgba(122, 162, 247, 0.06) 55%,
-      transparent 100%
-    );
-    animation: scanline 3.5s linear infinite;
-    pointer-events: none;
-    z-index: 1;
-  }
 }
 
 .avatar {
@@ -213,7 +166,6 @@
   &.running {
     background: #9ece6a;
     box-shadow: 0 0 8px rgba(158, 206, 106, 0.6);
-    animation: pulseGlow 2s ease-in-out infinite;
   }
 
   &.paused {
