@@ -252,8 +252,9 @@ impl Render for IssuePrompt {
             rows = rows.child(self.row(t, i == self.active, cx));
         }
         let list = div()
-            .h(px(196.0))
-            .flex_shrink_0()
+            .relative()
+            .flex_1()
+            .min_h(px(60.0))
             .child(div().id("prompt-list").track_scroll(scroll.handle()).size_full().overflow_y_scroll().child(scroll.pad(rows)))
             .child(scroll.bar());
 
