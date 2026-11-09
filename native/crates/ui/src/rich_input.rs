@@ -75,7 +75,7 @@ pub struct RichInput {
     blink_on: bool,
     blinking: bool,
     blink_gen: usize,
-    scroll: ScrollHandle,
+    scroll: crate::scrollbar::Scroll,
     ensure_caret_visible: bool,
 }
 
@@ -115,7 +115,7 @@ impl RichInput {
             blink_on: true,
             blinking: false,
             blink_gen: 0,
-            scroll: ScrollHandle::new(),
+            scroll: crate::scrollbar::Scroll::new(crate::scrollbar::BarStyle::Inset),
             ensure_caret_visible: false,
         }
     }
@@ -1059,12 +1059,16 @@ impl RichInput {
             .child(self.toolbar(cx));
         let surface = self.surface(cx);
         let editor = div()
-            .id("rich-scroll")
-            .track_scroll(&self.scroll)
-            .min_h(px(56.0))
-            .max_h(px(120.0))
-            .overflow_y_scroll()
-            .child(div().px(px(12.0)).pt(px(10.0)).pb(px(24.0)).child(surface));
+            .child(
+                div()
+                    .id("rich-scroll")
+                    .track_scroll(self.scroll.handle())
+                    .min_h(px(56.0))
+                    .max_h(px(120.0))
+                    .overflow_y_scroll()
+                    .child(self.scroll.pad(div().px(px(12.0)).pt(px(10.0)).pb(px(24.0)).child(surface))),
+            )
+            .child(self.scroll.bar());
         let expand = div()
             .id("rich-expand")
             .absolute()
@@ -1139,12 +1143,20 @@ impl RichInput {
             .child(self.toolbar(cx));
         let surface = self.surface(cx);
         let body = div()
-            .id("rich-modal-scroll")
-            .track_scroll(&self.scroll)
             .flex_1()
             .min_h(px(0.0))
-            .overflow_y_scroll()
-            .child(div().px(px(20.0)).py(px(16.0)).min_h(px(200.0)).child(surface));
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .id("rich-modal-scroll")
+                    .track_scroll(self.scroll.handle())
+                    .flex_1()
+                    .min_h(px(0.0))
+                    .overflow_y_scroll()
+                    .child(self.scroll.pad(div().px(px(20.0)).py(px(16.0)).min_h(px(200.0)).child(surface))),
+            )
+            .child(self.scroll.bar());
         let btn = |id: &'static str, label: &'static str, primary: bool| {
             let mut b = ui_text(13.0)
                 .id(id)

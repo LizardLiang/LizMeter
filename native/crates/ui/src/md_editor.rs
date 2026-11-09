@@ -143,7 +143,7 @@ pub struct MarkdownEditor {
     blink_on: bool,
     blinking: bool,
     blink_gen: usize,
-    scroll: ScrollHandle,
+    scroll: crate::scrollbar::Scroll,
     ensure_caret_visible: bool,
     uploads: Vec<UploadMark>,
     next_upload: u64,
@@ -187,7 +187,7 @@ impl MarkdownEditor {
             blink_on: true,
             blinking: false,
             blink_gen: 0,
-            scroll: ScrollHandle::new(),
+            scroll: crate::scrollbar::Scroll::new(crate::scrollbar::BarStyle::Global),
             ensure_caret_visible: false,
             uploads: Vec::new(),
             next_upload: 1,
@@ -1790,11 +1790,11 @@ impl MarkdownEditor {
         let body: AnyElement = match self.variant {
             MdVariant::Bare => div().id("md-body").w_full().min_h(px(48.0)).child(surface).into_any_element(),
             MdVariant::Fill => div()
-                .id("md-scroll")
-                .track_scroll(&self.scroll)
                 .size_full()
-                .overflow_y_scroll()
-                .child(surface)
+                .child(
+                    div().id("md-scroll").track_scroll(self.scroll.handle()).size_full().overflow_y_scroll().child(self.scroll.pad(surface)),
+                )
+                .child(self.scroll.bar())
                 .into_any_element(),
             MdVariant::Framed => {
                 let focused = self.focus.contains_focused(window, cx);
@@ -1805,12 +1805,12 @@ impl MarkdownEditor {
                 }
                 let scroller = div()
                     .id("md-scroll")
-                    .track_scroll(&self.scroll)
+                    .track_scroll(self.scroll.handle())
                     .min_h(px(160.0))
                     .max_h(px(320.0))
                     .overflow_y_scroll()
-                    .child(surface);
-                let mut pane = glass.el().w_full().overflow_hidden().child(div().m(px(1.0)).child(scroller));
+                    .child(self.scroll.pad(surface));
+                let mut pane = glass.el().w_full().overflow_hidden().child(div().m(px(1.0)).child(scroller).child(self.scroll.bar()));
                 if self.expandable && !self.disabled {
                     pane = pane.child(
                         div()
@@ -1881,13 +1881,15 @@ impl MarkdownEditor {
                     .child(svg().path("icons/win-close.svg").size(px(14.0)).text_color(col(TN_TEXT_DIM))),
             );
         let surface = self.surface(cx);
-        let body = div()
-            .id("md-modal-scroll")
-            .track_scroll(&self.scroll)
-            .flex_1()
-            .min_h(px(0.0))
-            .overflow_y_scroll()
-            .child(surface);
+        let body = div().flex_1().min_h(px(0.0)).flex().flex_col().child(
+            div()
+                .id("md-modal-scroll")
+                .track_scroll(self.scroll.handle())
+                .flex_1()
+                .min_h(px(0.0))
+                .overflow_y_scroll()
+                .child(self.scroll.pad(surface)),
+        ).child(self.scroll.bar());
         let btn = |id: &'static str, label: &'static str, primary: bool| {
             let mut b = ui_text(13.0).id(id).h(px(32.0)).px(px(14.0)).rounded(px(6.0)).flex().items_center().cursor_pointer();
             b = if primary {
