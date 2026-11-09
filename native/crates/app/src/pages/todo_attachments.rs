@@ -5,8 +5,9 @@ use super::todo_widgets::*;
 use crate::css::rgba;
 use crate::ui::*;
 use gpui::*;
-use lizmeter_core::{TodoAttachment, TodoAttachmentKind};
+use lizmeter_core::{AddTodoAttachmentBufferInput, TodoAttachment, TodoAttachmentKind};
 use lizmeter_services::Services;
+use lizmeter_ui::md_editor::{AttachRequest, FileSource};
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -50,6 +51,17 @@ pub fn file_extension(name: &str) -> &str {
 pub fn embed_markdown(a: &TodoAttachment) -> String {
     let prefix = if a.kind == TodoAttachmentKind::Image { "!" } else { "" };
     format!("{prefix}[{}]({})", a.file_name, a.url)
+}
+
+/// Stores a pasted or dropped file for `todo_id`; the result is the markdown that replaces the
+/// editor's placeholder.
+pub fn store_upload(svc: &Services, todo_id: i64, req: &AttachRequest) -> Result<String, String> {
+    let (data, mime) = match &req.source {
+        FileSource::Path(p) => (std::fs::read(p).map_err(|e| e.to_string())?, String::new()),
+        FileSource::Bytes { data, mime } => (data.clone(), mime.clone()),
+    };
+    let input = AddTodoAttachmentBufferInput { todo_id, file_name: req.name.clone(), mime_type: mime, data };
+    svc.add_attachment_buffer(&input).map(|a| embed_markdown(&a)).map_err(|e| e.to_string())
 }
 
 impl TodoAttachments {

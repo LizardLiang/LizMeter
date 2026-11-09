@@ -111,6 +111,12 @@ pub fn modal_overlay(id: &'static str, top: Option<f32>, dialog: impl IntoElemen
     o.child(entrance)
 }
 
+/// A layer the size of the page area (everything under the title bar) that paints over the app.
+pub fn window_layer(window: &Window, priority: usize, child: impl IntoElement) -> impl IntoElement {
+    let vp = window.viewport_size();
+    deferred(anchored().position(point(px(0.0), px(32.0))).anchor(Corner::TopLeft).child(div().relative().w(vp.width).h(vp.height - px(32.0)).child(child))).with_priority(priority)
+}
+
 /// A dialog's footer buttons look: outline `Cancel`.
 pub fn cancel_button(id: &'static str, label: &str) -> Stateful<Div> {
     div()
@@ -141,6 +147,149 @@ pub fn keep_in_view(scroll: &lizmeter_ui::scrollbar::Scroll, top: f32, h: f32) {
     if (target - scrolled).abs() > 0.5 {
         scroll.set_offset(point(px(0.0), px(-target.max(0.0))));
     }
+}
+
+// ---- Small pieces of the todo forms ----
+
+/// The dashed `+ Set parent` / `Link existing` button.
+pub fn link_button(id: impl Into<ElementId>, text: &str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .px(px(9.0))
+        .py(px(4.0))
+        .rounded(px(6.0))
+        .border(px(1.0))
+        .border_color(col(rgba(86, 95, 137, 0.5)))
+        .text_size(px(12.0))
+        .line_height(px(16.0))
+        .text_color(col(hex(0xa3abc9)))
+        .cursor_pointer()
+        .hover(|s| s.text_color(col(TN_BLUE)).border_color(col(rgba(122, 162, 247, 0.5))))
+        .child(text.to_string())
+}
+
+/// The small `x` of a chip or row that removes it.
+pub fn clear_x(id: impl Into<ElementId>) -> Stateful<Div> {
+    div().id(id).px(px(7.0)).py(px(3.0)).rounded(px(4.0)).text_size(px(12.0)).line_height(px(12.0)).text_color(col(hex(0xa3abc9))).cursor_pointer().hover(|s| s.text_color(col(TN_RED))).child("x")
+}
+
+/// A label on a todo: a pill in the label colour with a remove cross.
+pub fn label_chip(id: impl Into<ElementId>, name: &str, color: Option<&str>, on_remove: impl Fn(&mut Window, &mut App) + 'static) -> Div {
+    let (border, text) = match color {
+        Some(c) => (c_alpha(parse_color(c), 0.4), parse_color(c)),
+        None => (rgba(122, 134, 180, 0.5), hex(0xa3abc9)),
+    };
+    div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .flex_shrink_0()
+        .gap(px(4.0))
+        .pl(px(9.0))
+        .pr(px(4.0))
+        .py(px(2.0))
+        .rounded(px(999.0))
+        .border(px(1.0))
+        .border_color(col(border))
+        .text_size(px(11.0))
+        .line_height(px(14.0))
+        .font_weight(FontWeight(600.0))
+        .text_color(col(text))
+        .child(name.to_string())
+        .child(
+            div()
+                .id(id)
+                .size(px(15.0))
+                .rounded(px(8.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(13.0))
+                .line_height(px(13.0))
+                .opacity(0.6)
+                .cursor_pointer()
+                .hover(|s| s.opacity(1.0).bg(col(rgba(247, 118, 142, 0.2))))
+                .on_click(move |_, w, a| on_remove(w, a))
+                .child("\u{d7}"),
+        )
+}
+
+/// The frame around the label chips and the add-label box.
+pub fn label_row() -> Div {
+    div().flex().flex_row().flex_wrap().items_center().gap(px(6.0)).min_h(px(30.0)).px(px(6.0)).py(px(4.0)).rounded(px(8.0)).border(px(1.0)).border_color(col(rgba(41, 46, 66, 0.8))).bg(col(rgba(12, 13, 24, 0.5)))
+}
+
+/// The id, then the title, of a parent: `#12  Write the docs`.
+pub fn id_chip_text(id: i64) -> Div {
+    div().flex_shrink_0().text_size(px(11.0)).line_height(px(14.0)).text_color(col(dim())).child(format!("#{id}"))
+}
+
+/// The state colour dot plus a `Sub-issue of` chip body, shared by the dialog and the page.
+pub fn parent_chip(id: &'static str, parent_id: i64, text: String, max_w: f32, on_open: impl Fn(&mut Window, &mut App) + 'static) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .max_w(px(max_w))
+        .pl(px(9.0))
+        .pr(px(4.0))
+        .py(px(4.0))
+        .text_size(px(12.0))
+        .line_height(px(16.0))
+        .text_color(col(TN_BLUE))
+        .cursor_pointer()
+        .on_click(move |_, w, a| on_open(w, a))
+        .child(id_chip_text(parent_id))
+        .child(div().min_w_0().truncate().child(text))
+}
+
+/// The chip frame holding a parent chip body and its buttons.
+pub fn chip_frame() -> Div {
+    div().flex().flex_row().items_center().max_w_full().rounded(px(6.0)).border(px(1.0)).border_color(col(rgba(122, 162, 247, 0.28))).bg(col(rgba(122, 162, 247, 0.1)))
+}
+
+/// The text under a field or in an empty section.
+pub fn hint_text(text: &str) -> Div {
+    div().mt(px(8.0)).text_size(px(11.0)).line_height(px(16.5)).text_color(col(dim())).child(text.to_string())
+}
+
+/// The Create / primary action of a form (`.saveBtn`).
+pub fn save_button(id: &'static str, label: &str, enabled: bool) -> Stateful<Div> {
+    let b = div()
+        .id(id)
+        .px(px(20.0))
+        .py(px(8.0))
+        .rounded(px(8.0))
+        .border(px(1.0))
+        .border_color(col(rgba(122, 162, 247, 0.35)))
+        .bg(col(rgba(122, 162, 247, 0.14)))
+        .font_family(BTN_FONT)
+        .text_size(px(13.0))
+        .line_height(px(16.0))
+        .font_weight(FontWeight(600.0))
+        .text_color(col(TN_BLUE))
+        .child(label.to_string());
+    if enabled { b.cursor_pointer().hover(|s| s.bg(col(rgba(122, 162, 247, 0.22)))) } else { b.opacity(0.4) }
+}
+
+/// The `Cancel` of a form (`.cancelBtn`).
+pub fn plain_button(id: &'static str, label: &str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .px(px(16.0))
+        .py(px(8.0))
+        .rounded(px(8.0))
+        .border(px(1.0))
+        .border_color(col(hex(0x292e42)))
+        .font_family(BTN_FONT)
+        .text_size(px(13.0))
+        .line_height(px(16.0))
+        .text_color(col(TN_TEXT_DIM))
+        .cursor_pointer()
+        .hover(|s| s.text_color(col(TN_TEXT)).border_color(col(hex(0x3b4261))))
+        .child(label.to_string())
 }
 
 // ---- Combobox ----

@@ -40,6 +40,8 @@ pub struct SelectBox {
     max_w: f32,
     /// The list opens above the trigger (for controls that sit at the foot of the window).
     flip_up: bool,
+    /// The trigger fills its parent's width (the form fields).
+    fill: bool,
     open: bool,
     active: usize,
     focus: FocusHandle,
@@ -59,12 +61,18 @@ impl SelectBox {
             min_w,
             max_w,
             flip_up,
+            fill: false,
             open: false,
             active: 0,
             focus: cx.focus_handle(),
             closed_by_out: None,
             suppress_toggle: false,
         }
+    }
+
+    pub fn filled(mut self) -> Self {
+        self.fill = true;
+        self
     }
 
     pub fn set_options(&mut self, options: Vec<SelectOption>, value: &str, cx: &mut Context<Self>) {
@@ -248,7 +256,10 @@ impl Render for SelectBox {
         let chevron = svg().path("icons/chevron-down.svg").size(px(13.0)).flex_shrink_0().text_color(col(hex_muted()));
         let chevron = if open { chevron.with_transformation(Transformation::rotate(percentage(0.5))) } else { chevron };
         trigger = trigger.child(div().flex_1().min_w_0().truncate().text_color(col(color)).child(label)).child(chevron);
-        let mut wrap = div().relative().flex_shrink_0().child(trigger);
+        let mut wrap = div().relative().flex_shrink_0().child(if self.fill { trigger.w_full() } else { trigger });
+        if self.fill {
+            wrap = wrap.w_full();
+        }
         if self.open {
             wrap = wrap.child(deferred(self.list(cx)).with_priority(4));
         }
