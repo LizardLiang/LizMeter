@@ -121,9 +121,9 @@ impl Root {
     fn timer_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let m1 = me.clone();
-        let toggle = timer::mode_toggle(self.pomodoro, self.status != Status::Idle, move |pomodoro, _, app| {
+        let toggle = timer::mode_toggle(self.pomodoro, matches!(self.status, Status::Running | Status::Paused), move |pomodoro, _, app| {
             m1.update(app, |t, cx| {
-                if t.status == Status::Idle {
+                if !matches!(t.status, Status::Running | Status::Paused) {
                     t.pomodoro = pomodoro;
                     cx.notify();
                 }

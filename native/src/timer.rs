@@ -87,7 +87,7 @@ pub fn mode_toggle(
                         .inset(0.0, 1.0, wh(0.16))
                         .inset(0.0, -1.0, bk(0.10)),
                 ));
-        } else {
+        } else if !disabled {
             t = t.hover(|s| s.bg(col(rgba(122, 162, 247, 0.07))));
         }
         let _ = pomodoro;
