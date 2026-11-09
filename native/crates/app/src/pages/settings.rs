@@ -255,9 +255,11 @@ impl SettingsPage {
             if hours > 0.0 {
                 self.sw.max_duration_seconds = (hours * 3600.0).round() as i64;
                 cx.emit(PageEvent::StopwatchSettings(self.sw));
+                if !text.ends_with('.') {
+                    self.show_max_hours(cx);
+                }
             }
         }
-        self.show_max_hours(cx);
         cx.notify();
     }
 
@@ -377,7 +379,24 @@ impl SettingsPage {
                 cx.emit(PageEvent::Relaunch);
                 return;
             }
-            Ok(DataLocationMoveResult::Err { code, message, .. }) => match code {
+            Ok(DataLocationMoveResult::Err { code, message, .. }) => {
+                if code != DataLocationMoveErrorCode::SyncEnabledConfirmRequired {
+                    self.pending_disconnect = None;
+                }
+                self.refuse_move(target, code, message);
+            }
+            Ok(_) => {}
+            Err(e) => {
+                self.pending_adopt = None;
+                self.data_error = Some(e);
+            }
+        }
+        self.moving = false;
+        cx.notify();
+    }
+
+    fn refuse_move(&mut self, target: &str, code: DataLocationMoveErrorCode, message: String) {
+        match code {
                 DataLocationMoveErrorCode::TargetHasData => self.pending_adopt = Some((target.to_string(), AdoptReason::ExistingData)),
                 DataLocationMoveErrorCode::AdoptConfirmRequired => self.pending_adopt = Some((target.to_string(), AdoptReason::SyncPeer)),
                 DataLocationMoveErrorCode::TargetHasUnsyncedDbConfirmRequired => self.pending_adopt = Some((target.to_string(), AdoptReason::UnsyncedDb)),
@@ -386,14 +405,7 @@ impl SettingsPage {
                     self.pending_adopt = None;
                     self.data_error = Some(message);
                 }
-            },
-            Err(e) => {
-                self.pending_adopt = None;
-                self.data_error = Some(e);
-            }
         }
-        self.moving = false;
-        cx.notify();
     }
 
     // --- Sync ---

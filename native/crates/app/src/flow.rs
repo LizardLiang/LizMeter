@@ -53,6 +53,8 @@ pub fn completion_message(ty: TimerType, title_html: &str) -> (&'static str, Str
 impl Root {
     pub fn reload_tags(&mut self, cx: &mut Context<Self>) {
         self.all_tags = self.svc.list_tags().unwrap_or_default();
+        let known: Vec<i64> = self.all_tags.iter().map(|t| t.id).collect();
+        self.pending_tags.retain(|id| known.contains(id));
         let (all, sel) = (self.all_tags.clone(), self.pending_tags.clone());
         self.tag_picker.update(cx, |p, cx| p.set_tags(all, sel, cx));
     }
@@ -97,7 +99,7 @@ impl Root {
             let _ = std::process::Command::new("cmd")
                 .args(["/C", "ping -n 3 127.0.0.1 >nul & start \"\" \"%LIZMETER_EXE%\" %LIZMETER_ARGS%"])
                 .env("LIZMETER_EXE", exe)
-                .env("LIZMETER_ARGS", args.join(" "))
+                .env("LIZMETER_ARGS", args.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(" "))
                 .spawn();
         }
         cx.quit();

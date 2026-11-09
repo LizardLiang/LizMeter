@@ -134,6 +134,9 @@ pub fn time_pattern(time_format: &str, am: &str) -> String {
     }
     tighten_marker(&mut toks, am);
     trim_edges(&mut toks);
+    while matches!(toks.last(), Some(Tok::Lit(s, false)) if s.trim() == ".") {
+        toks.pop();
+    }
     join(&toks)
 }
 
@@ -208,7 +211,7 @@ mod win {
                 date: date_pattern(&long, false),
                 time: time_pattern(&time, &am),
                 full_time: full_time_pattern(&time, &am),
-                comma_before_time: short_date.starts_with('M'),
+                comma_before_time: !short_date.starts_with('y'),
                 short_date,
             })
         })
@@ -314,6 +317,7 @@ mod tests {
         assert_eq!(time_pattern("H:mm:ss", ""), "HH:mm");
         assert_eq!(time_pattern("tt hh:mm:ss", "上午"), "tthh:mm");
         assert_eq!(full_time_pattern("tt hh:mm:ss", "上午"), "tthh:mm:ss");
+        assert_eq!(time_pattern("H.mm.ss", ""), "HH.mm");
     }
 
     #[test]

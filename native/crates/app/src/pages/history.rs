@@ -84,6 +84,11 @@ impl HistoryPage {
         }
         self.loading = false;
         self.tags = self.svc.list_tags().unwrap_or_default();
+        if self.tag_filter.is_some_and(|f| !self.tags.iter().any(|t| t.id == f)) {
+            self.tag_filter = None;
+            self.load();
+            return;
+        }
         if let Ok(todos) = self.svc.list_todos(&ListTodosInput::default()) {
             self.todo_titles = todos.into_iter().map(|t| (t.id, t.title)).collect();
         }
