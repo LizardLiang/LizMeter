@@ -128,6 +128,7 @@ export function applyOplogEntries(database: DbHandle, entries: readonly OplogEnt
     // Captured before anything is applied, so the renumbering notice can tell "this todo moved
     // under the user" apart from "this todo arrived and was placed".
     const todoIdsBefore = snapshotTodoIds(database);
+    const deferred: OplogEntry[] = [];
 
     for (const entry of sorted) {
       const { clamped } = receive(database, deviceNumber, entry.hlc);
@@ -149,24 +150,36 @@ export function applyOplogEntries(database: DbHandle, entries: readonly OplogEnt
       // re-read this specific entry again once it was marked. Leaving it unmarked here is what
       // makes the retry real, since a future pass re-reads the same peer file and re-considers
       // every entry `sync_applied_ops` does not yet contain.
-      let fullyApplied = true;
-      if (entry.op === "delete") {
-        applyDelete(database, entry.table, entry.rowUuid, entry.hlc);
-      } else if (entry.op === "upsert") {
-        const outcome = applyUpsert(database, entry);
-        if (outcome.noticeRaised) notices += 1;
-        fullyApplied = outcome.fullyApplied;
-      } else {
-        fullyApplied = applyLink(database, entry.table, entry.op, entry.fields.fromUuid, entry.fields.toUuid);
-      }
+      const outcome = applyEntry(database, entry);
+      if (outcome.noticeRaised) notices += 1;
 
-      if (fullyApplied) {
+      if (outcome.fullyApplied) {
         markApplied(database, entry.opId, entry.hlc);
+      } else {
+        deferred.push(entry);
       }
       // Counts toward "did this pass do anything" (used to decide whether to refresh the
       // renderer) regardless of fullyApplied -- a partially-applied upsert (some fields written,
       // one FK still unresolved) is real, visible work even though the entry itself is retried.
       applied += 1;
+    }
+
+    // An entry that named a row this same batch had not created yet (a subtask applied before its
+    // parent, a link before its todo) is retried now that the whole batch is in. Without this the
+    // result depends on row order: a snapshot's entries share one HLC, and nothing ever re-reads a
+    // snapshot, so the unresolved reference was lost for good. Repeats until a round resolves
+    // nothing new, so a chain of any depth settles whatever order its entries arrived in.
+    let waiting = deferred;
+    while (waiting.length > 0) {
+      const stillWaiting: OplogEntry[] = [];
+      for (const entry of waiting) {
+        const outcome = applyEntry(database, entry);
+        if (outcome.noticeRaised) notices += 1;
+        if (outcome.fullyApplied) markApplied(database, entry.opId, entry.hlc);
+        else stillWaiting.push(entry);
+      }
+      if (stillWaiting.length === waiting.length) break;
+      waiting = stillWaiting;
     }
 
     recomputeLocalPositionFromSyncOrder(database, "todo_states");
@@ -186,6 +199,15 @@ export function applyOplogEntries(database: DbHandle, entries: readonly OplogEnt
   run();
 
   return { applied, skippedAlreadyApplied: entries.length - pending.length, notices };
+}
+
+function applyEntry(database: DbHandle, entry: OplogEntry): ApplyOutcome {
+  if (entry.op === "delete") {
+    applyDelete(database, entry.table, entry.rowUuid, entry.hlc);
+    return { fullyApplied: true, noticeRaised: false };
+  }
+  if (entry.op === "upsert") return applyUpsert(database, entry);
+  return { fullyApplied: applyLink(database, entry.table, entry.op, entry.fields.fromUuid, entry.fields.toUuid), noticeRaised: false };
 }
 
 // --- Delete (FR-007) ---

@@ -168,33 +168,31 @@ describe("B-5: an entry whose dependency has not arrived yet is retried on a lat
     // Crafted so the link's HLC sorts BEFORE the todo's own upsert HLC -- an out-of-causal-order
     // arrival (e.g. clock skew between real machines) is exactly the scenario Hermes's B-5
     // finding named: "entry arrival order is HLC order, not dependency order".
-    fs.appendFileSync(
-      filePath,
-      [
-        JSON.stringify({
-          v: 1,
-          opId: "early-link",
-          hlc: { physicalMs: 1000, counter: 0, deviceNumber: 1 },
-          table: "todo_label_links",
-          op: "link",
-          fields: { fromUuid: todoUuid, toUuid: labelUuid },
-        }),
-        JSON.stringify({
-          v: 1,
-          opId: "late-todo-upsert",
-          hlc: { physicalMs: 2000, counter: 0, deviceNumber: 1 },
-          table: "todos",
-          op: "upsert",
-          rowUuid: todoUuid,
-          fields: { title: { value: "Arrived after its own link", hlc: { physicalMs: 2000, counter: 0, deviceNumber: 1 } } },
-        }),
-        "",
-      ].join("\n"),
-      "utf8",
-    );
+    const appendEntries = (...objs: string[]) => fs.appendFileSync(filePath, [...objs, ""].join("\n"), "utf8");
+    const linkLine = JSON.stringify({
+      v: 1,
+      opId: "early-link",
+      hlc: { physicalMs: 1000, counter: 0, deviceNumber: 1 },
+      table: "todo_label_links",
+      op: "link",
+      fields: { fromUuid: todoUuid, toUuid: labelUuid },
+    });
+    const todoLine = JSON.stringify({
+      v: 1,
+      opId: "late-todo-upsert",
+      hlc: { physicalMs: 2000, counter: 0, deviceNumber: 1 },
+      table: "todos",
+      op: "upsert",
+      rowUuid: todoUuid,
+      fields: { title: { value: "Arrived after its own link", hlc: { physicalMs: 2000, counter: 0, deviceNumber: 1 } } },
+    });
 
-    // Pass 1: within this one batch, the link (HLC 1000) is considered before the todo (HLC
-    // 2000) exists locally -- it must defer, not silently succeed or get marked applied anyway.
+    // The link's own todo arrives only in a LATER pass (a different file write), so this batch
+    // cannot resolve it -- the entry must stay unmarked and be reconsidered next pass.
+    appendEntries(linkLine);
+
+    // Pass 1: the todo does not exist anywhere yet -- the link must defer, not silently succeed or
+    // get marked applied anyway.
     harness.sync(harness.deviceB);
 
     const appliedAfterPass1 = harness.as(
@@ -202,12 +200,6 @@ describe("B-5: an entry whose dependency has not arrived yet is retried on a lat
       () => harness.deviceB.db.prepare("SELECT 1 FROM sync_applied_ops WHERE op_id = 'early-link'").get(),
     );
     expect(appliedAfterPass1).toBeUndefined();
-
-    const todoExistsAfterPass1 = harness.as(
-      harness.deviceB,
-      () => listTodos().some((t) => t.title === "Arrived after its own link"),
-    );
-    expect(todoExistsAfterPass1).toBe(true); // the todo itself did apply in pass 1
 
     const linkedAfterPass1 = harness.as(
       harness.deviceB,
@@ -221,6 +213,8 @@ describe("B-5: an entry whose dependency has not arrived yet is retried on a lat
           .get(todoUuid) !== undefined,
     );
     expect(linkedAfterPass1).toBe(false); // not linked yet -- this is the deferred half
+
+    appendEntries(todoLine);
 
     // Pass 2: re-reading the same file, the still-unmarked link entry is reconsidered -- this
     // time the todo already exists locally, so it resolves. Under the old bug (markApplied
@@ -341,5 +335,56 @@ describe("two offline machines converge on one todo number each, without coordin
 
     // The contract that actually matters: both machines agree on every number.
     expect(onA).toEqual(onB);
+  });
+
+  it("a label link that sorts before its own todo's upsert in the SAME batch resolves within that pass", () => {
+    const label = harness.as(harness.deviceA, () => createTodoLabel({ name: "same-batch" }));
+    harness.sync(harness.deviceB);
+    const labelUuid = harness.as(
+      harness.deviceA,
+      () => (harness.deviceA.db.prepare("SELECT uuid FROM todo_labels WHERE id = ?").get(label.id) as { uuid: string }).uuid,
+    );
+    const todoUuid = "22222222-2222-2222-2222-222222222222";
+    const filePath = harness.as(harness.deviceA, () => getOplogFilePath(harness.sharedDir, harness.deviceA.deviceId));
+    fs.appendFileSync(
+      filePath,
+      [
+        JSON.stringify({
+          v: 1,
+          opId: "same-batch-link",
+          hlc: { physicalMs: 1000, counter: 0, deviceNumber: 1 },
+          table: "todo_label_links",
+          op: "link",
+          fields: { fromUuid: todoUuid, toUuid: labelUuid },
+        }),
+        JSON.stringify({
+          v: 1,
+          opId: "same-batch-todo",
+          hlc: { physicalMs: 2000, counter: 0, deviceNumber: 1 },
+          table: "todos",
+          op: "upsert",
+          rowUuid: todoUuid,
+          fields: { title: { value: "same batch", hlc: { physicalMs: 2000, counter: 0, deviceNumber: 1 } } },
+        }),
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    harness.sync(harness.deviceB);
+
+    const linked = harness.as(
+      harness.deviceB,
+      () =>
+        harness.deviceB.db
+          .prepare("SELECT 1 FROM todo_label_links k INNER JOIN todos t ON t.id = k.todo_id WHERE t.uuid = ?")
+          .get(todoUuid) !== undefined,
+    );
+    expect(linked).toBe(true);
+    const marked = harness.as(
+      harness.deviceB,
+      () => harness.deviceB.db.prepare("SELECT 1 FROM sync_applied_ops WHERE op_id = 'same-batch-link'").get(),
+    );
+    expect(marked).toBeDefined();
   });
 });

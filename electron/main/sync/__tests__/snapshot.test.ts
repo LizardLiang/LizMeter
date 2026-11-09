@@ -27,6 +27,7 @@ import {
   listTodoProjects,
   listTodos,
   saveSessionWithTracking,
+  updateTodo,
 } from "../../database.ts";
 import { createTwoDeviceHarness, type TwoDeviceHarness } from "../../../../src/test/two-device-harness.ts";
 import { getSyncDevicesDir, readOplogEntries } from "../oplog.ts";
@@ -233,6 +234,53 @@ describe("isStale / rebuildFromSnapshot (FR-019)", () => {
     // The wipe genuinely ran: B's own pre-existing todo is gone, replaced by the snapshot's.
     expect(onB.some((t) => t.title === "device B's own pre-rebuild todo")).toBe(false);
     expect(onB.find((t) => t.id === created.id)?.title).toBe("from the snapshot");
+  });
+
+  it("keeps a subtask's parent link when the parent todo has a higher number than the subtask", () => {
+    // Snapshot entries share one HLC, so they apply in table row order. A child numbered below its
+    // parent (made first, nested later) used to be applied before its parent existed: the unresolved
+    // parent_uuid was skipped, and nothing ever re-read the snapshot to retry it.
+    const grandchild = harness.as(harness.deviceA, () => createTodo({ title: "grandchild" }));
+    const child = harness.as(harness.deviceA, () => createTodo({ title: "child" }));
+    const parent = harness.as(harness.deviceA, () => createTodo({ title: "parent" }));
+    harness.as(harness.deviceA, () => {
+      updateTodo({ id: grandchild.id, parentId: child.id });
+      updateTodo({ id: child.id, parentId: parent.id });
+    });
+    expect(parent.id).toBeGreaterThan(child.id);
+    const now = Date.now();
+    harness.as(harness.deviceA, () => writeSnapshotIfDue(harness.deviceA.db, harness.sharedDir, harness.deviceA.deviceId, now));
+
+    const rebuilt = harness.as(
+      harness.deviceB,
+      () => rebuildFromSnapshot(harness.deviceB.db, harness.sharedDir, harness.deviceB.deviceId, now + 1000),
+    );
+    expect(rebuilt).toBe(true);
+
+    const onB = harness.as(harness.deviceB, () => listTodos());
+    const byTitle = new Map(onB.map((t) => [t.title, t]));
+    expect(byTitle.get("child")?.parentId).toBe(byTitle.get("parent")?.id);
+    expect(byTitle.get("grandchild")?.parentId).toBe(byTitle.get("child")?.id);
+    expect(byTitle.get("parent")?.parentId).toBeNull();
+  });
+
+  it("keeps a subtask's parent link when a fresh machine adopts a shared folder that holds a snapshot", () => {
+    const child = harness.as(harness.deviceA, () => createTodo({ title: "adopt child" }));
+    const parent = harness.as(harness.deviceA, () => createTodo({ title: "adopt parent" }));
+    harness.as(harness.deviceA, () => updateTodo({ id: child.id, parentId: parent.id }));
+    const now = Date.now();
+    harness.as(harness.deviceA, () => writeSnapshotIfDue(harness.deviceA.db, harness.sharedDir, harness.deviceA.deviceId, now));
+
+    // applyPendingSyncActionAfterInit's adopt branch calls exactly this on a freshly opened database.
+    harness.as(
+      harness.deviceB,
+      () => rebuildFromSnapshot(harness.deviceB.db, harness.sharedDir, harness.deviceB.deviceId, now + 1000),
+    );
+
+    const onB = harness.as(harness.deviceB, () => listTodos());
+    const adoptedChild = onB.find((t) => t.title === "adopt child");
+    expect(adoptedChild?.parentId).toBe(onB.find((t) => t.title === "adopt parent")?.id);
+    expect(adoptedChild?.parentId).not.toBeNull();
   });
 
   it("preserves claude_code_sessions/idle_periods across a rebuild by re-linking them to a session that survives it (H3-B1)", () => {
