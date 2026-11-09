@@ -150,6 +150,7 @@ pub struct TextField {
     blink_on: bool,
     blink_epoch: usize,
     blinking: bool,
+    blink_gen: usize,
 }
 
 pub(crate) struct LineLayouts {
@@ -223,6 +224,7 @@ impl TextField {
             blink_on: true,
             blink_epoch: 0,
             blinking: false,
+            blink_gen: 0,
         }
     }
 
@@ -259,12 +261,14 @@ impl TextField {
             return;
         }
         self.blinking = true;
+        self.blink_gen += 1;
+        let my_gen = self.blink_gen;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_millis(530)).await;
                 let keep = this
                     .update(cx, |t, cx| {
-                        if !t.blinking {
+                        if !t.blinking || t.blink_gen != my_gen {
                             return false;
                         }
                         t.blink_on = !t.blink_on;

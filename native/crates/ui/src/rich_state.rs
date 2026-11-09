@@ -113,6 +113,7 @@ impl RichState {
     }
 
     pub fn select_all(&mut self) {
+        self.stored = None;
         let last = self.leaves.len() - 1;
         self.anchor = Pos { leaf: 0, off: 0 };
         self.head = Pos { leaf: last, off: self.leaves[last].text.len() };
@@ -716,5 +717,28 @@ mod tests {
         let mut s = st("<p><a href=\"https://e.com\">x</a></p>");
         s.insert("y");
         assert!(!s.to_html().contains("xy"));
+    }
+}
+
+#[cfg(test)]
+mod reach_tests {
+    use super::*;
+
+    #[test]
+    fn outdent_in_the_middle_of_a_nested_list_still_serializes() {
+        let mut s = RichState::from_html("<ul><li><p>a</p><ul><li><p>b</p><ul><li><p>c</p></li></ul></li></ul></li></ul>");
+        s.move_to(Pos { leaf: 1, off: 0 }, false);
+        s.indent(false);
+        let html = s.to_html();
+        assert!(html.starts_with("<ul>") && html.contains("c"));
+    }
+
+    #[test]
+    fn select_all_drops_stored_marks() {
+        let mut s = RichState::from_html("<p>ab</p>");
+        s.toggle_mark(MarkKind::Bold);
+        s.select_all();
+        s.insert("x");
+        assert_eq!(s.to_html(), "<p>x</p>");
     }
 }

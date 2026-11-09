@@ -658,6 +658,19 @@ fn write_list(leaves: &[Leaf], i: &mut usize, depth: usize, out: &mut String) {
 }
 
 pub fn to_html(leaves: &[Leaf]) -> String {
+    // A list may not jump more than one level below its predecessor; edits can leave such gaps.
+    let mut fixed = leaves.to_vec();
+    let mut prev: Option<usize> = None;
+    for l in fixed.iter_mut() {
+        match l.list.as_mut() {
+            Some(li) => {
+                li.depth = li.depth.min(prev.map(|d| d + 1).unwrap_or(0));
+                prev = Some(li.depth);
+            }
+            None => prev = None,
+        }
+    }
+    let leaves = &fixed[..];
     let mut out = String::new();
     let mut i = 0;
     while i < leaves.len() {

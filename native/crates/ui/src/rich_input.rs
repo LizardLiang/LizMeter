@@ -74,6 +74,7 @@ pub struct RichInput {
     goal_x: Option<Pixels>,
     blink_on: bool,
     blinking: bool,
+    blink_gen: usize,
     scroll: ScrollHandle,
     ensure_caret_visible: bool,
 }
@@ -113,6 +114,7 @@ impl RichInput {
             goal_x: None,
             blink_on: true,
             blinking: false,
+            blink_gen: 0,
             scroll: ScrollHandle::new(),
             ensure_caret_visible: false,
         }
@@ -149,12 +151,14 @@ impl RichInput {
             return;
         }
         self.blinking = true;
+        self.blink_gen += 1;
+        let my_gen = self.blink_gen;
         cx.spawn(async move |this, cx| {
             loop {
                 cx.background_executor().timer(Duration::from_millis(530)).await;
                 let keep = this
                     .update(cx, |t, cx| {
-                        if !t.blinking {
+                        if !t.blinking || t.blink_gen != my_gen {
                             return false;
                         }
                         t.blink_on = !t.blink_on;
@@ -185,6 +189,9 @@ impl RichInput {
     // ---- edit actions ----
 
     fn backspace(&mut self, _: &ti::Backspace, _: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled {
+            return;
+        }
         self.state.backspace();
         self.changed(cx);
     }
@@ -201,6 +208,9 @@ impl RichInput {
         self.changed(cx);
     }
     fn enter(&mut self, _: &ti::Enter, _: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled {
+            return;
+        }
         self.state.enter();
         self.changed(cx);
     }
@@ -222,6 +232,9 @@ impl RichInput {
         self.changed(cx);
     }
     fn paste(&mut self, _: &ti::Paste, _: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled {
+            return;
+        }
         if let Some(t) = cx.read_from_clipboard().and_then(|c| c.text()) {
             self.state.replace(None, &t, RichEdit::Other);
             self.changed(cx);
@@ -784,15 +797,6 @@ impl Element for EditorElement {
         });
         let (placeholder, placeholder_opacity) = if v.state.is_empty() {
             let txt = v.placeholder.to_string();
-            let runs = vec![TextRun {
-                len: txt.len(),
-                font: font(EDITOR_FONT),
-                color: col(hex(0x7a8194)),
-                background_color: None,
-                underline: None,
-                strikethrough: None,
-            }];
-            let lines = ti_shape(&txt, &v.style, runs, bounds.size.width, window);
             let t = match anim_time() {
                 Some(ms) => ms,
                 None if frozen() => FREEZE_T * 4000.0,
@@ -804,7 +808,11 @@ impl Element for EditorElement {
             // placeholderBreath: 4s ease-in-out infinite, opacity .55 <-> .85
             let ph = (t % 4000.0) / 4000.0;
             let wave = 0.5 - 0.5 * (ph * std::f32::consts::TAU).cos();
-            (lines, 0.55 + 0.30 * wave)
+            let opacity = 0.55 + 0.30 * wave;
+            let mut color = col(hex(0x7a8194));
+            color.a = opacity;
+            let runs = vec![TextRun { len: txt.len(), font: font(EDITOR_FONT), color, background_color: None, underline: None, strikethrough: None }];
+            (ti_shape(&txt, &v.style, runs, bounds.size.width, window), opacity)
         } else {
             (Vec::new(), 1.0)
         };
