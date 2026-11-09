@@ -41,17 +41,19 @@ pub struct ActivityPage {
     /// Bumped by every show and hide: an older poll loop sees a newer number and exits.
     poll_gen: u64,
     visible: bool,
+    /// A date the capture hook asks the next show to open.
+    preset_date: Option<NaiveDate>,
 }
 
 impl ActivityPage {
     pub fn new(svc: Arc<Services>) -> Self {
-        Self { svc, date: Local::now().date_naive(), records: vec![], loading: true, error: None, collapsed: HashSet::new(), poll_gen: 0, visible: false }
+        Self { svc, date: Local::now().date_naive(), records: vec![], loading: true, error: None, collapsed: HashSet::new(), poll_gen: 0, visible: false, preset_date: None }
     }
 
     /// Capture hook: `"-1"` opens the day before today.
     pub fn preset(&mut self, spec: &str) {
         if let Ok(days) = spec.parse::<i64>() {
-            self.date = Local::now().date_naive() + Duration::days(days);
+            self.preset_date = Some(Local::now().date_naive() + Duration::days(days));
         }
     }
 
@@ -77,6 +79,8 @@ impl ActivityPage {
     /// The page is on screen: load now and keep loading every 5 s.
     pub fn show(&mut self, cx: &mut Context<Self>) {
         self.visible = true;
+        self.date = self.preset_date.take().unwrap_or_else(|| Local::now().date_naive());
+        self.collapsed.clear();
         self.poll_gen += 1;
         let generation = self.poll_gen;
         self.load(cx);

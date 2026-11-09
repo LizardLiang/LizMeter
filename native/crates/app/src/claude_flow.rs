@@ -121,6 +121,10 @@ impl Root {
     pub fn cc_track_link(&mut self, link: &Linked, cx: &mut Context<Self>) {
         if self.cc_scan(&link.project_dir, cx) {
             self.cc_track(vec![link.uuid.clone()]);
+            // A scan resets the tracker's pause: a paused timer must not gather while paused.
+            if self.countdown.status == Status::Paused || self.stopwatch.status == Status::Paused {
+                self.svc.claude_pause();
+            }
         }
     }
 
@@ -292,6 +296,8 @@ impl Root {
                     crate::app::Page::History => (1, 7),
                     crate::app::Page::Stats => (7, 8),
                     crate::app::Page::Tags => (8, 7),
+                    crate::app::Page::Claude => (4, 7),
+                    crate::app::Page::Activity => (5, 7),
                     crate::app::Page::Settings => (9, 7),
                     _ => (0, 7),
                 };
