@@ -48,6 +48,7 @@ impl Services {
         let location = Arc::new(location);
         let user_data_dir = location.default_data_dir().to_path_buf();
         let user_data_dir_copy = user_data_dir.clone();
+        let user_data_hub = user_data_dir.clone();
         let mut report = StartupReport::default();
 
         // Step 1 of 2 for a deferred sync action: marker files, before the database opens.
@@ -136,7 +137,9 @@ impl Services {
             tracker: Mutex::new(ClaudeTracker::new(projects_root)),
             retired: AtomicBool::new(false),
             guards: Mutex::new(Vec::new()),
+            hub: crate::issues::Hub::new(&user_data_hub),
         });
+        services.migrate_electron_tokens();
         Ok((services, report))
     }
 

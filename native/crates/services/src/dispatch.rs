@@ -85,6 +85,71 @@ struct IdArg {
     id: i64,
 }
 
+#[derive(serde::Deserialize)]
+struct TokenArg {
+    token: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RepoIssue {
+    repo: String,
+    issue_number: i64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TeamArg {
+    team_id: String,
+    team_name: String,
+}
+
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct ForceRefresh {
+    #[serde(default)]
+    force_refresh: bool,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IssueIdArg {
+    issue_id: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct IssueKeyArg {
+    issue_key: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuthTypeArg {
+    auth_type: JiraAuthType,
+}
+
+#[derive(serde::Deserialize)]
+struct DomainArg {
+    domain: String,
+}
+
+#[derive(serde::Deserialize)]
+struct EmailArg {
+    email: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProjectKeyArg {
+    project_key: String,
+}
+
+#[derive(serde::Deserialize)]
+struct JqlArg {
+    jql: String,
+}
+
 impl Services {
     /// Calls `channel` with the arguments the preload passes to `ipcRenderer.invoke`.
     pub fn dispatch(&self, channel: &str, args: &[Value]) -> Result<Value> {
@@ -215,6 +280,46 @@ impl Services {
                 let a: MarkLogged = arg(args, 0, "input")?;
                 out(self.mark_worklog_logged(&a.session_ids, &a.worklog_id)?)
             }
+
+            "worklog:log" => out(self.worklog_log(&arg(args, 0, "input")?)?),
+
+            "issues:list" => Ok(json!({ "issues": self.github_issues(&arg_or_default::<IssuesListInput>(args, 0)?)? })),
+            "issues:provider-status" => out(self.issue_provider_status()?),
+            "issues:set-token" => out(self.github_set_token(&arg::<TokenArg>(args, 0, "input")?.token)?),
+            "issues:test-token" => Ok(json!({ "username": self.github_test()? })),
+            "issues:fetch-comments" => {
+                let a: RepoIssue = arg(args, 0, "input")?;
+                out(self.github_comments(&a.repo, a.issue_number)?)
+            }
+            "issues:delete-token" => out(self.github_delete_token()),
+
+            "linear:set-token" => out(self.linear_set_token(&arg::<TokenArg>(args, 0, "input")?.token)?),
+            "linear:delete-token" => out(self.linear_delete_token()?),
+            "linear:test-connection" => Ok(json!({ "displayName": self.linear_test()? })),
+            "linear:list-teams" => out(self.linear_teams()?),
+            "linear:set-team" => {
+                let a: TeamArg = arg(args, 0, "input")?;
+                out(self.linear_set_team(&a.team_id, &a.team_name)?)
+            }
+            "linear:get-team" => Ok(match self.linear_team()? {
+                Some((team_id, team_name)) => json!({ "teamId": team_id, "teamName": team_name }),
+                None => Value::Null,
+            }),
+            "linear:fetch-issues" => out(self.linear_issues(arg_or_default::<ForceRefresh>(args, 0)?.force_refresh)?),
+            "linear:fetch-comments" => out(self.linear_comments(&arg::<IssueIdArg>(args, 0, "input")?.issue_id)?),
+            "linear:provider-status" => out(self.linear_provider_status()?),
+
+            "jira:set-token" => out(self.jira_set_token(&arg::<TokenArg>(args, 0, "input")?.token)?),
+            "jira:delete-token" => out(self.jira_delete_token()?),
+            "jira:test-connection" => Ok(json!({ "displayName": self.jira_test()? })),
+            "jira:fetch-issues" => out(self.jira_issues(arg_or_default::<ForceRefresh>(args, 0)?.force_refresh)?),
+            "jira:fetch-comments" => out(self.jira_comments(&arg::<IssueKeyArg>(args, 0, "input")?.issue_key)?),
+            "jira:provider-status" => out(self.jira_provider_status()?),
+            "jira:set-auth-type" => out(self.jira_set_auth_type(arg::<AuthTypeArg>(args, 0, "input")?.auth_type)?),
+            "jira:set-domain" => out(self.jira_set_domain(&arg::<DomainArg>(args, 0, "input")?.domain)?),
+            "jira:set-email" => out(self.jira_set_email(&arg::<EmailArg>(args, 0, "input")?.email)?),
+            "jira:set-project-key" => out(self.jira_set_project_key(&arg::<ProjectKeyArg>(args, 0, "input")?.project_key)?),
+            "jira:set-jql-filter" => out(self.jira_set_jql_filter(&arg::<JqlArg>(args, 0, "input")?.jql)?),
 
             other => match crate::channels::deferred_owner(other) {
                 Some(owner) => fail(format!("Channel {other} is not available yet (phase {})", owner.phase())),

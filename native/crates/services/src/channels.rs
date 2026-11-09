@@ -1,7 +1,7 @@
 //! The IPC channels of `electron/preload/index.ts` and who owns each in the native app.
 
 /// Channels answered by [`crate::Services::dispatch`] in this phase.
-pub const SERVICE_CHANNELS: [&str; 64] = [
+pub const SERVICE_CHANNELS: [&str; 91] = [
     "session:save",
     "session:save-with-tracking",
     "session:list",
@@ -66,13 +66,38 @@ pub const SERVICE_CHANNELS: [&str; 64] = [
     "claude-tracker:get-for-session",
     "nvim-activity:list-by-date",
     "worklog:mark-logged",
+    "worklog:log",
+    "issues:list",
+    "issues:provider-status",
+    "issues:set-token",
+    "issues:test-token",
+    "issues:fetch-comments",
+    "issues:delete-token",
+    "linear:set-token",
+    "linear:delete-token",
+    "linear:test-connection",
+    "linear:list-teams",
+    "linear:set-team",
+    "linear:get-team",
+    "linear:fetch-issues",
+    "linear:fetch-comments",
+    "linear:provider-status",
+    "jira:set-token",
+    "jira:delete-token",
+    "jira:test-connection",
+    "jira:fetch-issues",
+    "jira:fetch-comments",
+    "jira:provider-status",
+    "jira:set-auth-type",
+    "jira:set-domain",
+    "jira:set-email",
+    "jira:set-project-key",
+    "jira:set-jql-filter",
 ];
 
 /// Who answers a channel that [`SERVICE_CHANNELS`] does not list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Deferred {
-    /// Issue providers, token storage and the Jira worklog call.
-    IssueProviders,
     /// Music library, playlists, cache, binaries, playback.
     Music,
     /// The desktop widget and its avatars.
@@ -83,7 +108,6 @@ impl Deferred {
     /// The plan phase that ports it.
     pub fn phase(self) -> u8 {
         match self {
-            Deferred::IssueProviders => 8,
             Deferred::Music => 9,
             Deferred::Widget => 11,
         }
@@ -97,7 +121,6 @@ pub fn deferred_owner(channel: &str) -> Option<Deferred> {
     }
     let (prefix, _) = channel.split_once(':')?;
     match prefix {
-        "issues" | "linear" | "jira" | "worklog" => Some(Deferred::IssueProviders),
         "music" => Some(Deferred::Music),
         "widget" => Some(Deferred::Widget),
         _ => None,

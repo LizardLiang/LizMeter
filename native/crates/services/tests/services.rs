@@ -44,8 +44,8 @@ fn a_deferred_channel_names_its_phase_and_an_unknown_one_says_so() {
     let r = rig();
     let msg = r.svc.dispatch("music:play", &[]).unwrap_err().to_string();
     assert!(msg.contains("phase 9"), "{msg}");
-    let msg = r.svc.dispatch("linear:list-teams", &[]).unwrap_err().to_string();
-    assert!(msg.contains("phase 8"), "{msg}");
+    let msg = r.svc.dispatch("widget:get-settings", &[]).unwrap_err().to_string();
+    assert!(msg.contains("phase 11"), "{msg}");
     let msg = r.svc.dispatch("nope:nope", &[]).unwrap_err().to_string();
     assert!(msg.contains("Unknown channel"), "{msg}");
 }
@@ -205,6 +205,38 @@ fn every_service_channel_round_trips_through_dispatch() {
     c.call("claude-tracker:pause", vec![]);
     c.call("claude-tracker:resume", vec![]);
     assert_eq!(c.call("claude-tracker:stop", vec![]), json!({"sessions": []}));
+
+    // issue providers: no token yet, so every fetch names what is missing; the settings calls work
+    assert_eq!(c.call("issues:provider-status", vec![])["configured"], false);
+    assert!(c.call_err("issues:list", vec![]).contains("No token configured"));
+    assert!(c.call_err("issues:test-token", vec![]).contains("No token configured"));
+    assert!(c.call_err("issues:fetch-comments", vec![json!({"repo": "o/r", "issueNumber": 1})]).contains("No token configured"));
+    assert!(c.call_err("issues:set-token", vec![json!({"token": "  ", "provider": "github"})]).contains("Token cannot be empty"));
+    c.call("issues:delete-token", vec![]);
+    assert!(c.call_err("linear:test-connection", vec![]).contains("No Linear API key configured"));
+    assert!(c.call_err("linear:list-teams", vec![]).contains("No Linear API key configured"));
+    assert!(c.call_err("linear:fetch-issues", vec![json!({"forceRefresh": true})]).contains("No Linear API key configured"));
+    assert!(c.call_err("linear:fetch-comments", vec![json!({"issueId": "x"})]).contains("No Linear API key configured"));
+    assert!(c.call_err("linear:set-token", vec![json!({"token": ""})]).contains("Token cannot be empty"));
+    c.call("linear:set-team", vec![json!({"teamId": "t1", "teamName": "Core"})]);
+    assert_eq!(c.call("linear:get-team", vec![]), json!({"teamId": "t1", "teamName": "Core"}));
+    assert_eq!(c.call("linear:provider-status", vec![])["configured"], false);
+    c.call("linear:delete-token", vec![]);
+    assert_eq!(c.call("linear:get-team", vec![]), Value::Null);
+    assert!(c.call_err("jira:test-connection", vec![]).contains("No Jira credentials configured"));
+    assert!(c.call_err("jira:fetch-issues", vec![]).contains("No Jira credentials configured"));
+    assert!(c.call_err("jira:fetch-comments", vec![json!({"issueKey": "P-1"})]).contains("No Jira credentials configured"));
+    assert!(c.call_err("jira:set-token", vec![json!({"token": ""})]).contains("Token cannot be empty"));
+    c.call("jira:set-auth-type", vec![json!({"authType": "server"})]);
+    c.call("jira:set-domain", vec![json!({"domain": " https://jira.example.com/ "})]);
+    c.call("jira:set-email", vec![json!({"email": " liz "})]);
+    c.call("jira:set-project-key", vec![json!({"projectKey": "PROJ"})]);
+    c.call("jira:set-jql-filter", vec![json!({"jql": "assignee = me"})]);
+    assert_eq!(c.call("settings:get-value", vec![json!("jira_domain")]), json!("jira.example.com"));
+    assert_eq!(c.call("jira:provider-status", vec![])["authType"], "server");
+    c.call("jira:delete-token", vec![]);
+    assert_eq!(c.call("settings:get-value", vec![json!("jira_domain")]), Value::Null);
+    assert!(c.call_err("worklog:log", vec![json!({"sessionId": "s", "issueKey": "P-1"})]).contains("No Jira credentials configured"));
 
     // data location, last: a move retires this instance
     let info = c.call("data-location:get", vec![]);

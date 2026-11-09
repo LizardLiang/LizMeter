@@ -12,8 +12,11 @@ pub mod claude_tracker;
 mod dispatch;
 mod error;
 mod issues;
+pub mod providers;
+pub mod tokens;
 pub mod os;
 mod startup;
+pub mod worklog_merge;
 
 pub use error::{Result, ServiceError};
 pub use startup::StartupReport;
@@ -60,6 +63,8 @@ pub struct Services {
     pub(crate) retired: AtomicBool,
     /// Single-writer guards, held until this value drops.
     pub(crate) guards: Mutex<Vec<os::guard::SingleWriterGuard>>,
+    /// Issue-tracker tokens, endpoints and result caches.
+    pub(crate) hub: issues::Hub,
 }
 
 impl Services {

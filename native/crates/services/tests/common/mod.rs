@@ -50,3 +50,5 @@ impl<'a> Caller<'a> {
         self.svc.dispatch(channel, &args).expect_err(channel).to_string()
     }
 }
+
+pub mod mock;
