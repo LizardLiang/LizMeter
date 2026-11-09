@@ -59,6 +59,23 @@ try {
   ]);
   assert.equal(database.prepare("SELECT COUNT(*) AS count FROM todos WHERE id < 0").get().count, 0);
   console.log("PASS reconcileTodoIds completes a two-phase negative-id swap");
+
+  const childHlc = { physicalMs: Date.now(), counter: 10, deviceNumber: 941 };
+  const childEntry = buildUpsertEntry(childHlc, "todos", "real-subtask-child", {
+    title: { value: "Real child", hlc: childHlc },
+    parent_uuid: { value: "real-subtask-parent", hlc: childHlc },
+    id: { value: 1, hlc: childHlc },
+  });
+  const parentEntry = buildUpsertEntry(childHlc, "todos", "real-subtask-parent", {
+    title: { value: "Real parent", hlc: childHlc },
+    id: { value: 2, hlc: childHlc },
+  });
+  assert.doesNotThrow(() => applyOplogEntries(database, [childEntry, parentEntry]));
+  const linkedRows = database.prepare(
+    "SELECT c.parent_id AS parent_id, p.id AS parent_row_id FROM todos c INNER JOIN todos p ON p.uuid = 'real-subtask-parent' WHERE c.uuid = 'real-subtask-child'",
+  ).get() as { parent_id: number | null; parent_row_id: number };
+  assert.equal(linkedRows.parent_id, linkedRows.parent_row_id);
+  console.log("PASS applyOplogEntries resolves a subtask applied before its parent for real better-sqlite3");
 } finally {
   fs.rmSync(root, { recursive: true, force: true });
 }
