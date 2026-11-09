@@ -10,8 +10,9 @@ use windows::{
         Foundation::*,
         Globalization::GetUserDefaultLocaleName,
         Graphics::{
-            Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP, Direct3D11::*, DirectWrite::*,
-            Dxgi::Common::*, Gdi::LOGFONTW,
+            Direct2D::{Common::*, *}, Direct3D::D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP,
+            Direct3D11::*, DirectWrite::*, Dxgi::{Common::*, IDXGIDevice, IDXGISurface},
+            Gdi::LOGFONTW,
         },
         System::SystemServices::LOCALE_NAME_MAX_LENGTH,
         UI::WindowsAndMessaging::*,
@@ -809,7 +810,9 @@ impl DirectWriteState {
         }
 
         let bitmap_data = if params.is_emoji {
-            if let Ok(color) = self.rasterize_color(params, glyph_bounds) {
+            if let Ok(color) = self.rasterize_color_paint(params, glyph_bounds) {
+                color
+            } else if let Ok(color) = self.rasterize_color(params, glyph_bounds) {
                 color
             } else {
                 let monochrome = self.rasterize_monochrome(params, glyph_bounds)?;
@@ -848,6 +851,149 @@ impl DirectWriteState {
         }
 
         Ok(bitmap_data)
+    }
+
+    /// Draws the glyph with Direct2D so COLRv1 paint trees (gradients, transforms, clips) render in full.
+    fn rasterize_color_paint(
+        &self,
+        params: &RenderGlyphParams,
+        glyph_bounds: Bounds<DevicePixels>,
+    ) -> Result<Vec<u8>> {
+        let width = glyph_bounds.size.width.0 as u32;
+        let height = glyph_bounds.size.height.0 as u32;
+        let gpu_state = &self.components.gpu_state;
+        let subpixel_shift = params
+            .subpixel_variant
+            .map(|v| v as f32 / SUBPIXEL_VARIANTS_X as f32);
+
+        let texture_desc = |usage, bind, cpu| D3D11_TEXTURE2D_DESC {
+            Width: width,
+            Height: height,
+            MipLevels: 1,
+            ArraySize: 1,
+            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Usage: usage,
+            BindFlags: bind,
+            CPUAccessFlags: cpu,
+            MiscFlags: 0,
+        };
+        let mut target = None;
+        let mut staging = None;
+        unsafe {
+            gpu_state.device.CreateTexture2D(
+                &texture_desc(D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET.0 as u32, 0),
+                None,
+                Some(&mut target),
+            )?;
+            gpu_state.device.CreateTexture2D(
+                &texture_desc(D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ.0 as u32),
+                None,
+                Some(&mut staging),
+            )?;
+        }
+        let target = target.context("no render target texture")?;
+        let staging = staging.context("no staging texture")?;
+
+        unsafe {
+            let factory: ID2D1Factory1 =
+                D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
+            let dxgi_device: IDXGIDevice = gpu_state.device.cast()?;
+            let d2d_device = factory.CreateDevice(&dxgi_device)?;
+            let context: ID2D1DeviceContext7 = d2d_device
+                .CreateDeviceContext(D2D1_DEVICE_CONTEXT_OPTIONS_NONE)?
+                .cast()?;
+            let surface: IDXGISurface = target.cast()?;
+            let bitmap = context.CreateBitmapFromDxgiSurface(
+                &surface,
+                Some(&D2D1_BITMAP_PROPERTIES1 {
+                    pixelFormat: D2D1_PIXEL_FORMAT {
+                        format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                        alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                    },
+                    dpiX: 96.0,
+                    dpiY: 96.0,
+                    bitmapOptions: D2D1_BITMAP_OPTIONS_TARGET | D2D1_BITMAP_OPTIONS_CANNOT_DRAW,
+                    colorContext: std::mem::ManuallyDrop::new(None),
+                }),
+            )?;
+            context.SetTarget(&bitmap);
+            context.SetDpi(96.0, 96.0);
+            let brush = context.CreateSolidColorBrush(
+                &D2D1_COLOR_F {
+                    r: 0.0,
+                    g: 0.0,
+                    b: 0.0,
+                    a: 1.0,
+                },
+                None,
+            )?;
+
+            let font = &self.fonts[params.font_id.0];
+            let glyph_id = [params.glyph_id.0 as u16];
+            let advance = [0.0f32];
+            let glyph_run = DWRITE_GLYPH_RUN {
+                fontFace: std::mem::transmute_copy(&font.font_face),
+                fontEmSize: params.font_size.0 * params.scale_factor,
+                glyphCount: 1,
+                glyphIndices: glyph_id.as_ptr(),
+                glyphAdvances: advance.as_ptr(),
+                glyphOffsets: std::ptr::null(),
+                isSideways: BOOL(0),
+                bidiLevel: 0,
+            };
+
+            context.BeginDraw();
+            context.Clear(Some(&D2D1_COLOR_F {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            }));
+            context.DrawPaintGlyphRun(
+                Vector2::new(
+                    -glyph_bounds.origin.x.0 as f32 + subpixel_shift.x,
+                    -glyph_bounds.origin.y.0 as f32 + subpixel_shift.y,
+                ),
+                &glyph_run,
+                &brush,
+                0,
+                DWRITE_MEASURING_MODE_NATURAL,
+            );
+            context.EndDraw(None, None)?;
+            context.SetTarget(None::<&ID2D1Image>);
+        }
+
+        let device_context = &gpu_state.device_context;
+        unsafe { device_context.CopyResource(&staging, &target) };
+        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+        unsafe { device_context.Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped)) }?;
+        let row_bytes = width as usize * 4;
+        let mut rasterized = vec![0u8; row_bytes * height as usize];
+        for y in 0..height as usize {
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    (mapped.pData as *const u8).byte_add(mapped.RowPitch as usize * y),
+                    rasterized.as_mut_ptr().byte_add(row_bytes * y),
+                    row_bytes,
+                );
+            }
+        }
+        unsafe { device_context.Unmap(&staging, 0) };
+
+        for chunk in rasterized.chunks_exact_mut(4) {
+            let a = chunk[3] as f32;
+            if a > 0.0 {
+                let inv_a = 255.0 / a;
+                for c in &mut chunk[..3] {
+                    *c = (*c as f32 * inv_a).clamp(0.0, 255.0) as u8;
+                }
+            }
+        }
+        Ok(rasterized)
     }
 
     fn rasterize_color(

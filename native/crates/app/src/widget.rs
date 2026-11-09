@@ -204,7 +204,7 @@ impl Render for Widget {
                                     .rounded_full()
                                     .shadow(shadows(&[sh(0.0, 0.0, 4.0, rgba(122, 162, 247, 0.3))])),
                             )
-                            .child(img("icons/tomato.png").w(px(27.46875)).h(px(20.0))),
+                            .child(div().text_size(px(20.0)).line_height(px(20.0)).font_family("Segoe UI Emoji").child("\u{1F345}")),
                     )
                     .child(dot),
             )

@@ -29,15 +29,9 @@ mod embedded {
         "pause", "stop", "caret", "spark"
     );
 
-    /// U+1F345 as Chromium draws it from the system Segoe UI Emoji (COLRv1 paint tree), baked at 4x.
-    const TOMATO: &[u8] = include_bytes!("../assets/icons/tomato.png");
-
     pub struct Assets;
     impl AssetSource for Assets {
         fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-            if path == "icons/tomato.png" {
-                return Ok(Some(Cow::Borrowed(TOMATO)));
-            }
             Ok(ICONS.iter().find(|(p, _)| *p == path).map(|(_, b)| Cow::Borrowed(*b)))
         }
         fn list(&self, _path: &str) -> Result<Vec<SharedString>> {

@@ -357,6 +357,6 @@ pub fn emoji_sample() -> impl IntoElement {
         .bg(col(TN_BG))
         .pl(px(20.0))
         .pt(px(20.0))
-        .child(div().h(px(48.0)).line_height(px(48.0)).text_size(px(32.0)).font_family("Segoe UI Emoji").text_color(col(TN_TEXT)).child("\u{1F345} \u{1F600} \u{2764}\u{FE0F} \u{1F44D} \u{1F680} \u{1F525}"))
-        .child(div().h(px(48.0)).line_height(px(48.0)).text_size(px(14.0)).font_family("Segoe UI Emoji").text_color(col(TN_TEXT)).child("\u{1F345} \u{1F600} \u{2764}\u{FE0F} \u{1F44D} \u{1F680} \u{1F525} inline 14px"))
+        .child(div().h(px(48.0)).line_height(px(48.0)).text_size(px(32.0)).font_family("Segoe UI Emoji").text_color(col(TN_TEXT)).child("\u{1F345} \u{2705} \u{1F525} \u{1F389} \u{2764}\u{FE0F} \u{1F44D} \u{1F4DD} \u{23F0}"))
+        .child(div().h(px(48.0)).line_height(px(48.0)).text_size(px(14.0)).font_family("Segoe UI Emoji").text_color(col(TN_TEXT)).child("\u{1F345} \u{2705} \u{1F525} \u{1F389} \u{2764}\u{FE0F} \u{1F44D} \u{1F4DD} \u{23F0} inline 14px"))
 }
