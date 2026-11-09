@@ -72,7 +72,7 @@ pub fn rich_view(html: &str, size: f32, color: C) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::is_html;
 
     #[test]
     fn detects_html_titles() {

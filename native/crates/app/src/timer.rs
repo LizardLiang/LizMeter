@@ -3,36 +3,17 @@
 use crate::css::{Spec, TRANSPARENT, hex, linear, rgba};
 use crate::ui::*;
 use gpui::*;
+use lizmeter_ui::text_input::{FieldStyle, TextField};
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Status {
-    Idle,
-    Running,
-    Paused,
-    Completed,
-}
+pub use crate::engine::Status;
+pub use lizmeter_core::TimerType;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum TimerType {
-    Work,
-    ShortBreak,
-    LongBreak,
-}
-
-impl TimerType {
-    pub fn accent(self) -> crate::css::C {
-        match self {
-            TimerType::Work => TN_BLUE,
-            TimerType::ShortBreak => TN_GREEN,
-            TimerType::LongBreak => TN_PURPLE,
-        }
-    }
-    pub fn seconds(self) -> i32 {
-        match self {
-            TimerType::Work => 25 * 60,
-            TimerType::ShortBreak => 5 * 60,
-            TimerType::LongBreak => 15 * 60,
-        }
+/// The accent colour of a timer type.
+pub fn accent(ty: TimerType) -> crate::css::C {
+    match ty {
+        TimerType::Work | TimerType::Stopwatch => TN_BLUE,
+        TimerType::ShortBreak => TN_GREEN,
+        TimerType::LongBreak => TN_PURPLE,
     }
 }
 
@@ -112,15 +93,9 @@ pub fn mode_toggle(
 }
 
 /// The idle/running/hover look of the big card (TimerView.module.scss `.container`).
-pub fn card_glass(status: Status, ttype: TimerType, border_alpha: f32) -> Glass {
-    // The SCSS selector `[data-timer-type="work"]:not([data-status="idle"])` also matches the idle card
-    // (data-status lives on a child), so Electron always renders the Work card with the accent look.
-    let _ = status;
-    let accent_active = true;
-    let (border, glow, hi_top, hi_side) = if accent_active && ttype == TimerType::Work {
+pub fn card_glass(ttype: TimerType, border_alpha: f32) -> Glass {
+    let (border, glow, hi_top, hi_side) = if ttype == TimerType::Work {
         (rgba(122, 162, 247, 0.22), Some(rgba(122, 162, 247, 0.07)), rgba(122, 162, 247, 0.18), rgba(122, 162, 247, 0.08))
-    } else if false {
-        (rgba(158, 206, 106, 0.20), Some(rgba(158, 206, 106, 0.06)), rgba(158, 206, 106, 0.16), rgba(158, 206, 106, 0.07))
     } else {
         (rgba(122, 162, 247, border_alpha), None, wh(0.12), wh(0.06))
     };
@@ -161,7 +136,7 @@ pub fn type_selector(selected: TimerType, enabled: bool, on_pick: impl Fn(TimerT
     row = row.child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(122, 162, 247, 0.08))));
     for (label, ty) in [("Work", TimerType::Work), ("Short Break", TimerType::ShortBreak), ("Long Break", TimerType::LongBreak)] {
         let is_sel = ty == selected;
-        let accent = ty.accent();
+        let accent = accent(ty);
         let pick = on_pick.clone();
         let mut b = div()
             .id(label)
@@ -185,7 +160,25 @@ pub fn type_selector(selected: TimerType, enabled: bool, on_pick: impl Fn(TimerT
     row
 }
 
-pub fn timer_display(status: Status, remaining: i32, can_edit: bool) -> impl IntoElement {
+/// The two fields of the click-to-edit display.
+pub struct DisplayEdit {
+    pub mins: Entity<TextField>,
+    pub secs: Entity<TextField>,
+}
+
+pub fn display_field_style() -> FieldStyle {
+    let mut st = FieldStyle::new(MONO, 104.0, 104.0, col(TN_TEXT));
+    st.weight = FontWeight(700.0);
+    st
+}
+
+pub fn timer_display(
+    status: Status,
+    remaining: i64,
+    can_edit: bool,
+    edit: Option<DisplayEdit>,
+    on_edit: impl Fn(&mut Window, &mut App) + 'static,
+) -> impl IntoElement {
     let mins = remaining.max(0) / 60;
     let secs = remaining.max(0) % 60;
     let color = match status {
@@ -203,30 +196,63 @@ pub fn timer_display(status: Status, remaining: i32, can_edit: bool) -> impl Int
         run
     };
     let digits_w = 152.3;
-    let row = div()
-        .relative()
-        .w(px(2.0 * digits_w + 8.0 + 58.9))
-        .h(px(122.0))
-        .flex_shrink_0()
-        .font_family(MONO)
-        .text_size(px(104.0))
-        .line_height(px(104.0))
-        .font_weight(FontWeight(700.0))
-        .text_color(col(color))
-        .child(glyphs(&format!("{mins:02}"), (digits_w - 2.0 * step) / 2.0))
-        .child(
+    let editing = edit.is_some();
+    let row = if let Some(e) = edit {
+        let underline = |field: Entity<TextField>| {
             div()
-                .absolute()
-                .left(px(digits_w + 4.0))
-                .top_0()
-                .w(px(58.9))
+                .w(px(digits_w))
                 .h(px(122.0))
-                .opacity(0.45)
-                .font_weight(FontWeight(300.0))
-                .child(glyphs(":", (58.9 - step) / 2.0)),
-        )
-        .child(glyphs(&format!("{secs:02}"), digits_w + 8.0 + 58.9 + (digits_w - 2.0 * step) / 2.0));
-    let hint = if can_edit { "click to edit" } else { "" };
+                .pt(px(9.0))
+                .pl(px((digits_w - 2.0 * step) / 2.0))
+                .border_b_2()
+                .border_color(col(rgba(122, 162, 247, 0.31)))
+                .child(field)
+        };
+        div()
+            .flex()
+            .flex_row()
+            .items_start()
+            .child(underline(e.mins))
+            .child(div().w(px(58.9 + 8.0)).h(px(122.0)).pt(px(9.0)).flex().justify_center().opacity(0.45).font_family(MONO).text_size(px(104.0)).line_height(px(104.0)).font_weight(FontWeight(300.0)).child(":"))
+            .child(underline(e.secs))
+            .into_any_element()
+    } else {
+        let row = div()
+            .relative()
+            .w(px(2.0 * digits_w + 8.0 + 58.9))
+            .h(px(122.0))
+            .flex_shrink_0()
+            .font_family(MONO)
+            .text_size(px(104.0))
+            .line_height(px(104.0))
+            .font_weight(FontWeight(700.0))
+            .text_color(col(color))
+            .child(glyphs(&format!("{mins:02}"), (digits_w - 2.0 * step) / 2.0))
+            .child(
+                div()
+                    .absolute()
+                    .left(px(digits_w + 4.0))
+                    .top_0()
+                    .w(px(58.9))
+                    .h(px(122.0))
+                    .opacity(0.45)
+                    .font_weight(FontWeight(300.0))
+                    .child(glyphs(":", (58.9 - step) / 2.0)),
+            )
+            .child(glyphs(&format!("{secs:02}"), digits_w + 8.0 + 58.9 + (digits_w - 2.0 * step) / 2.0));
+        if can_edit {
+            row.id("time-edit").cursor_pointer().on_click(move |_, w, a| on_edit(w, a)).into_any_element()
+        } else {
+            row.into_any_element()
+        }
+    };
+    let hint = if editing {
+        "enter to confirm"
+    } else if can_edit {
+        "click to edit"
+    } else {
+        ""
+    };
     div()
         .w_full()
         .pt(px(24.0))
@@ -258,23 +284,57 @@ pub fn timer_display(status: Status, remaining: i32, can_edit: bool) -> impl Int
         })
 }
 
-pub fn link_issue_button() -> impl IntoElement {
-    Glass::new(
-        8.0,
-        8.0,
-        1.0,
-        Spec::rrect(8.0).solid(rgba(16, 18, 36, 0.35)).border(1.0, rgba(41, 46, 66, 0.8)),
-    )
-    .el()
-    .h(px(26.0))
-    .px(px(13.0))
-    .flex()
-    .flex_row()
-    .items_center()
-    .gap(px(6.0))
-    .text_color(col(TN_TEXT_DIM))
-    .child(svg().path("icons/link.svg").size(px(14.0)).text_color(col(TN_TEXT_DIM)))
-    .child(btn_text("Link issue", 12.0, 500.0, 0.0))
+/// `IssuePickerDropdown` trigger: the "Link issue" button, or the chosen issue with a clear button.
+pub fn link_issue_button(
+    selected: Option<(String, String)>,
+    on_open: impl Fn(&mut Window, &mut App) + 'static,
+    on_clear: impl Fn(&mut Window, &mut App) + 'static,
+) -> AnyElement {
+    if let Some((id, title)) = selected {
+        return div()
+            .max_w(px(260.0))
+            .px(px(10.0))
+            .py(px(4.0))
+            .rounded(px(6.0))
+            .border(px(1.0))
+            .border_color(col(rgba(122, 162, 247, 0.25)))
+            .bg(col(rgba(122, 162, 247, 0.063)))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.0))
+            .text_size(px(12.0))
+            .text_color(col(TN_TEXT))
+            .child(div().flex().flex_row().gap(px(5.0)).overflow_hidden().child(div().flex_shrink_0().font_weight(FontWeight(600.0)).text_color(col(TN_BLUE)).child(id)).child(div().truncate().child(title)))
+            .child(
+                div()
+                    .id("issue-clear")
+                    .flex_shrink_0()
+                    .text_size(px(14.0))
+                    .line_height(px(14.0))
+                    .text_color(col(ICON_DIM))
+                    .cursor_pointer()
+                    .hover(|s| s.text_color(col(TN_TEXT)))
+                    .on_click(move |_, w, a| on_clear(w, a))
+                    .child("\u{2715}"),
+            )
+            .into_any_element();
+    }
+    Glass::new(8.0, 8.0, 1.0, Spec::rrect(8.0).solid(rgba(16, 18, 36, 0.35)).border(1.0, rgba(41, 46, 66, 0.8)))
+        .el()
+        .id("link-issue")
+        .h(px(26.0))
+        .px(px(13.0))
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.0))
+        .text_color(col(TN_TEXT_DIM))
+        .cursor_pointer()
+        .on_click(move |_, w, a| on_open(w, a))
+        .child(svg().path("icons/link.svg").size(px(14.0)).text_color(col(TN_TEXT_DIM)))
+        .child(btn_text("Link issue", 12.0, 500.0, 0.0))
+        .into_any_element()
 }
 
 pub struct Btn {
@@ -320,18 +380,41 @@ pub fn control_button(id: &'static str, b: Btn, on_click: impl Fn(&mut Window, &
     el.child(btn_text(b.label, 15.0, b.weight, b.spacing))
 }
 
+pub struct ControlState {
+    pub status: Status,
+    pub start_disabled: bool,
+    pub restored: bool,
+}
+
 pub fn controls(
-    status: Status,
+    st: ControlState,
     on_start: impl Fn(&mut Window, &mut App) + 'static,
     on_pause: impl Fn(&mut Window, &mut App) + 'static,
     on_resume: impl Fn(&mut Window, &mut App) + 'static,
     on_reset: impl Fn(&mut Window, &mut App) + 'static,
+    on_dismiss: impl Fn(&mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
+    let status = st.status;
     let base = Btn { label: "", bg: None, hover_bg: None, fg: TN_BG, hover_fg: None, weight: 600.0, px: 36.0, spacing: 0.75, opacity: 1.0 };
     let mut row = div().flex().flex_row().justify_center().items_center().gap(px(8.0)).pt(px(20.0)).pb(px(6.0));
+    let on_reset = std::rc::Rc::new(on_reset);
     match status {
         Status::Idle => {
-            row = row.child(control_button("start", Btn { label: "Start", bg: Some(TN_BLUE), hover_bg: Some(hex(0x89b4f8)), ..base }, on_start));
+            let b = Btn { label: "Start", bg: Some(TN_BLUE), hover_bg: Some(hex(0x89b4f8)), opacity: if st.start_disabled { 0.4 } else { 1.0 }, ..base };
+            let start_disabled = st.start_disabled;
+            row = row.child(control_button("start", b, move |w, a| {
+                if !start_disabled {
+                    on_start(w, a)
+                }
+            }));
+            if st.restored {
+                let cancel = on_reset.clone();
+                row = row.child(control_button(
+                    "cancel",
+                    Btn { label: "Cancel", bg: None, hover_bg: None, fg: TN_TEXT_DIM, hover_fg: Some(TN_RED), weight: 500.0, px: 22.0, spacing: 0.6, opacity: 1.0 },
+                    move |w, a| cancel(w, a),
+                ));
+            }
         }
         Status::Running => {
             row = row.child(control_button("pause", Btn { label: "Pause", bg: Some(TN_YELLOW), hover_bg: Some(hex(0xe8bc7a)), ..base }, on_pause));
@@ -340,7 +423,7 @@ pub fn controls(
             row = row.child(control_button("resume", Btn { label: "Resume", bg: Some(TN_BLUE), hover_bg: Some(hex(0x89b4f8)), ..base }, on_resume));
         }
         Status::Completed => {
-            row = row.child(control_button("again", Btn { label: "Start New Session", bg: Some(TN_GREEN), hover_bg: Some(hex(0xaad97a)), ..base }, on_reset));
+            row = row.child(control_button("again", Btn { label: "Start New Session", bg: Some(TN_GREEN), hover_bg: Some(hex(0xaad97a)), ..base }, on_dismiss));
             return row;
         }
     }

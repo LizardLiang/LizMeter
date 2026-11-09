@@ -1,12 +1,14 @@
 //! LizMeter native visual spike: Rust + gpui (DirectX 11) with a patched backdrop-blur renderer.
 
 mod app;
+mod cards;
 mod chrome;
 
 mod gallery;
 mod modal;
 mod controls;
 mod engine;
+mod flow;
 mod fmt;
 mod pages;
 mod rich_view;
@@ -18,7 +20,8 @@ mod widget;
 use app::{Page, Root};
 use gpui::*;
 use lizmeter_ui::md_editor::MdVariant;
-use std::{path::PathBuf, time::Duration};
+use lizmeter_services::Services;
+use std::{path::PathBuf, sync::Arc, time::Duration};
 use timer::Status;
 
 mod embedded {
@@ -58,10 +61,11 @@ struct Args {
     md: Option<PathBuf>,
     size: (f32, f32),
     steps: Vec<Step>,
+    data_dir: Option<PathBuf>,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new() };
+    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new(), data_dir: None };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -75,6 +79,7 @@ fn parse_args() -> Args {
                 }
             }
             "--focus" => a.focus = true,
+            "--data-dir" => a.data_dir = it.next().map(PathBuf::from),
             "--html" => a.html = it.next(),
             "--md" => a.md = it.next().map(PathBuf::from),
             "--size" => {
@@ -141,12 +146,15 @@ fn make_topmost(window: &Window) {
 fn main() {
     let mut args = parse_args();
     let shot = args.screenshot.is_some();
+    let services = if args.page == "widget" { None } else { Some(open_services(args.data_dir.take())) };
     if shot {
         ui::FREEZE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
     let mut args_steps = std::mem::take(&mut args.steps);
     let mut args_html = args.html.take();
     let args_focus = args.focus;
+    let for_shutdown = services.clone();
+    let services_bg = services.clone();
     Application::new().with_assets(embedded::Assets).run(move |cx: &mut App| {
         cx.text_system()
             .add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf") as &[u8])])
@@ -210,7 +218,8 @@ fn main() {
                     },
                     |window, cx| {
                         cx.new(|cx| {
-                            let mut r = Root::new(page, pomodoro, modal, hover, window, cx);
+                            let svc = services.clone().expect("services are open for every window page");
+                            let mut r = Root::new(svc, page, pomodoro, hover, window, cx);
                             if let Some(path) = &args_md {
                                 let text = std::fs::read_to_string(path).expect("read --md file");
                                 let base = path.parent().map(|p| p.to_path_buf());
@@ -227,10 +236,13 @@ fn main() {
                                 r.open_notes_modal(window, cx);
                             }
                             if running || modal {
-                                r.rich.update(cx, |ri, cx| ri.set_html("<p>Review native spike</p>", cx));
+                                r.set_title_html(!pomodoro, "<p>Review native spike</p>", cx);
                             }
                             if running {
                                 r.start(cx);
+                            }
+                            if modal {
+                                r.open_prompt(app::PromptPurpose::StopwatchStart, window, cx);
                             }
                             r
                         })
@@ -239,6 +251,11 @@ fn main() {
                 .unwrap();
             w.into()
         };
+        if let Some(svc) = &services_bg {
+            if let Err(e) = svc.start_background() {
+                eprintln!("[sync] could not start: {e}");
+            }
+        }
         cx.activate(!shot);
         {
             let steps = std::mem::take(&mut args_steps);
@@ -252,7 +269,8 @@ fn main() {
                         if let Some(ent) = ent {
                             let _ = handle.update(cx, |_, window, cx| {
                                 if let Some(h) = &html {
-                                    ent.read(cx).rich.clone().update(cx, |r, cx| r.set_html(h, cx));
+                                    let sw = !ent.read(cx).pomodoro;
+                                    ent.update(cx, |r, cx| r.set_title_html(sw, h, cx));
                                 }
                                 let notes_page = matches!(ent.read(cx).page, Page::Notes(_));
                                 let f = if notes_page {
@@ -286,6 +304,41 @@ fn main() {
             .detach();
         }
     });
+    if let Some(svc) = for_shutdown {
+        svc.shutdown();
+    }
+}
+
+/// Opens the database behind the single-writer guard. A refusal is shown to the user and ends the process.
+fn open_services(data_dir: Option<PathBuf>) -> Arc<Services> {
+    use lizmeter_db::data_location::DataLocation;
+    use lizmeter_services::claude_tracker::default_projects_root;
+    use lizmeter_services::os::WindowsHost;
+    let dir = data_dir.unwrap_or_else(DataLocation::default_user_data_dir);
+    let _ = std::fs::create_dir_all(&dir);
+    match Services::open_guarded(DataLocation::new(dir), Arc::new(WindowsHost::default()), default_projects_root()) {
+        Ok((svc, _report)) => svc,
+        Err(e) => {
+            show_fatal(&e.to_string());
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn show_fatal(message: &str) {
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{MB_ICONERROR, MB_OK, MessageBoxW};
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (text, title) = (wide(message), wide("LizMeter"));
+    unsafe {
+        MessageBoxW(None, PCWSTR(text.as_ptr()), PCWSTR(title.as_ptr()), MB_OK | MB_ICONERROR);
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn show_fatal(message: &str) {
+    eprintln!("{message}");
 }
 
 /// Scripted input for captures and tests (`--type`, `--keys`, `--ime`, `--expand`), applied in order

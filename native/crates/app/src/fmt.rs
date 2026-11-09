@@ -219,6 +219,68 @@ pub fn start_of_day_minus(now: DateTime<Local>, days: i64) -> DateTime<Local> {
     Local.from_local_datetime(&d.and_hms_opt(0, 0, 0).unwrap()).earliest().unwrap_or(now)
 }
 
+/// `stripHtml`: the text between tags, trimmed.
+pub fn strip_html(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
+}
+
+/// The text shown for an issue link: `#12`, `ENG-4`, `PROJ-7`.
+pub fn issue_ref_id(issue: &lizmeter_core::IssueRef) -> String {
+    use lizmeter_core::IssueRef::*;
+    match issue {
+        Github { number, .. } => format!("#{number}"),
+        Linear { identifier, .. } => identifier.clone(),
+        Jira { key, .. } => key.clone(),
+        Todo { id, .. } => format!("#{id}"),
+    }
+}
+
+pub fn issue_ref_title(issue: &lizmeter_core::IssueRef) -> &str {
+    use lizmeter_core::IssueRef::*;
+    match issue {
+        Github { title, .. } | Linear { title, .. } | Jira { title, .. } | Todo { title, .. } => title,
+    }
+}
+
+/// `reconstructIssueRef`: the link a saved session carries, if it has a usable one.
+pub fn reconstruct_issue(s: &Session) -> Option<lizmeter_core::IssueRef> {
+    use lizmeter_core::IssueRef;
+    let id = s.issue_id.as_ref()?;
+    let provider = s.issue_provider?;
+    let title = s.issue_title.clone().unwrap_or_default();
+    let url = s.issue_url.clone().unwrap_or_default();
+    match provider {
+        IssueProviderKind::Linear => Some(IssueRef::Linear { identifier: id.clone(), title, url }),
+        IssueProviderKind::Jira => Some(IssueRef::Jira { key: id.clone(), title, url }),
+        IssueProviderKind::Github => {
+            let number = s.issue_number.or_else(|| id.trim().parse().ok()).filter(|n| *n != 0)?;
+            Some(IssueRef::Github { number, title, url })
+        }
+        IssueProviderKind::Todo => Some(IssueRef::Todo { id: id.trim().parse().ok()?, title }),
+    }
+}
+
+/// The `SaveSessionInput` issue columns for a link.
+pub fn issue_columns(issue: &lizmeter_core::IssueRef) -> (Option<i64>, Option<String>, Option<String>, IssueProviderKind, String) {
+    use lizmeter_core::IssueRef::*;
+    match issue {
+        Github { number, title, url } => (Some(*number), Some(title.clone()), Some(url.clone()), IssueProviderKind::Github, number.to_string()),
+        Linear { identifier, title, url } => (None, Some(title.clone()), Some(url.clone()), IssueProviderKind::Linear, identifier.clone()),
+        Jira { key, title, url } => (None, Some(title.clone()), Some(url.clone()), IssueProviderKind::Jira, key.clone()),
+        Todo { id, title } => (None, Some(title.clone()), None, IssueProviderKind::Todo, id.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +370,21 @@ mod tests {
         assert!(has_linked_issue(&s));
         let k = issue_group_key(&s);
         assert_eq!((k.key.as_str(), k.display_id.as_str()), ("legacy-github-num:42", "#42"));
+    }
+
+    #[test]
+    fn strip_html_keeps_the_text() {
+        assert_eq!(strip_html("<p>Hello <strong>world</strong></p>"), "Hello world");
+        assert_eq!(strip_html("<p></p>"), "");
+        assert_eq!(strip_html("  plain  "), "plain");
+    }
+
+    #[test]
+    fn issue_links_map_to_session_columns() {
+        use lizmeter_core::IssueRef;
+        let r = IssueRef::Todo { id: 12, title: "x".into() };
+        let (n, t, u, p, id) = issue_columns(&r);
+        assert_eq!((n, t.as_deref(), u, p, id.as_str()), (None, Some("x"), None, IssueProviderKind::Todo, "12"));
+        assert_eq!(issue_ref_id(&r), "#12");
     }
 }

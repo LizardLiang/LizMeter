@@ -325,6 +325,9 @@ pub fn rasterize(spec: &Spec, w: f32, h: f32, scale: f32) -> (u32, u32, Vec<u8>)
     (pw, ph, out)
 }
 
+/// Rasters kept before the cache starts over; one window holds a few dozen distinct sprites.
+const CACHE_LIMIT: usize = 400;
+
 thread_local! {
     static CACHE: RefCell<HashMap<u64, Arc<RenderImage>>> = RefCell::new(HashMap::new());
 }
@@ -343,6 +346,12 @@ pub fn image_for(spec: &Spec, w: f32, h: f32, scale: f32) -> Arc<RenderImage> {
     let (pw, ph, bytes) = rasterize(spec, w, h, scale);
     let img = RgbaImage::from_raw(pw, ph, bytes).expect("raster size");
     let image = Arc::new(RenderImage::new(vec![Frame::new(img)]));
-    CACHE.with(|c| c.borrow_mut().insert(key, image.clone()));
+    CACHE.with(|c| {
+        let mut c = c.borrow_mut();
+        if c.len() >= CACHE_LIMIT {
+            c.clear();
+        }
+        c.insert(key, image.clone());
+    });
     image
 }

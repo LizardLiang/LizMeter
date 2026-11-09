@@ -1,31 +1,138 @@
-//! IssuePromptDialog: blur overlay + glass dialog with the `modalEntrance` animation.
+//! IssuePromptDialog: blur overlay + glass dialog with the `modalEntrance` animation, over the real todos.
 
-use crate::css::{Spec, TRANSPARENT, hex, linear, rgba};
+use crate::controls::field_style;
+use crate::css::{Spec, TRANSPARENT, linear, rgba};
 use crate::ui::*;
 use gpui::*;
+use lizmeter_core::{IssueRef, ListTodosInput, Todo, TodoState};
+use lizmeter_services::Services;
+use lizmeter_ui::text_input::{TextField, TextFieldEvent, TextInput};
+use std::sync::Arc;
 
-fn mock_row(key: &str, title: &str, highlighted: bool) -> Div {
-    let mut row = div()
-        .w_full()
-        .h(px(30.0))
-        .px(px(12.0))
-        .flex()
-        .flex_row()
-        .items_center()
-        .gap(px(6.0))
-        .font_family("Arial")
-        .text_size(px(12.0))
-        .text_color(col(TN_TEXT))
-        .child(div().font_weight(FontWeight(600.0)).text_color(col(TN_BLUE)).child(key.to_string()))
-        .child(div().text_size(px(12.0)).child(title.to_string()));
-    if highlighted {
-        row = row.bg(col(rgba(122, 162, 247, 0.07)));
-    }
-    row
+pub enum PromptEvent {
+    Select(IssueRef),
+    Skip,
 }
 
-fn chip(label: &str) -> Div {
-    div()
+impl EventEmitter<PromptEvent> for IssuePrompt {}
+
+/// A subsequence match of `needle` in `hay`: `None` when it does not match, a higher score for
+/// earlier and more contiguous hits.
+pub fn fuzzy_score(needle: &str, hay: &str) -> Option<i64> {
+    let hay: Vec<char> = hay.to_lowercase().chars().collect();
+    let mut score = 0i64;
+    let mut at = 0usize;
+    let mut prev: Option<usize> = None;
+    for n in needle.to_lowercase().chars() {
+        let found = (at..hay.len()).find(|&i| hay[i] == n)?;
+        score += 10 - (found as i64).min(9);
+        if prev.is_some_and(|p| p + 1 == found) {
+            score += 15;
+        }
+        prev = Some(found);
+        at = found + 1;
+    }
+    Some(score)
+}
+
+/// The todos that match the search text and state chip, best match first.
+pub fn matching_todos<'a>(todos: &'a [Todo], query: &str, state: Option<i64>) -> Vec<&'a Todo> {
+    let q = query.trim();
+    let by_id = q.trim_start_matches('#');
+    let id_query = !by_id.is_empty() && by_id.chars().all(|c| c.is_ascii_digit());
+    let mut scored: Vec<(i64, &Todo)> = vec![];
+    for t in todos.iter().filter(|t| state.is_none_or(|s| t.state.id == s)) {
+        if q.is_empty() {
+            scored.push((0, t));
+            continue;
+        }
+        let fuzzy = fuzzy_score(q, &t.title);
+        let id_hit = id_query && t.id.to_string().starts_with(by_id);
+        if fuzzy.is_none() && !id_hit {
+            continue;
+        }
+        scored.push((fuzzy.unwrap_or(0) + if id_hit { 1000 } else { 0 }, t));
+    }
+    if !q.is_empty() {
+        scored.sort_by(|a, b| b.0.cmp(&a.0));
+    }
+    scored.into_iter().map(|(_, t)| t).collect()
+}
+
+pub struct IssuePrompt {
+    todos: Vec<Todo>,
+    states: Vec<TodoState>,
+    state_filter: Option<i64>,
+    search: Entity<TextField>,
+    query: String,
+    active: usize,
+    error: Option<String>,
+    focus: FocusHandle,
+}
+
+impl IssuePrompt {
+    pub fn new(svc: &Arc<Services>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let search = TextInput::new(field_style(13.0), "Search by title or #id\u{2026}", window, cx);
+        cx.subscribe(&search, |this, s, ev: &TextFieldEvent, cx| match ev {
+            TextFieldEvent::Changed => {
+                this.query = s.read(cx).text().to_string();
+                this.active = 0;
+                cx.notify();
+            }
+            TextFieldEvent::Submit => this.pick_active(cx),
+            TextFieldEvent::Cancel => cx.emit(PromptEvent::Skip),
+        })
+        .detach();
+        let (todos, error) = match svc.list_todos(&ListTodosInput::default()) {
+            Ok(t) => (t, None),
+            Err(e) => (vec![], Some(e.to_string())),
+        };
+        let states = svc.list_todo_states().unwrap_or_default();
+        let focus = search.read(cx).focus_handle().clone();
+        window.focus(&focus);
+        Self { todos, states, state_filter: None, search, query: String::new(), active: 0, error, focus }
+    }
+
+    fn pick_active(&mut self, cx: &mut Context<Self>) {
+        let todo = matching_todos(&self.todos, &self.query, self.state_filter).get(self.active).map(|t| (*t).clone());
+        if let Some(t) = todo {
+            cx.emit(PromptEvent::Select(IssueRef::Todo { id: t.id, title: t.title }));
+        }
+    }
+
+    fn row(&self, t: &Todo, active: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let me = cx.entity();
+        let (id, title) = (t.id, t.title.clone());
+        let mut row = div()
+            .id(SharedString::from(format!("todo-{id}")))
+            .w_full()
+            .h(px(30.0))
+            .flex_shrink_0()
+            .px(px(12.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(6.0))
+            .font_family("Arial")
+            .text_size(px(12.0))
+            .text_color(col(TN_TEXT))
+            .cursor_pointer()
+            .child(div().flex_shrink_0().font_weight(FontWeight(600.0)).text_color(col(TN_BLUE)).child(format!("#{id}")))
+            .child(div().flex_1().min_w_0().truncate().child(t.title.clone()))
+            .on_click(move |_, _, app| me.update(app, |_, cx| cx.emit(PromptEvent::Select(IssueRef::Todo { id, title: title.clone() }))));
+        if let Some(p) = &t.project {
+            row = row.child(div().flex_shrink_0().text_size(px(10.5)).text_color(col(TN_MUTED)).child(p.name.clone()));
+        }
+        if active {
+            row = row.bg(col(rgba(122, 162, 247, 0.07)));
+        }
+        row
+    }
+}
+
+fn chip(label: &str, on: bool, color: Option<crate::css::C>) -> Div {
+    let accent = color.unwrap_or(TN_BLUE);
+    let mut c = div()
         .h(px(18.0))
         .px(px(9.0))
         .rounded(px(9.0))
@@ -33,12 +140,18 @@ fn chip(label: &str) -> Div {
         .border_color(col(rgba(41, 46, 66, 0.8)))
         .bg(col(rgba(16, 18, 40, 0.4)))
         .flex()
+        .flex_shrink_0()
         .items_center()
+        .cursor_pointer()
         .font_family("Arial")
         .text_size(px(10.5))
         .font_weight(FontWeight(600.0))
         .text_color(col(TN_TEXT_DIM))
-        .child(label.to_string())
+        .child(label.to_string());
+    if on {
+        c = c.border_color(col(c_alpha(accent, 0.33))).text_color(col(accent));
+    }
+    c
 }
 
 fn section(label: &str, first: bool) -> Div {
@@ -58,139 +171,161 @@ fn section(label: &str, first: bool) -> Div {
     d
 }
 
-pub fn dialog() -> Div {
-    let spec = Spec::rrect(18.0)
-        .fill(linear(135.0, &[(0.0, wh(0.07)), (0.32, wh(0.01)), (0.55, TRANSPARENT)]))
-        .fill(linear(315.0, &[(0.0, bk(0.08)), (0.40, TRANSPARENT)]))
-        .solid(rgba(20, 23, 42, 0.86))
-        .border(1.0, rgba(122, 162, 247, 0.4))
-        .inset(0.0, 1.0, wh(0.12))
-        .inset(1.0, 0.0, wh(0.05))
-        .inset(0.0, -1.0, bk(0.15))
-        .inset(-1.0, 0.0, bk(0.05));
-    let mut shd = vec![Sh { dx: 0.0, dy: 0.0, blur: 0.0, spread: 1.0, color: bk(0.3) }];
-    shd.push(sh(0.0, 16.0, 40.0, bk(0.28)));
-    Glass::new(18.0, 36.0, 1.7, spec)
-        .shadows(&shd)
-        .el()
-        .w(px(420.0))
-        .h(px(480.0))
-        .flex_shrink_0()
-        .flex()
-        .flex_col()
-        .overflow_hidden()
-        .child(
-            div()
-                .relative()
-                .h(px(62.0))
-                .flex_shrink_0()
-                .px(px(21.0))
-                .flex()
-                .flex_row()
-                .items_center()
-                .justify_between()
-                .child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(86, 95, 137, 0.3))))
-                .child(
-                    ui_text(15.0)
-                        .line_height(px(19.0))
-                        .font_weight(FontWeight(600.0))
-                        .text_color(col(TN_TEXT))
-                        .child("Link an issue (optional)"),
-                )
-                .child(
-                    div()
-                        .h(px(29.0))
-                        .px(px(17.0))
-                        .rounded(px(6.0))
-                        .border(px(1.0))
-                        .border_color(col(TN_MUTED))
-                        .flex()
-                        .items_center()
-                        .font_family("Arial")
-                        .text_size(px(13.0))
-                        .text_color(col(TN_TEXT))
-                        .child("Skip"),
-                ),
-        )
-        .child(
-            div()
-                .flex_1()
-                .p(px(8.0))
-                .flex()
-                .flex_col()
-                .overflow_hidden()
-                .child(section("Todos", true))
-                .child(
-                    div()
-                        .relative()
-                        .h(px(37.0))
-                        .flex_shrink_0()
-                        .px(px(12.0))
-                        .flex()
-                        .items_center()
-                        .font_family("Arial")
-                        .text_size(px(13.0))
-                        .text_color(col(ICON_DIM))
-                        .child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(41, 46, 66, 0.8))))
-                        .child("Search by title or #id\u{2026}"),
-                )
-                .child(
-                    div()
-                        .px(px(8.0))
-                        .py(px(6.0))
-                        .flex()
-                        .flex_row()
-                        .gap(px(4.0))
-                        .children(["Backlog", "Todo", "Processing", "Testing", "Done", "Deprecated"].map(chip)),
-                )
-                .child(
-                    div()
-                        .h(px(220.0))
-                        .flex_shrink_0()
-                        .overflow_hidden()
-                        .child(mock_row("#10", "Demo: created by me", true))
-                        .child(mock_row("#9", "Demo: unknown agent (fallback)", false))
-                        .child(mock_row("#8", "Demo: added by Codex", false))
-                        .child(mock_row("#7", "Demo: added by Claude", false))
-                        .child(mock_row("#6", "Demo: added by claude-code", false))
-                        .child(mock_row("#5", "Demo: added by Codex", false))
-                        .child(mock_row("#4", "Demo: added by Claude", false))
-                        .child(mock_row("#3", "Demo: added by Claude", false)),
-                )
-                .child(section("Issue trackers", false))
-                .child(
-                    ui_text(13.0)
-                        .py(px(24.0))
-                        .px(px(20.0))
-                        .text_center()
-                        .text_color(col(TN_MUTED))
-                        .child("No issue providers configured. Set up Linear or Jira in Settings."),
-                ),
-        )
+impl Render for IssuePrompt {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let me = cx.entity();
+        let matches: Vec<Todo> = matching_todos(&self.todos, &self.query, self.state_filter).into_iter().cloned().collect();
+        let skip_me = me.clone();
+        let skip = div()
+            .id("prompt-skip")
+            .h(px(29.0))
+            .px(px(17.0))
+            .rounded(px(6.0))
+            .border(px(1.0))
+            .border_color(col(TN_MUTED))
+            .flex()
+            .items_center()
+            .cursor_pointer()
+            .hover(|s| s.bg(col(rgba(122, 162, 247, 0.07))))
+            .font_family("Arial")
+            .text_size(px(13.0))
+            .text_color(col(TN_TEXT))
+            .on_click(move |_, _, app| skip_me.update(app, |_, cx| cx.emit(PromptEvent::Skip)))
+            .child("Skip");
+
+        let mut chips = div().id("prompt-chips").px(px(8.0)).py(px(6.0)).flex().flex_row().flex_wrap().gap(px(4.0));
+        for s in &self.states {
+            let (m, id, on) = (me.clone(), s.id, self.state_filter == Some(s.id));
+            let color = crate::controls::parse_color(&s.color);
+            chips = chips.child(
+                chip(&s.label, on, Some(color)).id(SharedString::from(format!("state-{id}"))).on_click(move |_, _, app| {
+                    m.update(app, |p, cx| {
+                        p.state_filter = if on { None } else { Some(id) };
+                        p.active = 0;
+                        cx.notify();
+                    })
+                }),
+            );
+        }
+
+        let mut list = div().id("prompt-list").h(px(220.0)).flex_shrink_0().flex().flex_col().overflow_y_scroll();
+        if let Some(e) = &self.error {
+            list = list.child(crate::controls::state_message(e.clone(), TN_RED, false));
+        } else if matches.is_empty() {
+            let filtered = !self.query.trim().is_empty() || self.state_filter.is_some();
+            list = list.child(crate::controls::state_message(if filtered { "No matching todos" } else { "No todos yet" }, TN_TEXT_DIM, false));
+        }
+        for (i, t) in matches.iter().enumerate() {
+            list = list.child(self.row(t, i == self.active, cx));
+        }
+
+        let search = div()
+            .relative()
+            .h(px(37.0))
+            .flex_shrink_0()
+            .px(px(12.0))
+            .flex()
+            .items_center()
+            .child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(41, 46, 66, 0.8))))
+            .child(div().w_full().child(self.search.clone()));
+
+        let header = div()
+            .relative()
+            .h(px(62.0))
+            .flex_shrink_0()
+            .px(px(21.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .justify_between()
+            .child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(86, 95, 137, 0.3))))
+            .child(ui_text(15.0).line_height(px(19.0)).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT)).child("Link an issue (optional)"))
+            .child(skip);
+
+        let body = div()
+            .flex_1()
+            .p(px(8.0))
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .child(section("Todos", true))
+            .child(search)
+            .child(chips)
+            .child(list)
+            .child(section("Issue trackers", false))
+            .child(
+                ui_text(13.0)
+                    .py(px(24.0))
+                    .px(px(20.0))
+                    .text_center()
+                    .text_color(col(TN_MUTED))
+                    .child("No issue providers configured. Set up Linear or Jira in Settings."),
+            );
+
+        let spec = Spec::rrect(18.0)
+            .fill(linear(135.0, &[(0.0, wh(0.07)), (0.32, wh(0.01)), (0.55, TRANSPARENT)]))
+            .fill(linear(315.0, &[(0.0, bk(0.08)), (0.40, TRANSPARENT)]))
+            .solid(rgba(20, 23, 42, 0.86))
+            .border(1.0, rgba(122, 162, 247, 0.4))
+            .inset(0.0, 1.0, wh(0.12))
+            .inset(1.0, 0.0, wh(0.05))
+            .inset(0.0, -1.0, bk(0.15))
+            .inset(-1.0, 0.0, bk(0.05));
+        let shd = vec![Sh { dx: 0.0, dy: 0.0, blur: 0.0, spread: 1.0, color: bk(0.3) }, sh(0.0, 16.0, 40.0, bk(0.28))];
+        let dialog = Glass::new(18.0, 36.0, 1.7, spec)
+            .shadows(&shd)
+            .el()
+            .id("prompt-dialog")
+            .w(px(420.0))
+            .h(px(480.0))
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .track_focus(&self.focus)
+            .on_click(|_, _, _| {})
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                let n = matching_todos(&this.todos, &this.query, this.state_filter).len();
+                match ev.keystroke.key.as_str() {
+                    "down" if n > 0 => this.active = (this.active + 1).min(n - 1),
+                    "up" => this.active = this.active.saturating_sub(1),
+                    "escape" => cx.emit(PromptEvent::Skip),
+                    _ => return,
+                }
+                cx.notify();
+            }))
+            .child(header)
+            .child(body);
+
+        // modalEntrance 0.2s cubic-bezier(0.34, 1.56, 0.64, 1): opacity, translateY(8 -> 0)
+        let entrance = animate(div().relative().child(dialog), "modal-entrance", 200, false, overshoot(), 1.0, |el, t| {
+            el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t)))
+        });
+        let skip_overlay = me.clone();
+        Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
+            .el()
+            .id("prompt-overlay")
+            .absolute()
+            .top_0()
+            .left_0()
+            .right_0()
+            .bottom_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .on_click(move |_, _, app| skip_overlay.update(app, |_, cx| cx.emit(PromptEvent::Skip)))
+            .child(entrance)
+    }
 }
 
-/// Overlay (rgba(192,202,245,.06) + blur 16 / saturate 1.25) and the animated dialog, centered
-/// in the overlay. In the Electron app the overlay's containing block is the glass card (a
-/// `backdrop-filter` ancestor), so the overlay covers the card rather than the window.
-pub fn overlay_and_dialog(_on_close: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
-    let overlay = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
-        .el()
-        .absolute()
-        .top(px(1.0))
-        .left(px(1.0))
-        .right(px(1.0))
-        .bottom(px(1.0))
-        .flex()
-        .items_center()
-        .justify_center();
-    // modalEntrance 0.2s cubic-bezier(0.34, 1.56, 0.64, 1): opacity, translateY(8 -> 0), scale(.94 -> 1)
-    let entrance = animate(div().relative().child(dialog()), "modal-entrance", 200, false, overshoot(), 1.0, |el, t| {
-        el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t)))
-    });
-    overlay.child(entrance)
-}
+#[cfg(test)]
+mod tests {
+    use super::fuzzy_score;
 
-#[allow(dead_code)]
-fn unused() -> crate::css::C {
-    hex(0)
+    #[test]
+    fn fuzzy_needs_the_letters_in_order_and_prefers_tight_hits() {
+        assert!(fuzzy_score("wdc", "Write docs").is_some());
+        assert!(fuzzy_score("cdw", "Write docs").is_none());
+        assert!(fuzzy_score("doc", "Write docs") > fuzzy_score("dcs", "Write docs"));
+    }
 }
