@@ -294,3 +294,13 @@ collapsed.
 - **gpui `truncate()` shows no ellipsis in flex-resolved widths.** The text measure caches the untruncated line from the first pass, so Activity file names and the select label clip without the "…" Chromium draws. Fixed-width cases (the stopwatch issue badge) do show it.
 - **Claude page paragraphs take their height from a fixed 584 px column** (`TEXT_W`): gpui measures wrapped text before the flex width is known. A window narrower than the page's 640 px max wraps one line more than the box reserves.
 - **Long-date weekday is inferred.** `locale::with_weekday` adds the weekday to a Windows long-date pattern that lacks one (front for day-first locales, back for year-first ones such as zh-TW); a locale that glues the weekday on (ja: `2026年1月10日月曜日`) gets a space.
+
+## Native port, phase 7a (2026-11-09)
+
+- **No `todo:changed` push in the native services.** Electron refreshes the list when the MCP server or sync writes a todo. The native Todos page reloads when it is shown and after each of its own writes. Wire a change signal when the pipe server (phase 10) and the merge pass notify.
+- **Collapsed groups persist in the `settings` table** under `ui.todos.collapsedStates` (Electron keeps them in `localStorage`). The table is not synced, so the choice stays per machine, as before.
+- **Row hover tooltips are not ported** (notes summary on the row body, the priority, source and sub-issue titles). Electron sets them as `title` attributes.
+- **gpui breaks lines only at spaces.** Chromium also breaks "sub-issue" at the hyphen, so one line of the shortcuts sheet wraps one word earlier in Electron.
+- **A `margin-left: auto` flex child collapses the band's gaps in this gpui.** The group band uses a `flex_1` spacer instead of `ml_auto`.
+- **`use gpui::*` brings `gpui::test` into scope.** A `#[cfg(test)]` module that does `use super::*` then recurses at `#[test]`: import the tested items by name.
+- **Window-size and DPI for the Todos shot** match Electron within a frame offset of about 9 physical px (native window border); every measured row, band and menu metric lands within 1-2 physical px.
