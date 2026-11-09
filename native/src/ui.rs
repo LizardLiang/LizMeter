@@ -30,6 +30,16 @@ pub fn col(c: C) -> Hsla {
 pub static FREEZE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub const FREEZE_T: f32 = 0.55;
 
+/// `--anim-time <ms>`: every animation renders the state it has `ms` after it started (u32::MAX = unset).
+pub static ANIM_TIME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+
+pub fn anim_time() -> Option<f32> {
+    match ANIM_TIME.load(std::sync::atomic::Ordering::Relaxed) {
+        u32::MAX => None,
+        ms => Some(ms as f32),
+    }
+}
+
 pub fn frozen() -> bool {
     FREEZE.load(std::sync::atomic::Ordering::Relaxed)
 }
@@ -224,6 +234,11 @@ pub fn animate<E: IntoElement + 'static + Styled>(
     freeze_t: f32,
     f: impl Fn(E, f32) -> E + 'static,
 ) -> AnyElement {
+    if let Some(ms) = anim_time() {
+        let d = duration_ms as f32;
+        let t = if repeat { (ms % d) / d } else { (ms / d).min(1.0) };
+        return f(el, easing(t)).into_any_element();
+    }
     if frozen() {
         return f(el, easing(freeze_t)).into_any_element();
     }

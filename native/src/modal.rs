@@ -62,7 +62,7 @@ pub fn dialog() -> Div {
     let spec = Spec::rrect(18.0)
         .fill(linear(135.0, &[(0.0, wh(0.07)), (0.32, wh(0.01)), (0.55, TRANSPARENT)]))
         .fill(linear(315.0, &[(0.0, bk(0.08)), (0.40, TRANSPARENT)]))
-        .solid(rgba(20, 23, 42, 0.55))
+        .solid(rgba(20, 23, 42, 0.86))
         .border(1.0, rgba(122, 162, 247, 0.4))
         .inset(0.0, 1.0, wh(0.12))
         .inset(1.0, 0.0, wh(0.05))
@@ -173,7 +173,7 @@ pub fn dialog() -> Div {
 /// in the overlay. In the Electron app the overlay's containing block is the glass card (a
 /// `backdrop-filter` ancestor), so the overlay covers the card rather than the window.
 pub fn overlay_and_dialog(_on_close: impl Fn(&mut Window, &mut App) + 'static) -> impl IntoElement {
-    let overlay = Glass::new(0.0, 16.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.06)))
+    let overlay = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
         .el()
         .absolute()
         .top(px(1.0))

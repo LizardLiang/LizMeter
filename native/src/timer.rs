@@ -48,6 +48,7 @@ pub fn btn_text(label: &str, size: f32, weight: f32, spacing: f32) -> Div {
 /// ModeToggle: Pomodoro / Time Tracking segmented control.
 pub fn mode_toggle(
     pomodoro_active: bool,
+    disabled: bool,
     on_pick: impl Fn(bool, &mut Window, &mut App) + Clone + 'static,
 ) -> impl IntoElement {
     let glass = Glass::new(
@@ -90,6 +91,10 @@ pub fn mode_toggle(
             t = t.hover(|s| s.bg(col(rgba(122, 162, 247, 0.07))));
         }
         let _ = pomodoro;
+        // ModeToggle.module.scss: `.tab:disabled { opacity: .5 }`, `.tab.active:disabled { opacity: .7 }`
+        if disabled {
+            t = t.opacity(if active { 0.7 } else { 0.5 }).cursor_not_allowed();
+        }
         t.text_color(col(if active { TN_BLUE } else { TN_TEXT_DIM })).child(btn_text(label, 13.0, if active { 600.0 } else { 500.0 }, 0.0))
     };
     let p1 = on_pick.clone();
@@ -268,7 +273,7 @@ fn toolbar_sep() -> impl IntoElement {
 }
 
 /// RichTextInput glass pane (SessionTitleInput) with its toolbar. Editing is not wired in the spike.
-pub fn rich_input(height: f32) -> impl IntoElement {
+pub fn rich_input(height: f32, text: Option<&str>) -> impl IntoElement {
     let glass = Glass::new(
         10.0,
         12.0,
@@ -306,7 +311,11 @@ pub fn rich_input(height: f32) -> impl IntoElement {
                         .child(div().flex().flex_row().gap(px(1.0)).child(toolbar_button("icons/bullets.svg")).child(toolbar_button("icons/numbered.svg")))
                         .child(toolbar_sep())
                         .child(div().flex().flex_row().child(toolbar_button("icons/code.svg"))),
-                ),
+                )
+                .children(text.map(|t| {
+                    // .editor .ProseMirror: padding 10px 12px, 15px / 1.65, letter-spacing .01em
+                    ui_text(15.0).px(px(12.0)).pt(px(10.0)).line_height(px(24.75)).text_color(col(TN_TEXT)).child(spaced(t, 0.15))
+                })),
         )
         .child(
             div()

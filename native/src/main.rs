@@ -29,9 +29,15 @@ mod embedded {
         "pause", "stop", "caret", "spark"
     );
 
+    /// U+1F345 as Chromium draws it from the system Segoe UI Emoji (COLRv1 paint tree), baked at 4x.
+    const TOMATO: &[u8] = include_bytes!("../assets/icons/tomato.png");
+
     pub struct Assets;
     impl AssetSource for Assets {
         fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
+            if path == "icons/tomato.png" {
+                return Ok(Some(Cow::Borrowed(TOMATO)));
+            }
             Ok(ICONS.iter().find(|(p, _)| *p == path).map(|(_, b)| Cow::Borrowed(*b)))
         }
         fn list(&self, _path: &str) -> Result<Vec<SharedString>> {
@@ -57,6 +63,11 @@ fn parse_args() -> Args {
             "--page" => a.page = it.next().unwrap_or_default(),
             "--hover-nav" => a.hover_nav = it.next().and_then(|v| v.parse().ok()),
             "--running" => a.running = true,
+            "--anim-time" => {
+                if let Some(ms) = it.next().and_then(|v| v.parse::<u32>().ok()) {
+                    ui::ANIM_TIME.store(ms, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
             "--composite" => a.composite = it.next().and_then(|v| u32::from_str_radix(v.trim_start_matches('#'), 16).ok()),
             _ => {}
         }
@@ -134,6 +145,10 @@ fn main() {
         } else {
             let (page, pomodoro, modal) = match args.page.as_str() {
                 "gallery" => (Page::Gallery, true, false),
+                name if name.starts_with("anim:") => {
+                    let i = gallery::ANIM_NAMES.iter().position(|n| *n == &name[5..]).expect("unknown animation");
+                    (Page::Anim(i), true, false)
+                }
                 "modal" => (Page::Timer, false, true),
                 "stopwatch" => (Page::Timer, false, false),
                 _ => (Page::Timer, true, false),
@@ -153,6 +168,9 @@ fn main() {
                     |_, cx| {
                         cx.new(|cx| {
                             let mut r = Root::new(page, pomodoro, modal, hover);
+                            if running || modal {
+                                r.description = Some("Review native spike");
+                            }
                             if running {
                                 r.start(cx);
                             }

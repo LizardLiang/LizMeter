@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 pub enum Page {
     Timer,
     Gallery,
+    Anim(usize),
     Other(usize),
 }
 
@@ -27,6 +28,7 @@ pub struct Root {
     pub hover_nav: Option<usize>,
     ever_hovered: HashSet<usize>,
     pub modal_open: bool,
+    pub description: Option<&'static str>,
 }
 
 impl Root {
@@ -43,6 +45,7 @@ impl Root {
             hover_nav,
             ever_hovered: hover_nav.into_iter().collect(),
             modal_open,
+            description: None,
         }
     }
 
@@ -118,7 +121,7 @@ impl Root {
     fn timer_page(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let m1 = me.clone();
-        let toggle = timer::mode_toggle(self.pomodoro, move |pomodoro, _, app| {
+        let toggle = timer::mode_toggle(self.pomodoro, self.status != Status::Idle, move |pomodoro, _, app| {
             m1.update(app, |t, cx| {
                 if t.status == Status::Idle {
                     t.pomodoro = pomodoro;
@@ -168,7 +171,7 @@ impl Root {
                             .text_color(col(TN_TEXT_DIM))
                             .child(spaced("SESSION DESCRIPTION", 1.32)),
                     )
-                    .child(timer::rich_input(95.8)),
+                    .child(timer::rich_input(95.8, self.description)),
             )
             .child(div().mt(px(10.0)).flex().flex_row().child(timer::link_issue_button()))
             .child(timer::controls(
@@ -213,7 +216,7 @@ impl Root {
         let mut el = glass.el().w_full().p(px(25.0)).flex().flex_col().gap(px(16.0));
         el = el
             .child(ui_text(11.0).h(px(14.0)).line_height(px(14.0)).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT)).child(spaced("STOPWATCH", 1.5)))
-            .child(timer::rich_input(95.8))
+            .child(timer::rich_input(95.8, self.description))
             .child(select)
             .child(div().flex().flex_row().child(timer::link_issue_button()))
             .child(
@@ -274,7 +277,7 @@ impl Root {
         let active_idx = match self.page {
             Page::Timer => Some(0),
             Page::Other(i) => Some(i),
-            Page::Gallery => None,
+            Page::Gallery | Page::Anim(_) => None,
         };
         let running_dot = match self.status {
             Status::Running => Some(true),
@@ -359,9 +362,13 @@ fn btn_like_w(text: &str, size: f32, weight: f32) -> Div {
 
 impl Render for Root {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Page::Anim(i) = self.page {
+            return gallery::anim_page(i).into_any_element();
+        }
         let page = match self.page {
             Page::Timer => div().flex_1().h_full().flex().justify_center().overflow_hidden().child(self.timer_page(cx)).into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),
+            Page::Anim(_) => unreachable!(),
             Page::Other(i) => div()
                 .flex_1()
                 .h_full()
@@ -392,5 +399,6 @@ impl Render for Root {
                     .child(page),
             )
             .child(deferred(chrome::titlebar(None)).with_priority(9))
+            .into_any_element()
     }
 }

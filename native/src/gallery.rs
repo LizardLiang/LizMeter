@@ -78,7 +78,7 @@ fn anim_cell(name: &'static str, dur: &str, demo: impl FnOnce() -> AnyElement) -
         .gap(px(8.0))
         .child(div().h(px(40.0)).w_full().flex().items_center().justify_center().child(demo()))
         .child(small_label(name))
-        .child(div().text_color(col(TN_MUTED)).font_family(UI_FONT).text_size(px(9.0)).child(dur.to_string()))
+        .child(div().text_color(col(TN_MUTED)).font_family(UI_FONT).text_size(px(9.0)).line_height(px(12.0)).child(dur.to_string()))
 }
 
 /// Run a demo element through a CSS-like keyframe. `active_ms` plays, then it holds ~0.9s.
@@ -90,6 +90,9 @@ fn keyed<E: IntoElement + Styled + 'static>(
     freeze_p: f32,
     f: impl Fn(E, f32) -> E + 'static,
 ) -> AnyElement {
+    if let Some(ms) = anim_time() {
+        return f(el, easing((ms / active_ms as f32).min(1.0))).into_any_element();
+    }
     let period = active_ms + 900;
     let frac = active_ms as f32 / period as f32;
     animate(el, id, period, true, |t| t, freeze_p * frac, move |e, d| {
@@ -115,6 +118,15 @@ fn chip(text: &str, scale: f32) -> Div {
     .font_family(UI_FONT)
     .text_size(px(11.0 * scale))
     .child(text.to_string())
+}
+
+pub const ANIM_NAMES: [&str; 8] =
+    ["spin", "fadeIn", "fade-in-up", "menuFadeIn", "modalEntrance", "placeholderBreath", "todoRowFlash", "dropHintEntrance"];
+
+/// One keyframe demo cell, for the `--page anim:<name>` comparison captures.
+pub fn anim_page(index: usize) -> impl IntoElement {
+    let cell = keyframe_cells().into_iter().nth(index).expect("animation index");
+    div().size_full().bg(col(TN_BG)).flex().items_center().justify_center().child(cell)
 }
 
 fn keyframe_cells() -> Vec<AnyElement> {
@@ -150,7 +162,7 @@ fn keyframe_cells() -> Vec<AnyElement> {
             // scale(.95 -> 1) translateY(-4px -> 0): chip geometry scales with the keyframe.
             keyed(div().relative().h(px(28.0)).flex().items_center(), "g-menu", 120, ease_out(), 0.5, |e, p| {
                 let s = 0.95 + 0.05 * p;
-                e.opacity(p).top(px(-4.0 * (1.0 - p))).child(chip("menuFadeIn", s))
+                e.opacity(p.clamp(0.0, 1.0)).top(px(-4.0 * s * (1.0 - p))).child(chip("menuFadeIn", s))
             })
         })
         .into_any_element(),
@@ -159,7 +171,7 @@ fn keyframe_cells() -> Vec<AnyElement> {
         anim_cell("modalEntrance", "0.2s cubic-bezier", || {
             keyed(div().relative().h(px(28.0)).flex().items_center(), "g-modal", 200, overshoot(), 0.5, |e, p| {
                 let s = 0.94 + 0.06 * p;
-                e.opacity(p.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - p))).child(chip("modalEntrance", s))
+                e.opacity(p.clamp(0.0, 1.0)).top(px(8.0 * s * (1.0 - p))).child(chip("modalEntrance", s))
             })
         })
         .into_any_element(),
@@ -171,12 +183,12 @@ fn keyframe_cells() -> Vec<AnyElement> {
                 "g-breath",
                 4000,
                 true,
-                ease_in_out_css(),
+                |t| t,
                 0.5,
                 |e, t| {
-                    // 0%,100% -> .55 ; 50% -> .85
-                    let tri = 1.0 - (2.0 * t - 1.0).abs();
-                    e.opacity(0.55 + 0.30 * tri)
+                    // 0%,100% -> .55 ; 50% -> .85, with `ease-in-out` restarting in each keyframe segment
+                    let seg = if t < 0.5 { 2.0 * t } else { 2.0 * (1.0 - t) };
+                    e.opacity(0.55 + 0.30 * ease_in_out_css()(seg))
                 },
             )
         })
