@@ -245,3 +245,13 @@ collapsed.
 - **Wrapped list items** lose the hanging indent: the first row is shifted left by 1.4em for the bullet and continuation rows shift with it.
 - **Notes cap counts chars**, TS counts UTF-16 units; images load from files only (http and `app-media:` need the Phase 5 resolver via `set_image_resolver`); uppercase of h5/h6 has no letter-spacing.
 - Table and image widgets keep the line's side padding; Electron draws tables flush with the framed card edge.
+
+## Native port, phase 3 (2026-11-09)
+
+- **Legacy project-text migration skips padded spellings.** `migrateProjectTextToRows` (TS) and `migrate_project_text_to_rows` (Rust) match `project = ? COLLATE NOCASE` with the trimmed name, so a legacy row spelled `"  LizMeter  "` is not repointed when another spelling creates the project. Kept identical for parity; the migration ran long ago on real data.
+- **No `user_version`.** Schema equality (`native/crates/db/tests/schema_equality.rs`) relies on `schema.sql` being a byte copy of the `db.exec` text in `database.ts`: `sqlite_master` stores that text, comments included. Any schema edit must land in both files and regenerate `tests/fixtures/electron-schema.json` (`node native/tools/schema-dump/dump.mjs ...`).
+- **Sync hook is a seam, not the engine.** `lizmeter_db::SyncHook` has only the no-op `NoSync` until Phase 4 ports `sync-writer.ts`. `Database::set_sync_hook` installs the real one. A device with sync enabled must not run on `NoSync` (ids and oplog would diverge).
+- **UTF-16 limits.** Title, notes and label caps use `js_len`/`js_truncate` (UTF-16 units, as in JS). Truncating inside a surrogate pair drops the whole pair; JS keeps a lone surrogate.
+- **Attachment URL resolver** (`resolveAttachmentPath`, traversal guard) is not ported yet: Phase 5 with the `app-media` scheme.
+- **Numbers the typed API narrows.** `SaveSessionInput` durations are `i64`; the TS accepted any JS number (a float planned duration would have been stored as REAL). Fractional input now fails at deserialisation.
+- **Schema dump tool runs under node, not bun.** `native/tools/schema-dump/dump.mjs` bundles with esbuild and runs the real better-sqlite3 (the repo copy is built for Electron's ABI; the bundled run resolves another copy). Same approach as `scripts/verify-real-better-sqlite3.mjs`.

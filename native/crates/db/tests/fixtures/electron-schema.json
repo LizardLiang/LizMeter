@@ -1,0 +1,1475 @@
+{
+  "sqliteVersion": "3.51.2",
+  "master": [
+    {
+      "type": "index",
+      "name": "idx_cc_idle_cc_session_id",
+      "tbl_name": "claude_code_idle_periods",
+      "sql": "CREATE INDEX idx_cc_idle_cc_session_id ON claude_code_idle_periods(cc_session_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_cc_sessions_session_id",
+      "tbl_name": "claude_code_sessions",
+      "sql": "CREATE INDEX idx_cc_sessions_session_id ON claude_code_sessions(session_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_cc_sessions_unique",
+      "tbl_name": "claude_code_sessions",
+      "sql": "CREATE UNIQUE INDEX idx_cc_sessions_unique ON claude_code_sessions(session_id, cc_session_uuid)"
+    },
+    {
+      "type": "index",
+      "name": "idx_nvim_activity_project",
+      "tbl_name": "nvim_activity",
+      "sql": "CREATE INDEX idx_nvim_activity_project ON nvim_activity(project)"
+    },
+    {
+      "type": "index",
+      "name": "idx_nvim_activity_recorded_at",
+      "tbl_name": "nvim_activity",
+      "sql": "CREATE INDEX idx_nvim_activity_recorded_at ON nvim_activity(recorded_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "idx_playlist_tracks_playlist_position",
+      "tbl_name": "playlist_tracks",
+      "sql": "CREATE INDEX idx_playlist_tracks_playlist_position ON playlist_tracks(playlist_id, position)"
+    },
+    {
+      "type": "index",
+      "name": "idx_playlist_tracks_track",
+      "tbl_name": "playlist_tracks",
+      "sql": "CREATE INDEX idx_playlist_tracks_track ON playlist_tracks(track_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_sessions_completed_at",
+      "tbl_name": "sessions",
+      "sql": "CREATE INDEX idx_sessions_completed_at ON sessions(completed_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "idx_sync_notices_created_at",
+      "tbl_name": "sync_notices",
+      "sql": "CREATE INDEX idx_sync_notices_created_at ON sync_notices(created_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "idx_tags_uuid",
+      "tbl_name": "tags",
+      "sql": "CREATE UNIQUE INDEX idx_tags_uuid ON tags(uuid) WHERE uuid IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "idx_todo_attachments_sha",
+      "tbl_name": "todo_attachments",
+      "sql": "CREATE INDEX idx_todo_attachments_sha ON todo_attachments(sha256)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todo_attachments_todo",
+      "tbl_name": "todo_attachments",
+      "sql": "CREATE INDEX idx_todo_attachments_todo ON todo_attachments(todo_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todo_label_links_label",
+      "tbl_name": "todo_label_links",
+      "sql": "CREATE INDEX idx_todo_label_links_label ON todo_label_links(label_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todo_labels_uuid",
+      "tbl_name": "todo_labels",
+      "sql": "CREATE UNIQUE INDEX idx_todo_labels_uuid ON todo_labels(uuid) WHERE uuid IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "idx_todo_projects_position",
+      "tbl_name": "todo_projects",
+      "sql": "CREATE INDEX idx_todo_projects_position ON todo_projects(position)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todo_projects_uuid",
+      "tbl_name": "todo_projects",
+      "sql": "CREATE UNIQUE INDEX idx_todo_projects_uuid ON todo_projects(uuid) WHERE uuid IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "idx_todo_states_position",
+      "tbl_name": "todo_states",
+      "sql": "CREATE INDEX idx_todo_states_position ON todo_states(position)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todo_states_uuid",
+      "tbl_name": "todo_states",
+      "sql": "CREATE UNIQUE INDEX idx_todo_states_uuid ON todo_states(uuid) WHERE uuid IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "idx_todos_created_at",
+      "tbl_name": "todos",
+      "sql": "CREATE INDEX idx_todos_created_at ON todos(created_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todos_due_date",
+      "tbl_name": "todos",
+      "sql": "CREATE INDEX idx_todos_due_date ON todos(due_date)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todos_parent_id",
+      "tbl_name": "todos",
+      "sql": "CREATE INDEX idx_todos_parent_id ON todos(parent_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todos_project_id",
+      "tbl_name": "todos",
+      "sql": "CREATE INDEX idx_todos_project_id ON todos(project_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todos_source",
+      "tbl_name": "todos",
+      "sql": "CREATE INDEX idx_todos_source ON todos(source)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todos_state_id",
+      "tbl_name": "todos",
+      "sql": "CREATE INDEX idx_todos_state_id ON todos(state_id)"
+    },
+    {
+      "type": "index",
+      "name": "idx_todos_uuid",
+      "tbl_name": "todos",
+      "sql": "CREATE UNIQUE INDEX idx_todos_uuid ON todos(uuid) WHERE uuid IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "idx_tracks_added_at",
+      "tbl_name": "tracks",
+      "sql": "CREATE INDEX idx_tracks_added_at ON tracks(added_at DESC)"
+    },
+    {
+      "type": "index",
+      "name": "idx_tracks_cached",
+      "tbl_name": "tracks",
+      "sql": "CREATE INDEX idx_tracks_cached ON tracks(cached_file_path) WHERE cached_file_path IS NOT NULL"
+    },
+    {
+      "type": "index",
+      "name": "idx_tracks_last_played_at",
+      "tbl_name": "tracks",
+      "sql": "CREATE INDEX idx_tracks_last_played_at ON tracks(last_played_at)"
+    },
+    {
+      "type": "index",
+      "name": "idx_tracks_source_url",
+      "tbl_name": "tracks",
+      "sql": "CREATE INDEX idx_tracks_source_url ON tracks(source_url)"
+    },
+    {
+      "type": "index",
+      "name": "idx_tracks_title",
+      "tbl_name": "tracks",
+      "sql": "CREATE INDEX idx_tracks_title ON tracks(title COLLATE NOCASE)"
+    },
+    {
+      "type": "table",
+      "name": "claude_code_idle_periods",
+      "tbl_name": "claude_code_idle_periods",
+      "sql": "CREATE TABLE claude_code_idle_periods (\n      id                  INTEGER PRIMARY KEY AUTOINCREMENT,\n      cc_session_id       TEXT NOT NULL REFERENCES claude_code_sessions(id) ON DELETE CASCADE,\n      start_at            TEXT NOT NULL,\n      end_at              TEXT NOT NULL,\n      duration_seconds    INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "claude_code_sessions",
+      "tbl_name": "claude_code_sessions",
+      "sql": "CREATE TABLE claude_code_sessions (\n      id                  TEXT PRIMARY KEY,\n      session_id          TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n      cc_session_uuid     TEXT NOT NULL,\n      file_edit_count     INTEGER NOT NULL DEFAULT 0,\n      total_idle_seconds  INTEGER NOT NULL DEFAULT 0,\n      idle_period_count   INTEGER NOT NULL DEFAULT 0,\n      first_activity_at   TEXT,\n      last_activity_at    TEXT,\n      files_edited        TEXT NOT NULL DEFAULT '[]'\n    )"
+    },
+    {
+      "type": "table",
+      "name": "nvim_activity",
+      "tbl_name": "nvim_activity",
+      "sql": "CREATE TABLE nvim_activity (\n      id          INTEGER PRIMARY KEY AUTOINCREMENT,\n      project     TEXT NOT NULL,\n      file        TEXT NOT NULL,\n      recorded_at TEXT NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "playlist_tracks",
+      "tbl_name": "playlist_tracks",
+      "sql": "CREATE TABLE playlist_tracks (\n      id          INTEGER PRIMARY KEY AUTOINCREMENT,\n      playlist_id INTEGER NOT NULL REFERENCES playlists(id) ON DELETE CASCADE,\n      track_id    TEXT NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,\n      position    INTEGER NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "playlists",
+      "tbl_name": "playlists",
+      "sql": "CREATE TABLE playlists (\n      id          INTEGER PRIMARY KEY AUTOINCREMENT,\n      name        TEXT NOT NULL,\n      source      TEXT NOT NULL DEFAULT 'user_created',\n      created_at  TEXT NOT NULL,\n      updated_at  TEXT NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "session_tags",
+      "tbl_name": "session_tags",
+      "sql": "CREATE TABLE session_tags (\n      session_id TEXT    NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,\n      tag_id     INTEGER NOT NULL REFERENCES tags(id)     ON DELETE CASCADE,\n      PRIMARY KEY (session_id, tag_id)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "sessions",
+      "tbl_name": "sessions",
+      "sql": "CREATE TABLE sessions (\n      id            TEXT PRIMARY KEY,\n      title         TEXT NOT NULL DEFAULT '',\n      timer_type    TEXT NOT NULL,\n      planned_duration_seconds  INTEGER NOT NULL,\n      actual_duration_seconds   INTEGER NOT NULL,\n      completed_at  TEXT NOT NULL\n    , issue_number INTEGER, issue_title TEXT, issue_url TEXT, issue_provider TEXT, issue_id TEXT, worklog_status TEXT NOT NULL DEFAULT 'not_logged', worklog_id TEXT)"
+    },
+    {
+      "type": "table",
+      "name": "settings",
+      "tbl_name": "settings",
+      "sql": "CREATE TABLE settings (\n      key   TEXT PRIMARY KEY,\n      value TEXT NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "sync_applied_ops",
+      "tbl_name": "sync_applied_ops",
+      "sql": "CREATE TABLE sync_applied_ops (\n      op_id       TEXT PRIMARY KEY,\n      device_id   TEXT NOT NULL,\n      applied_at  TEXT NOT NULL\n    )"
+    },
+    {
+      "type": "table",
+      "name": "sync_devices",
+      "tbl_name": "sync_devices",
+      "sql": "CREATE TABLE sync_devices (\n      device_id         TEXT PRIMARY KEY,\n      device_number     INTEGER NOT NULL UNIQUE,\n      first_seen_at     TEXT NOT NULL,\n      last_seen_at      TEXT NOT NULL,\n      last_applied_seq  INTEGER NOT NULL DEFAULT 0\n    )"
+    },
+    {
+      "type": "table",
+      "name": "sync_field_clocks",
+      "tbl_name": "sync_field_clocks",
+      "sql": "CREATE TABLE sync_field_clocks (\n      table_name        TEXT NOT NULL,\n      row_uuid          TEXT NOT NULL,\n      field_name        TEXT NOT NULL,\n      hlc_physical_ms   INTEGER NOT NULL,\n      hlc_counter       INTEGER NOT NULL,\n      hlc_device_number INTEGER NOT NULL,\n      PRIMARY KEY (table_name, row_uuid, field_name)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "sync_id_aliases",
+      "tbl_name": "sync_id_aliases",
+      "sql": "CREATE TABLE sync_id_aliases (\n      table_name  TEXT NOT NULL,\n      old_uuid    TEXT NOT NULL,\n      new_uuid    TEXT NOT NULL,\n      created_at  TEXT NOT NULL,\n      PRIMARY KEY (table_name, old_uuid)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "sync_notices",
+      "tbl_name": "sync_notices",
+      "sql": "CREATE TABLE sync_notices (\n      id          INTEGER PRIMARY KEY AUTOINCREMENT,\n      kind        TEXT NOT NULL,\n      message     TEXT NOT NULL,\n      detail      TEXT,\n      created_at  TEXT NOT NULL,\n      dismissed   INTEGER NOT NULL DEFAULT 0\n    )"
+    },
+    {
+      "type": "table",
+      "name": "sync_tombstones",
+      "tbl_name": "sync_tombstones",
+      "sql": "CREATE TABLE sync_tombstones (\n      table_name        TEXT NOT NULL,\n      row_uuid          TEXT NOT NULL,\n      deleted_at        TEXT NOT NULL,\n      hlc_physical_ms   INTEGER NOT NULL,\n      hlc_counter       INTEGER NOT NULL,\n      hlc_device_number INTEGER NOT NULL,\n      PRIMARY KEY (table_name, row_uuid)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "tags",
+      "tbl_name": "tags",
+      "sql": "CREATE TABLE tags (\n      id         INTEGER PRIMARY KEY AUTOINCREMENT,\n      name       TEXT NOT NULL,\n      color      TEXT NOT NULL DEFAULT '#7aa2f7',\n      created_at TEXT NOT NULL, uuid TEXT,\n      UNIQUE(name COLLATE NOCASE)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "todo_attachments",
+      "tbl_name": "todo_attachments",
+      "sql": "CREATE TABLE todo_attachments (\n      id          INTEGER PRIMARY KEY AUTOINCREMENT,\n      todo_id     INTEGER NOT NULL REFERENCES todos(id) ON DELETE CASCADE,\n      sha256      TEXT NOT NULL,\n      file_name   TEXT NOT NULL,\n      mime_type   TEXT NOT NULL,\n      size_bytes  INTEGER NOT NULL,\n      kind        TEXT NOT NULL DEFAULT 'file',\n      created_at  TEXT NOT NULL,\n      UNIQUE(todo_id, sha256)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "todo_label_links",
+      "tbl_name": "todo_label_links",
+      "sql": "CREATE TABLE todo_label_links (\n      todo_id  INTEGER NOT NULL REFERENCES todos(id)       ON DELETE CASCADE,\n      label_id INTEGER NOT NULL REFERENCES todo_labels(id) ON DELETE CASCADE,\n      PRIMARY KEY (todo_id, label_id)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "todo_labels",
+      "tbl_name": "todo_labels",
+      "sql": "CREATE TABLE todo_labels (\n      id         INTEGER PRIMARY KEY AUTOINCREMENT,\n      name       TEXT NOT NULL,\n      color      TEXT NOT NULL DEFAULT '#7aa2f7',\n      created_at TEXT NOT NULL, uuid TEXT,\n      UNIQUE(name COLLATE NOCASE)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "todo_projects",
+      "tbl_name": "todo_projects",
+      "sql": "CREATE TABLE todo_projects (\n      id         INTEGER PRIMARY KEY AUTOINCREMENT,\n      name       TEXT NOT NULL,\n      color      TEXT NOT NULL DEFAULT '#7aa2f7',\n      position   INTEGER NOT NULL,\n      created_at TEXT NOT NULL, uuid TEXT, sync_order TEXT,\n      UNIQUE(name COLLATE NOCASE)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "todo_states",
+      "tbl_name": "todo_states",
+      "sql": "CREATE TABLE todo_states (\n      id           INTEGER PRIMARY KEY AUTOINCREMENT,\n      label        TEXT NOT NULL,\n      color        TEXT NOT NULL DEFAULT '#7aa2f7',\n      position     INTEGER NOT NULL,\n      is_completed INTEGER NOT NULL DEFAULT 0,\n      is_default   INTEGER NOT NULL DEFAULT 0,\n      created_at   TEXT NOT NULL, uuid TEXT, sync_order TEXT,\n      UNIQUE(label COLLATE NOCASE)\n    )"
+    },
+    {
+      "type": "table",
+      "name": "todos",
+      "tbl_name": "todos",
+      "sql": "CREATE TABLE todos (\n      id           INTEGER PRIMARY KEY AUTOINCREMENT,\n      title        TEXT NOT NULL,\n      notes        TEXT,\n      state_id     INTEGER REFERENCES todo_states(id),\n      -- Deleting a project clears it from its todos rather than deleting the work items.\n      project_id   INTEGER REFERENCES todo_projects(id) ON DELETE SET NULL,\n      milestone    TEXT,\n      -- 0-4 on the Linear scale, where 0 is \"not set\". See TODO_PRIORITY_LABELS.\n      priority     INTEGER NOT NULL DEFAULT 0,\n      start_date   TEXT,\n      due_date     TEXT,\n      source       TEXT NOT NULL DEFAULT 'user',\n      source_label TEXT,\n      -- Self-referencing: a todo nests under another todo, to any depth. Deleting a parent\n      -- lifts its children to the top level rather than taking them with it.\n      parent_id    INTEGER REFERENCES todos(id) ON DELETE SET NULL,\n      created_at   TEXT NOT NULL,\n      completed_at TEXT\n    , uuid TEXT, claimed_id INTEGER)"
+    },
+    {
+      "type": "table",
+      "name": "tracks",
+      "tbl_name": "tracks",
+      "sql": "CREATE TABLE tracks (\n      id                TEXT PRIMARY KEY,\n      source_url        TEXT NOT NULL UNIQUE,\n      source_id         TEXT NOT NULL,\n      source_site       TEXT NOT NULL,\n      title             TEXT NOT NULL,\n      artist            TEXT,\n      duration_seconds  INTEGER,\n      thumbnail_url     TEXT,\n      cached_file_path  TEXT,\n      cache_size_bytes  INTEGER,\n      play_count        INTEGER NOT NULL DEFAULT 0,\n      last_played_at    TEXT,\n      added_at          TEXT NOT NULL\n    )"
+    }
+  ],
+  "columns": {
+    "claude_code_idle_periods": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "cc_session_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "start_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "end_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "duration_seconds",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "claude_code_sessions": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "session_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "cc_session_uuid",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "file_edit_count",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "total_idle_seconds",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "idle_period_count",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "first_activity_at",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "last_activity_at",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "files_edited",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'[]'",
+        "pk": 0
+      }
+    ],
+    "nvim_activity": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "project",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "file",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "recorded_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "playlist_tracks": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "playlist_id",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "track_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "position",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "playlists": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "source",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'user_created'",
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "updated_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "session_tags": [
+      {
+        "cid": 0,
+        "name": "session_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "tag_id",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 2
+      }
+    ],
+    "sessions": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "title",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "''",
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "timer_type",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "planned_duration_seconds",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "actual_duration_seconds",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "completed_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "issue_number",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "issue_title",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "issue_url",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "issue_provider",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "issue_id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "worklog_status",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'not_logged'",
+        "pk": 0
+      },
+      {
+        "cid": 12,
+        "name": "worklog_id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "settings": [
+      {
+        "cid": 0,
+        "name": "key",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "value",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "sync_applied_ops": [
+      {
+        "cid": 0,
+        "name": "op_id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "device_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "applied_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "sync_devices": [
+      {
+        "cid": 0,
+        "name": "device_id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "device_number",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "first_seen_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "last_seen_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "last_applied_seq",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      }
+    ],
+    "sync_field_clocks": [
+      {
+        "cid": 0,
+        "name": "table_name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "row_uuid",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 2
+      },
+      {
+        "cid": 2,
+        "name": "field_name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 3
+      },
+      {
+        "cid": 3,
+        "name": "hlc_physical_ms",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "hlc_counter",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "hlc_device_number",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "sync_id_aliases": [
+      {
+        "cid": 0,
+        "name": "table_name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "old_uuid",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 2
+      },
+      {
+        "cid": 2,
+        "name": "new_uuid",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "sync_notices": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "kind",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "message",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "detail",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "dismissed",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      }
+    ],
+    "sync_tombstones": [
+      {
+        "cid": 0,
+        "name": "table_name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "row_uuid",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 2
+      },
+      {
+        "cid": 2,
+        "name": "deleted_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "hlc_physical_ms",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "hlc_counter",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "hlc_device_number",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "tags": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "color",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'#7aa2f7'",
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "uuid",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "todo_attachments": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "todo_id",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "sha256",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "file_name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "mime_type",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "size_bytes",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "kind",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'file'",
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "todo_label_links": [
+      {
+        "cid": 0,
+        "name": "todo_id",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "label_id",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 2
+      }
+    ],
+    "todo_labels": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "color",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'#7aa2f7'",
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "uuid",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "todo_projects": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "name",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "color",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'#7aa2f7'",
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "position",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "uuid",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "sync_order",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "todo_states": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "label",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "color",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'#7aa2f7'",
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "position",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "is_completed",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "is_default",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "uuid",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "sync_order",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "todos": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "title",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "notes",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "state_id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "project_id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "milestone",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "priority",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "start_date",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "due_date",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "source",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": "'user'",
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "source_label",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "parent_id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 12,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 13,
+        "name": "completed_at",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 14,
+        "name": "uuid",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 15,
+        "name": "claimed_id",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ],
+    "tracks": [
+      {
+        "cid": 0,
+        "name": "id",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "source_url",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "source_id",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 3,
+        "name": "source_site",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 4,
+        "name": "title",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 5,
+        "name": "artist",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 6,
+        "name": "duration_seconds",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 7,
+        "name": "thumbnail_url",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 8,
+        "name": "cached_file_path",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 9,
+        "name": "cache_size_bytes",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 10,
+        "name": "play_count",
+        "type": "INTEGER",
+        "notnull": 1,
+        "dflt_value": "0",
+        "pk": 0
+      },
+      {
+        "cid": 11,
+        "name": "last_played_at",
+        "type": "TEXT",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 12,
+        "name": "added_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      }
+    ]
+  }
+}
