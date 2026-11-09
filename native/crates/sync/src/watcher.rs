@@ -85,11 +85,16 @@ pub fn start_watching(
                         Err(RecvTimeoutError::Timeout) => break,
                     }
                 }
-                on_change();
+                run_guarded(&on_change);
             }
-            Err(RecvTimeoutError::Timeout) => on_change(),
+            Err(RecvTimeoutError::Timeout) => run_guarded(&on_change),
         }
     });
 
     Ok(SyncWatcher { tx, worker: Some(worker), _fs_watcher: fs_watcher })
+}
+
+/// A panic inside one pass must not end the worker: later events and the periodic rescan still run.
+fn run_guarded(on_change: &Arc<dyn Fn() + Send + Sync>) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| on_change()));
 }

@@ -74,6 +74,9 @@ impl SyncManager {
         db_path: Option<PathBuf>,
         notifier: Arc<dyn Notifier>,
     ) -> Arc<SyncManager> {
+        // The writer is the hook for every launch, not only one that applies a pending action: it
+        // is a no-op while sync is off, and without it a synced device would write no oplog.
+        lock(&db).set_sync_hook(Box::new(writer.clone()));
         Arc::new(SyncManager {
             merge_override: Mutex::new(None),
             db,

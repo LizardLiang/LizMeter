@@ -57,9 +57,9 @@ impl SyncWriter {
         append_oplog_entry(&self.data_dir, &self.device_id, &build_upsert_entry(hlc, table, row_uuid, changes))?;
 
         // A local write competes with a remote one for the same field just as much as two remote
-        // writes do, so it needs the same high-water mark the merge engine reads. `id` (todos
-        // only) gets a clock like every other field: dense ids collide by design, so an id changes
-        // when a merge bumps the losing claimant, and that change wins or loses on LWW terms.
+        // writes do, so it needs the same high-water mark the merge engine reads. The merge engine
+        // never writes a clock for `id` (ids are derived by `reconcile_todo_ids`), so the clock
+        // recorded here for a todo's `id` is never read; it is kept for row parity with the TS writer.
         let mut set_clock = conn.prepare_cached(
             "INSERT OR REPLACE INTO sync_field_clocks
                (table_name, row_uuid, field_name, hlc_physical_ms, hlc_counter, hlc_device_number)
