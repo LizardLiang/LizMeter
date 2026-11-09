@@ -4,3 +4,17 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+lizmeter-core = { version = "0.0.1", path = "../core" }
+lizmeter-db = { version = "0.0.1", path = "../db" }
+notify = "8"
+rusqlite = { version = "0.41.1", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+
+thiserror = "2.0.21"
+uuid = { version = "1.29.2", features = ["v4"] }
+
+[dev-dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+tempfile = "3.27.0"

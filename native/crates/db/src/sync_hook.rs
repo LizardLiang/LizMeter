@@ -1,9 +1,9 @@
 //! The seam between database writes and the multi-writer sync engine.
 //!
 //! `database.ts` calls `recordUpsert` / `recordDelete` / `recordLink` / `recordReorder` and
-//! `allocateTodoIdIfSyncEnabled` from `sync-writer.ts` after each synced write. The sync engine
-//! lands in a later phase, so the database crate owns only the trait; [`NoSync`] is the behaviour
-//! of a device that never turned sync on (every call is a no-op and AUTOINCREMENT assigns ids).
+//! `allocateTodoIdIfSyncEnabled` from `sync-writer.ts` after each synced write. The engine lives in
+//! `lizmeter-sync` (`SyncWriter` implements [`SyncHook`]); this crate owns only the trait. [`NoSync`] is
+//! the behaviour of a device that never turned sync on: every call is a no-op and AUTOINCREMENT assigns ids.
 
 use crate::error::{DbError, Result};
 use rusqlite::{Connection, OptionalExtension};
