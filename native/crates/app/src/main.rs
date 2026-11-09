@@ -5,6 +5,12 @@ mod chrome;
 
 mod gallery;
 mod modal;
+mod controls;
+mod engine;
+mod fmt;
+mod pages;
+mod rich_view;
+mod tag_picker;
 mod timer;
 pub use lizmeter_ui::{css, ui};
 mod widget;

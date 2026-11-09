@@ -3081,8 +3081,12 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 name = "lizmeter-app"
 version = "0.0.1"
 dependencies = [
+ "chrono",
  "gpui",
  "image",
+ "lizmeter-core",
+ "lizmeter-db",
+ "lizmeter-services",
  "lizmeter-ui",
  "png 0.18.1",
  "raw-window-handle",

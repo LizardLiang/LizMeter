@@ -9,6 +9,10 @@ path = "src/main.rs"
 
 [dependencies]
 lizmeter-ui = { path = "../ui" }
+lizmeter-core = { path = "../core" }
+lizmeter-db = { path = "../db" }
+lizmeter-services = { path = "../services" }
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 gpui.workspace = true
 png.workspace = true
 image.workspace = true
