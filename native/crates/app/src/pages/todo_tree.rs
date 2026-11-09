@@ -52,11 +52,10 @@ pub fn linkable_children(todos: &[Todo], parent: i64) -> Vec<Todo> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ancestor_ids, descendant_ids, linkable_children, linkable_parents};
+pub mod fixture {
     use lizmeter_core::{Todo, TodoSource, TodoState};
 
-    fn todo(id: i64, parent: Option<i64>) -> Todo {
+    pub fn todo(id: i64, parent: Option<i64>) -> Todo {
         Todo {
             id,
             title: format!("t{id}"),
@@ -78,6 +77,13 @@ mod tests {
             completed_at: None,
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ancestor_ids, descendant_ids, linkable_children, linkable_parents};
+    use super::fixture::todo;
+    use lizmeter_core::Todo;
 
     // 1 -> 2 -> 3, and 4 alone.
     fn tree() -> Vec<Todo> {

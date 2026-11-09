@@ -2,7 +2,7 @@
 //! and the shared button looks.
 
 use crate::controls::{field_style, parse_color};
-use crate::css::{hex, rgba, C};
+use crate::css::{hex, linear, rgba, Spec, C, TRANSPARENT};
 use crate::ui::*;
 use chrono::{Datelike, Duration, NaiveDate};
 use gpui::prelude::FluentBuilder;
@@ -69,6 +69,78 @@ pub fn dot(color: &str, filled: bool, size: f32, border: f32) -> Div {
 /// The bold 11px label above a form field (`.label` / `.sectionLabel`).
 pub fn field_label(text: &str) -> Div {
     ui_text(11.0).line_height(px(14.0)).font_weight(FontWeight(700.0)).text_color(col(hex(0xa3abc9))).mb(px(5.0)).child(spaced(&text.to_uppercase(), 1.32))
+}
+
+// ---- Dialog shell ----
+
+/// The glass dialog of the app (same formula as the issue prompt): readable, not see-through.
+pub fn dialog_glass(radius: f32) -> Div {
+    let spec = Spec::rrect(radius)
+        .fill(linear(135.0, &[(0.0, wh(0.07)), (0.32, wh(0.01)), (0.55, TRANSPARENT)]))
+        .fill(linear(315.0, &[(0.0, bk(0.08)), (0.40, TRANSPARENT)]))
+        .solid(rgba(20, 23, 42, 0.86))
+        .border(1.0, rgba(122, 162, 247, 0.4))
+        .inset(0.0, 1.0, wh(0.12))
+        .inset(1.0, 0.0, wh(0.05))
+        .inset(0.0, -1.0, bk(0.15))
+        .inset(-1.0, 0.0, bk(0.05));
+    let shd = vec![Sh { dx: 0.0, dy: 0.0, blur: 0.0, spread: 1.0, color: bk(0.3) }, sh(0.0, 16.0, 40.0, bk(0.28))];
+    Glass::new(radius, 36.0, 1.7, spec).shadows(&shd).el()
+}
+
+/// The blur scrim over the window with `dialog` entering as `modalEntrance` (0.2s, 8px rise).
+/// `top` pins the dialog that far from the top (the pickers); `None` centres it.
+pub fn modal_overlay(id: &'static str, top: Option<f32>, dialog: impl IntoElement, on_close: impl Fn(&mut Window, &mut App) + 'static) -> Stateful<Div> {
+    let entrance = animate(div().relative().child(dialog), id, 200, false, overshoot(), 1.0, |el, t| el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t))));
+    let mut o = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
+        .el()
+        .id(SharedString::from(format!("{id}-overlay")))
+        .absolute()
+        .top_0()
+        .left_0()
+        .right_0()
+        .bottom_0()
+        .flex()
+        .justify_center()
+        .occlude()
+        .on_click(move |_, w, a| on_close(w, a));
+    o = match top {
+        Some(t) => o.items_start().pt(px(t)),
+        None => o.items_center(),
+    };
+    o.child(entrance)
+}
+
+/// A dialog's footer buttons look: outline `Cancel`.
+pub fn cancel_button(id: &'static str, label: &str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .h(px(29.0))
+        .px(px(17.0))
+        .rounded(px(6.0))
+        .border(px(1.0))
+        .border_color(col(TN_MUTED))
+        .flex()
+        .items_center()
+        .cursor_pointer()
+        .hover(|s| s.bg(col(rgba(122, 162, 247, 0.07))))
+        .font_family(BTN_FONT)
+        .text_size(px(13.0))
+        .text_color(col(TN_TEXT))
+        .child(label.to_string())
+}
+
+/// The scroll position that keeps `[top, top + h)` in view.
+pub fn keep_in_view(scroll: &lizmeter_ui::scrollbar::Scroll, top: f32, h: f32) {
+    let vp = f32::from(scroll.bounds().size.height);
+    if vp <= 0.0 {
+        return;
+    }
+    let scrolled = -f32::from(scroll.offset().y);
+    let target = super::todos_logic::scroll_nearest(scrolled, vp, top, top + h);
+    if (target - scrolled).abs() > 0.5 {
+        scroll.set_offset(point(px(0.0), px(-target.max(0.0))));
+    }
 }
 
 // ---- Combobox ----
