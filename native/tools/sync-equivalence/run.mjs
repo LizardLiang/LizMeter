@@ -236,10 +236,8 @@ ts.tsClose();
   ts.tsSetup(d, "adopt");
   same("fresh Rust device vs fresh TypeScript device, both adopting the mixed folder", ts.tsDump(d, true), readJson(outC));
 
-  // And against the converged devices: a rebuild may only differ where a todo's parent link could not
-  // be restored (see the finding in the README), never in ids or any other row.
-  const strip = (dump) => ({ ...dump, todos: dump.todos.map(({ parent_uuid, ...rest }) => rest) });
-  same("fresh TypeScript device vs converged devices (parent links aside)", strip(ts.tsDump(d, true)), strip(ts.tsDump(a, true)));
+  // And against the converged devices: a rebuild keeps every row, parent links included.
+  same("fresh TypeScript device vs converged devices", ts.tsDump(d, true), ts.tsDump(a, true));
   console.log(`PASS mixed adopt: fresh Rust and fresh TS devices match each other and the converged state (${todos.length} todos)`);
 }
 ts.tsClose();

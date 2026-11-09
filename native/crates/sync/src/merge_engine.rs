@@ -132,6 +132,7 @@ pub fn apply_oplog_entries(conn: &Connection, entries: &[OplogEntry]) -> Result<
         // Captured before anything is applied, so the renumbering notice can tell "this todo moved
         // under the user" apart from "this todo arrived and was placed".
         let todo_ids_before = snapshot_todo_ids(conn)?;
+        let mut deferred: Vec<&OplogEntry> = Vec::new();
 
         for entry in &pending {
             let received = receive(conn, device_number, *entry.hlc())?;
@@ -152,26 +153,59 @@ pub fn apply_oplog_entries(conn: &Connection, entries: &[OplogEntry]) -> Result<
             // B-5: mark applied only when the entry's work is done. `sync_applied_ops` is what
             // later passes filter on, so marking an entry whose real work was deferred (a link
             // whose todo has not arrived, an unresolved foreign key) would make the skip permanent.
-            let fully_applied = match entry {
-                OplogEntry::Delete(d) => {
-                    apply_delete(conn, &d.table, &d.row_uuid, &d.hlc)?;
-                    true
-                }
-                OplogEntry::Upsert(u) => {
-                    let outcome = apply_upsert(&ctx, u)?;
-                    if outcome.notice_raised {
-                        notices += 1;
-                    }
-                    outcome.fully_applied
-                }
-                OplogEntry::Link(l) => apply_link(conn, &l.table, l.op, &l.from_uuid, &l.to_uuid)?,
-            };
-            if fully_applied {
+            let outcome = apply_entry(&ctx, entry)?;
+            if outcome.notice_raised {
+                notices += 1;
+            }
+            if outcome.fully_applied {
                 mark_applied(conn, entry.op_id(), entry.hlc())?;
+            } else {
+                deferred.push(*entry);
             }
             // Counts toward "did this pass do anything" regardless of `fully_applied`: a
             // partially applied upsert is real, visible work even though the entry is retried.
             applied += 1;
+        }
+
+        // An entry that named a row this same batch had not created yet (a subtask applied before its
+        // parent, a link before its todo) is retried now that the whole batch is in. A snapshot's
+        // entries share one HLC and nothing re-reads a snapshot, so without this the unresolved
+        // reference is lost. Repeats until a round resolves nothing new, so a chain of any depth
+        // settles whatever order its entries arrived in.
+        //
+        // A deferred link or unlink is dropped when a later entry in this batch touches the same
+        // pair: links carry no per-field clock, so replaying the older one now would undo the newer.
+        let mut latest_link_op: HashMap<(&str, &str, &str), &str> = HashMap::new();
+        for entry in &pending {
+            if let OplogEntry::Link(l) = entry {
+                latest_link_op.insert((l.table.as_str(), l.from_uuid.as_str(), l.to_uuid.as_str()), l.op_id.as_str());
+            }
+        }
+        let mut waiting = deferred;
+        while !waiting.is_empty() {
+            let mut still_waiting: Vec<&OplogEntry> = Vec::new();
+            for entry in &waiting {
+                if let OplogEntry::Link(l) = entry {
+                    let key = (l.table.as_str(), l.from_uuid.as_str(), l.to_uuid.as_str());
+                    if latest_link_op.get(&key) != Some(&l.op_id.as_str()) {
+                        mark_applied(conn, entry.op_id(), entry.hlc())?;
+                        continue;
+                    }
+                }
+                let outcome = apply_entry(&ctx, entry)?;
+                if outcome.notice_raised {
+                    notices += 1;
+                }
+                if outcome.fully_applied {
+                    mark_applied(conn, entry.op_id(), entry.hlc())?;
+                } else {
+                    still_waiting.push(*entry);
+                }
+            }
+            if still_waiting.len() == waiting.len() {
+                break;
+            }
+            waiting = still_waiting;
         }
 
         recompute_local_position_from_sync_order(conn, "todo_states")?;
@@ -188,6 +222,20 @@ pub fn apply_oplog_entries(conn: &Connection, entries: &[OplogEntry]) -> Result<
     })?;
 
     Ok(ApplyResult { applied, skipped_already_applied: entries.len() - pending.len(), notices })
+}
+
+fn apply_entry(ctx: &Ctx<'_>, entry: &OplogEntry) -> Result<ApplyOutcome> {
+    match entry {
+        OplogEntry::Delete(d) => {
+            apply_delete(ctx.conn, &d.table, &d.row_uuid, &d.hlc)?;
+            Ok(ApplyOutcome { fully_applied: true, notice_raised: false })
+        }
+        OplogEntry::Upsert(u) => apply_upsert(ctx, u),
+        OplogEntry::Link(l) => Ok(ApplyOutcome {
+            fully_applied: apply_link(ctx.conn, &l.table, l.op, &l.from_uuid, &l.to_uuid)?,
+            notice_raised: false,
+        }),
+    }
 }
 
 // --- Delete (FR-007) ---

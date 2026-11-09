@@ -5,7 +5,7 @@ mod common;
 use common::*;
 use lizmeter_core::{
     ClaudeCodeIdlePeriod, ClaudeCodeSessionData, CreateTodoInput, CreateTodoProjectInput, ListTodosInput,
-    SaveSessionWithTrackingInput, TimerType,
+    SaveSessionWithTrackingInput, TimerType, UpdateTodoInput,
 };
 use lizmeter_db::{CreateTodoAttachmentInput, Database};
 use lizmeter_sync::oplog::read_oplog_entries;
@@ -144,6 +144,55 @@ fn a_stale_machine_rebuilds_from_the_latest_snapshot_and_writes_a_notice() {
 
     assert!(todo_titles(&h.b.db).contains(&"from the snapshot".to_string()));
     assert_eq!(count(&h.b.db, "SELECT COUNT(*) FROM sync_notices WHERE kind = 'stale-machine-rebuild'"), 1);
+}
+
+fn set_parent(db: &Database, id: i64, parent: i64) {
+    db.update_todo(&UpdateTodoInput { id, parent_id: Some(Some(parent)), ..Default::default() }).unwrap();
+}
+
+fn parent_of(db: &Database, title: &str) -> Option<i64> {
+    db.list_todos(&ListTodosInput::default()).unwrap().into_iter().find(|t| t.title == title).unwrap().parent_id
+}
+
+fn id_of(db: &Database, title: &str) -> i64 {
+    db.list_todos(&ListTodosInput::default()).unwrap().into_iter().find(|t| t.title == title).unwrap().id
+}
+
+#[test]
+fn a_subtask_keeps_its_parent_link_when_the_parent_todo_has_a_higher_number() {
+    // Snapshot entries share one HLC, so they apply in table row order: a child numbered below its
+    // parent used to be applied before its parent existed, and nothing re-read the snapshot.
+    let h = Harness::new();
+    let grandchild = h.a.db.create_todo(&new("grandchild")).unwrap();
+    let child = h.a.db.create_todo(&new("child")).unwrap();
+    let parent = h.a.db.create_todo(&new("parent")).unwrap();
+    set_parent(&h.a.db, grandchild.id, child.id);
+    set_parent(&h.a.db, child.id, parent.id);
+    assert!(parent.id > child.id);
+    let t = now();
+    write_snapshot(&h, &h.a, t);
+
+    assert!(rebuild(&h, &h.b, t + 1000));
+
+    assert_eq!(parent_of(&h.b.db, "child"), Some(id_of(&h.b.db, "parent")));
+    assert_eq!(parent_of(&h.b.db, "grandchild"), Some(id_of(&h.b.db, "child")));
+    assert_eq!(parent_of(&h.b.db, "parent"), None);
+}
+
+#[test]
+fn a_fresh_machine_adopting_a_snapshot_keeps_a_subtask_parent_link() {
+    let h = Harness::new();
+    let child = h.a.db.create_todo(&new("adopt child")).unwrap();
+    let parent = h.a.db.create_todo(&new("adopt parent")).unwrap();
+    set_parent(&h.a.db, child.id, parent.id);
+    let t = now();
+    write_snapshot(&h, &h.a, t);
+
+    rebuild(&h, &h.b, t + 1000);
+
+    let adopted = parent_of(&h.b.db, "adopt child");
+    assert_eq!(adopted, Some(id_of(&h.b.db, "adopt parent")));
+    assert!(adopted.is_some());
 }
 
 #[test]

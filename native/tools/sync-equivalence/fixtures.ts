@@ -163,6 +163,41 @@ function basics(): Scenario {
   };
 }
 
+// --- a snapshot rebuild: every entry shares one HLC, so entries apply in file order ---
+
+function snapshotOrder(): Scenario {
+  const at = hlc(BASE + 500, 0, 1);
+  const iso = (ms: number): string => new Date(BASE + ms).toISOString();
+  const G = "snap-todo-grandchild";
+  const C = "snap-todo-child";
+  const P = "snap-todo-parent";
+  const LABEL = "snap-label";
+  const T = "snap-todo-labelled";
+
+  // Grandchild < child < parent by number, and each entry names a parent that appears later in the file.
+  const lines: string[] = [
+    upsert("sn-label", at, "todo_labels", LABEL, { name: "snap", color: "#7aa2f7", created_at: iso(1) }),
+    upsert("sn-gc", at, "todos", G, { title: "grandchild", claimed_id: 1, created_at: iso(2), parent_uuid: C }),
+    upsert("sn-c", at, "todos", C, { title: "child", claimed_id: 2, created_at: iso(3), parent_uuid: P }),
+    upsert("sn-p", at, "todos", P, { title: "parent", claimed_id: 3, created_at: iso(4) }),
+  ];
+
+  // A link that sorts before its todo, then an unlink of the same pair after it: the deferred link must
+  // not be replayed over the unlink. A second pair keeps its link.
+  const sameBatch: string[] = [
+    link("sb-link-gone", hlc(BASE + 600, 0, 1), "todo_label_links", "link", T, LABEL),
+    upsert("sb-todo", hlc(BASE + 700, 0, 1), "todos", T, { title: "link then unlink", claimed_id: 4, created_at: iso(5) }),
+    link("sb-unlink", hlc(BASE + 800, 0, 1), "todo_label_links", "unlink", T, LABEL),
+    link("sb-link-kept", hlc(BASE + 650, 0, 1), "todo_label_links", "link", P, LABEL),
+  ];
+
+  return {
+    name: "snapshot-order",
+    phase1: { [file(D1)]: [...lines, ...sameBatch] },
+    phase2: {},
+  };
+}
+
 // --- seeded fuzz: random but valid-looking entries, heavy on collisions and ties ---
 
 function mulberry32(seed: number): () => number {
@@ -276,5 +311,5 @@ function fuzz(seed: number, entriesPerFile: number): Scenario {
 }
 
 export function makeScenarios(fuzzSeeds: number[] = [1, 2, 3, 4, 5, 6], entriesPerFile = 120): Scenario[] {
-  return [basics(), ...fuzzSeeds.map((s) => fuzz(s, entriesPerFile))];
+  return [basics(), snapshotOrder(), ...fuzzSeeds.map((s) => fuzz(s, entriesPerFile))];
 }

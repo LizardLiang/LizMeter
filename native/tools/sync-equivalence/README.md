@@ -37,9 +37,9 @@ cd .. && node native/tools/sync-equivalence/run.mjs [--tmp <dir>] [--keep] [--fu
 - Mixed run only: tombstone clocks. Two devices that delete the same row each keep the other device's
   tombstone clock.
 
-## Known behavior the harness shows in both engines
+## Subtask parent links across a snapshot rebuild
 
-A todo whose parent has a higher id than the todo itself loses its parent link when a device rebuilds from
-a snapshot (adopt, or a stale-machine rebuild). Snapshot entries apply in row order, the parent does not
-exist yet, the entry stays unmarked, and nothing re-reads a snapshot. Both engines do this. It is logged in
-`.claude/.Arena/debt.md`.
+A snapshot's entries share one HLC and apply in row order, so a todo can arrive before its parent. Both
+engines retry every entry that stayed unresolved once the whole batch is in. The `snapshot-order` fixture
+(a grandchild numbered below its child below its parent, plus a deferred link followed by an unlink of the
+same pair) and the final adopt comparison, which includes `parent_uuid`, cover it.

@@ -144,18 +144,16 @@ fn an_entry_whose_dependency_has_not_arrived_is_retried_not_lost() {
     let label_uuid = uuid_of(&h.a.db, "todo_labels", label.id);
     let todo_uuid = "11111111-1111-1111-1111-111111111111";
 
-    // The link's HLC sorts BEFORE the todo's own upsert: arrival order is HLC order, not dependency order.
-    append_raw(
-        &h.oplog_path(&h.a),
-        &[
-            json!({ "v": 1, "opId": "early-link", "hlc": { "physicalMs": 1000, "counter": 0, "deviceNumber": 1 },
-                    "table": "todo_label_links", "op": "link", "fields": { "fromUuid": todo_uuid, "toUuid": label_uuid } }),
-            json!({ "v": 1, "opId": "late-todo-upsert", "hlc": { "physicalMs": 2000, "counter": 0, "deviceNumber": 1 },
-                    "table": "todos", "op": "upsert", "rowUuid": todo_uuid,
-                    "fields": { "title": { "value": "Arrived after its own link",
-                                           "hlc": { "physicalMs": 2000, "counter": 0, "deviceNumber": 1 } } } }),
-        ],
-    );
+    // The link's own todo arrives only in a LATER pass, so one batch cannot resolve the link: it must
+    // stay unmarked and be reconsidered on the next pass.
+    let link_line = json!({ "v": 1, "opId": "early-link", "hlc": { "physicalMs": 1000, "counter": 0, "deviceNumber": 1 },
+                            "table": "todo_label_links", "op": "link",
+                            "fields": { "fromUuid": todo_uuid, "toUuid": label_uuid } });
+    let todo_line = json!({ "v": 1, "opId": "late-todo-upsert", "hlc": { "physicalMs": 2000, "counter": 0, "deviceNumber": 1 },
+                            "table": "todos", "op": "upsert", "rowUuid": todo_uuid,
+                            "fields": { "title": { "value": "Arrived after its own link",
+                                                   "hlc": { "physicalMs": 2000, "counter": 0, "deviceNumber": 1 } } } });
+    append_raw(&h.oplog_path(&h.a), &[link_line]);
 
     let linked = |db: &Database| -> bool {
         query_opt::<i64>(
@@ -171,12 +169,79 @@ fn an_entry_whose_dependency_has_not_arrived_is_retried_not_lost() {
 
     h.sync(&h.b);
     assert!(!applied(&h.b.db));
-    assert!(find(&h.b.db, "Arrived after its own link").is_some());
     assert!(!linked(&h.b.db));
 
+    append_raw(&h.oplog_path(&h.a), &[todo_line]);
     h.sync(&h.b);
+    assert!(find(&h.b.db, "Arrived after its own link").is_some());
     assert!(linked(&h.b.db));
     assert!(applied(&h.b.db));
+}
+
+fn raw_line(op_id: &str, physical_ms: i64, extra: serde_json::Value) -> serde_json::Value {
+    let mut v = json!({ "v": 1, "opId": op_id, "hlc": { "physicalMs": physical_ms, "counter": 0, "deviceNumber": 1 } });
+    for (k, val) in extra.as_object().unwrap() {
+        v[k] = val.clone();
+    }
+    v
+}
+
+fn label_link_exists(db: &Database, todo_uuid: &str) -> bool {
+    query_opt::<i64>(
+        db,
+        "SELECT 1 FROM todo_label_links k INNER JOIN todos t ON t.id = k.todo_id WHERE t.uuid = ?",
+        [todo_uuid],
+    )
+    .is_some()
+}
+
+#[test]
+fn a_label_link_that_sorts_before_its_todo_in_the_same_batch_resolves_within_that_pass() {
+    let h = Harness::new();
+    let label = h.a.db.create_todo_label(&CreateTodoLabelInput { name: "same-batch".into(), color: None }).unwrap();
+    h.sync(&h.b);
+    let label_uuid = uuid_of(&h.a.db, "todo_labels", label.id);
+    let todo_uuid = "22222222-2222-2222-2222-222222222222";
+    append_raw(
+        &h.oplog_path(&h.a),
+        &[
+            raw_line("same-batch-link", 1000, json!({ "table": "todo_label_links", "op": "link",
+                     "fields": { "fromUuid": todo_uuid, "toUuid": label_uuid } })),
+            raw_line("same-batch-todo", 2000, json!({ "table": "todos", "op": "upsert", "rowUuid": todo_uuid,
+                     "fields": { "title": { "value": "same batch",
+                                            "hlc": { "physicalMs": 2000, "counter": 0, "deviceNumber": 1 } } } })),
+        ],
+    );
+
+    h.sync(&h.b);
+
+    assert!(label_link_exists(&h.b.db, todo_uuid));
+    assert!(query_opt::<i64>(&h.b.db, "SELECT 1 FROM sync_applied_ops WHERE op_id = 'same-batch-link'", []).is_some());
+}
+
+#[test]
+fn a_deferred_link_is_not_replayed_over_a_later_unlink_of_the_same_pair_in_the_same_batch() {
+    let h = Harness::new();
+    let label = h.a.db.create_todo_label(&CreateTodoLabelInput { name: "unlinked".into(), color: None }).unwrap();
+    h.sync(&h.b);
+    let label_uuid = uuid_of(&h.a.db, "todo_labels", label.id);
+    let todo_uuid = "33333333-3333-3333-3333-333333333333";
+    append_raw(
+        &h.oplog_path(&h.a),
+        &[
+            raw_line("lk-link", 1000, json!({ "table": "todo_label_links", "op": "link",
+                     "fields": { "fromUuid": todo_uuid, "toUuid": label_uuid } })),
+            raw_line("lk-todo", 2000, json!({ "table": "todos", "op": "upsert", "rowUuid": todo_uuid,
+                     "fields": { "title": { "value": "link then unlink",
+                                            "hlc": { "physicalMs": 2000, "counter": 0, "deviceNumber": 1 } } } })),
+            raw_line("lk-unlink", 3000, json!({ "table": "todo_label_links", "op": "unlink",
+                     "fields": { "fromUuid": todo_uuid, "toUuid": label_uuid } })),
+        ],
+    );
+
+    h.sync(&h.b);
+
+    assert!(!label_link_exists(&h.b.db, todo_uuid));
 }
 
 #[test]
