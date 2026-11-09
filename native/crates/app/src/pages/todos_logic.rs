@@ -8,6 +8,8 @@ use std::ops::Range;
 
 pub const BAND_H: f32 = 34.0;
 pub const ROW_H: f32 = 36.0;
+/// The strip an empty, open group shows while a drag is in flight (`.emptyDrop`).
+pub const DROP_H: f32 = 38.0;
 
 pub struct Group {
     pub state: TodoState,
@@ -69,6 +71,8 @@ pub fn select_range(visible: &[i64], anchor: i64, id: i64) -> Option<Vec<i64>> {
 pub enum Flat {
     Band(usize),
     Row(usize, usize),
+    /// The "Drop here" strip of an empty group, present only during a drag.
+    Drop(usize),
 }
 
 /// The list as one run of fixed-height items, so any scroll position maps to the items on screen.
@@ -78,13 +82,16 @@ pub struct FlatLayout {
 }
 
 impl FlatLayout {
-    pub fn new(groups: &[Group], collapsed: &HashSet<i64>) -> Self {
+    pub fn new(groups: &[Group], collapsed: &HashSet<i64>, dragging: bool) -> Self {
         let mut items = vec![];
         for (gi, g) in groups.iter().enumerate() {
             items.push(Flat::Band(gi));
             if !collapsed.contains(&g.state.id) {
                 for ri in 0..g.items.len() {
                     items.push(Flat::Row(gi, ri));
+                }
+                if dragging && g.items.is_empty() {
+                    items.push(Flat::Drop(gi));
                 }
             }
         }
@@ -95,6 +102,7 @@ impl FlatLayout {
             y += match it {
                 Flat::Band(_) => BAND_H,
                 Flat::Row(..) => ROW_H,
+                Flat::Drop(_) => DROP_H,
             };
             offsets.push(y);
         }
@@ -120,9 +128,42 @@ impl FlatLayout {
         first.saturating_sub(overscan)..(last + overscan).min(n)
     }
 
+    /// The vertical extent of group `gi`, band included: the whole group is the drop target.
+    pub fn group_span(&self, gi: usize) -> Option<(f32, f32)> {
+        let mut at = self.items.iter().enumerate().filter(|(_, it)| item_group(it) == gi).map(|(i, _)| i);
+        let first = at.next()?;
+        let last = at.last().unwrap_or(first);
+        Some((self.offsets[first], self.offsets[last + 1]))
+    }
+
     pub fn index_of_row(&self, groups: &[Group], todo_id: i64) -> Option<usize> {
         self.items.iter().position(|it| matches!(it, Flat::Row(g, r) if groups[*g].items[*r].id == todo_id))
     }
+}
+
+fn item_group(item: &Flat) -> usize {
+    match *item {
+        Flat::Band(g) | Flat::Row(g, _) | Flat::Drop(g) => g,
+    }
+}
+
+/// The group under `y` (measured from the top of the list), or `None` outside it.
+pub fn group_at(layout: &FlatLayout, y: f32) -> Option<usize> {
+    if y < 0.0 || y >= layout.height() {
+        return None;
+    }
+    let idx = layout.offsets.partition_point(|&o| o <= y).saturating_sub(1);
+    layout.items.get(idx).map(item_group)
+}
+
+pub fn group_span(layout: &FlatLayout, gi: usize) -> Option<(f32, f32)> {
+    layout.group_span(gi)
+}
+
+/// Which of `ids` change state when dropped on `target`. Rows already there are skipped, and so are
+/// ids no longer in the list (deleted mid-drag), as `todosToMove` in `todoDrag.ts`.
+pub fn todos_to_move(ids: &[i64], todos: &[Todo], target: i64) -> Vec<i64> {
+    ids.iter().copied().filter(|id| todos.iter().any(|t| t.id == *id && t.state.id != target)).collect()
 }
 
 /// The scroll position that brings `[item_top, item_bottom)` into a viewport of `viewport_h` showing
@@ -507,7 +548,7 @@ mod tests {
         let st = state(1, 0, false);
         let todos: Vec<Todo> = (0..50_000).map(|i| todo(i, &st)).collect();
         let groups = group_todos(&todos, std::slice::from_ref(&st));
-        let layout = FlatLayout::new(&groups, &HashSet::new());
+        let layout = FlatLayout::new(&groups, &HashSet::new(), false);
         assert_eq!(layout.items.len(), 50_001);
         assert!((layout.height() - (BAND_H + 50_000.0 * ROW_H)).abs() < 1.0);
         let r = layout.range(0.0, 800.0, 0);
@@ -521,10 +562,52 @@ mod tests {
     }
 
     #[test]
+    fn a_drop_moves_only_rows_that_change_state_and_skips_unknown_ids() {
+        let (_, todos) = sample();
+        // 10 is in state 2, 11 and 12 in state 1, 99 was deleted mid-drag.
+        assert_eq!(todos_to_move(&[10, 11, 12, 99], &todos, 1), vec![10]);
+        assert_eq!(todos_to_move(&[11, 12], &todos, 1), Vec::<i64>::new());
+        assert_eq!(todos_to_move(&[11, 12], &todos, 2), vec![11, 12]);
+    }
+
+    #[test]
+    fn the_pointer_resolves_to_the_group_under_it_band_included() {
+        let (mut states, todos) = sample();
+        states.push(state(3, 2, false));
+        let groups = group_todos(&todos, &states);
+        // Groups: [1: band + 2 rows], [2: band + 1 row], [3: band, empty].
+        let layout = FlatLayout::new(&groups, &HashSet::new(), true);
+        let g1 = BAND_H + 2.0 * ROW_H;
+        let g2 = BAND_H + ROW_H;
+        assert_eq!(group_at(&layout, 0.0), Some(0));
+        assert_eq!(group_at(&layout, g1 - 1.0), Some(0));
+        assert_eq!(group_at(&layout, g1), Some(1));
+        assert_eq!(group_at(&layout, g1 + g2 + 5.0), Some(2));
+        assert_eq!(group_at(&layout, layout.height() + 1.0), None);
+        assert_eq!(group_at(&layout, -1.0), None);
+        assert_eq!(group_span(&layout, 1), Some((g1, g1 + g2)));
+    }
+
+    #[test]
+    fn an_empty_group_gets_a_drop_strip_only_while_dragging() {
+        let (mut states, todos) = sample();
+        states.push(state(3, 2, false));
+        let groups = group_todos(&todos, &states);
+        let idle = FlatLayout::new(&groups, &HashSet::new(), false);
+        let dragging = FlatLayout::new(&groups, &HashSet::new(), true);
+        assert_eq!(dragging.items.last(), Some(&Flat::Drop(2)));
+        assert!(idle.items.iter().all(|i| !matches!(i, Flat::Drop(_))));
+        assert_eq!(dragging.height() - idle.height(), DROP_H);
+        // A collapsed empty group keeps only its band.
+        let collapsed = FlatLayout::new(&groups, &HashSet::from([3]), true);
+        assert!(collapsed.items.iter().all(|i| !matches!(i, Flat::Drop(_))));
+    }
+
+    #[test]
     fn a_collapsed_group_has_only_its_band() {
         let (states, todos) = sample();
         let groups = group_todos(&todos, &states);
-        let layout = FlatLayout::new(&groups, &HashSet::from([1]));
+        let layout = FlatLayout::new(&groups, &HashSet::from([1]), false);
         assert_eq!(layout.items, vec![Flat::Band(0), Flat::Band(1), Flat::Row(1, 0)]);
         assert_eq!(layout.index_of_row(&groups, 10), Some(2));
         assert_eq!(layout.index_of_row(&groups, 11), None);

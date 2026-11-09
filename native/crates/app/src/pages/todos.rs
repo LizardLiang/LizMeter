@@ -14,6 +14,7 @@ use crate::controls::parse_color;
 use crate::css::{hex, rgba, C};
 use crate::select::{SelectBox, SelectEvent, SelectOption};
 use crate::ui::*;
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use lizmeter_core::*;
 use lizmeter_services::Services;
@@ -31,6 +32,71 @@ const BULK_BAR_H: f32 = 50.0;
 const SCROLL_ID: &str = "todos-page";
 
 const FILTERS: [(TodoFilter, &str); 4] = [(TodoFilter::All, "All"), (TodoFilter::Active, "Active"), (TodoFilter::Done, "Done"), (TodoFilter::Ai, "From AI")];
+
+/// What a row carries while it is dragged: the row it was picked up by.
+#[derive(Clone, Copy)]
+struct DragPayload(i64);
+
+/// A drag in flight: the rows moving and the group under the pointer.
+struct DragState {
+    ids: Vec<i64>,
+    over: Option<usize>,
+    /// Set by a capture hook, which has no gpui drag behind it and draws the ghost itself.
+    held_at: Option<Point<Pixels>>,
+    title: String,
+    state: TodoState,
+}
+
+/// What follows the pointer during a drag (`DragGhost`): smaller than a row, so the target stays visible.
+struct DragGhost {
+    title: String,
+    state: Option<TodoState>,
+    count: usize,
+}
+
+impl Render for DragGhost {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        ghost_el(&self.title, self.state.as_ref(), self.count)
+    }
+}
+
+fn ghost_el(title: &str, state: Option<&TodoState>, count: usize) -> Div {
+    let mut g = div()
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(8.0))
+        .max_w(px(352.0))
+        .px(px(12.0))
+        .py(px(7.0))
+        .rounded(px(8.0))
+        .border(px(1.0))
+        .border_color(col(rgba(122, 162, 247, 0.35)))
+        .bg(col(rgba(26, 29, 51, 0.95)))
+        .backdrop_filter(px(18.0), 1.5)
+        .shadow(shadows(&[sh(0.0, 12.0, 28.0, bk(0.5))]))
+        .font_family(UI_FONT)
+        .children(state.map(|s| state_dot(&s.color, s.is_completed, 11.0, 1.5)))
+        .child(div().min_w_0().truncate().text_size(px(12.5)).line_height(px(16.0)).font_weight(FontWeight(500.0)).text_color(col(TN_TEXT)).child(title.to_string()));
+    if count > 1 {
+        g = g.child(
+            div()
+                .flex_shrink_0()
+                .px(px(7.0))
+                .py(px(1.0))
+                .rounded(px(9999.0))
+                .border(px(1.0))
+                .border_color(col(rgba(122, 162, 247, 0.35)))
+                .bg(col(rgba(122, 162, 247, 0.2)))
+                .text_color(col(TN_BLUE))
+                .text_size(px(10.5))
+                .line_height(px(14.0))
+                .font_weight(FontWeight(700.0))
+                .child(format!("+{}", count - 1)),
+        );
+    }
+    g
+}
 
 /// Where the list sits in the scroller, measured while painting.
 #[derive(Clone, Copy)]
@@ -122,6 +188,7 @@ pub struct TodosPage {
     detail: Option<Entity<TodoDetailPage>>,
     /// A row to centre once the list has been measured.
     scroll_target: Option<i64>,
+    drag: Option<DragState>,
 }
 
 impl EventEmitter<PageEvent> for TodosPage {}
@@ -160,7 +227,7 @@ impl TodosPage {
         Self {
             svc,
             groups: vec![],
-            layout: FlatLayout::new(&[], &HashSet::new()),
+            layout: FlatLayout::new(&[], &HashSet::new(), false),
             todo_count: 0,
             states: vec![],
             projects: vec![],
@@ -186,6 +253,7 @@ impl TodosPage {
             dialog: Dialog::None,
             detail: None,
             scroll_target: None,
+            drag: None,
         }
     }
 
@@ -232,7 +300,7 @@ impl TodosPage {
     }
 
     fn rebuild(&mut self) {
-        self.layout = FlatLayout::new(&self.groups, &self.collapsed);
+        self.layout = FlatLayout::new(&self.groups, &self.collapsed, self.drag.is_some());
         let visible = visible_ids(&self.groups, &self.collapsed);
         self.focused = cursor_on_screen(self.focused, &visible);
     }
@@ -318,6 +386,72 @@ impl TodosPage {
                 return;
             }
         }
+    }
+
+    // ---- Drag and drop ----
+
+    /// A row is picked up. Dragging a selected row moves the whole selection, like the bulk bar.
+    fn begin_drag(&mut self, lead: i64, cx: &mut Context<Self>) -> Option<(String, TodoState, usize)> {
+        let todo = self.todo(lead)?;
+        let (title, state) = (todo.title.clone(), todo.state.clone());
+        let ids: Vec<i64> = if self.selected.contains(&lead) { self.selected.iter().copied().collect() } else { vec![lead] };
+        let count = ids.len();
+        self.drag = Some(DragState { ids, over: None, held_at: None, title: title.clone(), state: state.clone() });
+        self.rebuild();
+        cx.notify();
+        Some((title, state, count))
+    }
+
+    /// The group under a window position, found from the list's measured placement.
+    fn group_under(&self, at: Point<Pixels>) -> Option<usize> {
+        let g = self.geo.get()?;
+        let off = f32::from(self.scroll().offset().y);
+        let y = f32::from(at.y) - (g.vp_top + g.panel_y + 1.0 + off);
+        group_at(&self.layout, y)
+    }
+
+    /// Window y of the top of group `gi`, for placing a captured ghost.
+    fn group_screen_top(&self, gi: usize) -> Option<f32> {
+        let g = self.geo.get()?;
+        let (top, _) = group_span(&self.layout, gi)?;
+        Some(g.vp_top + g.panel_y + 1.0 + top + f32::from(self.scroll().offset().y))
+    }
+
+    /// The pointer moved during a drag. Hovering a collapsed group opens it, so the landing is visible.
+    fn drag_to(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let over = self.group_under(at);
+        let Some(d) = self.drag.as_mut() else { return };
+        if d.over == over {
+            return;
+        }
+        d.over = over;
+        if let Some(sid) = over.map(|gi| self.groups[gi].state.id).filter(|sid| self.collapsed.contains(sid)) {
+            self.toggle_collapsed(sid, cx);
+        }
+        cx.notify();
+    }
+
+    fn end_drag(&mut self, cx: &mut Context<Self>) -> Option<DragState> {
+        let d = self.drag.take();
+        if d.is_some() {
+            self.rebuild();
+            cx.notify();
+        }
+        d
+    }
+
+    /// The row is released over the list: the rows that are not already in that group take its state.
+    fn drop_rows(&mut self, over: Option<usize>, cx: &mut Context<Self>) {
+        let Some(d) = self.end_drag(cx) else { return };
+        let Some(gi) = over.or(d.over) else { return };
+        let target = self.groups[gi].state.id;
+        let all: Vec<Todo> = self.groups.iter().flat_map(|g| g.items.iter().cloned()).collect();
+        let moving = todos_to_move(&d.ids, &all, target);
+        if moving.is_empty() {
+            return;
+        }
+        self.set_state_of(&moving, target);
+        self.reload(cx);
     }
 
     // ---- Scrolling ----
@@ -786,6 +920,36 @@ impl TodosPage {
                     self.rebuild();
                 }
             }
+            "drag" => {
+                // drag:<row>@<group>[+<more rows>]: a row lifted over a group, as mid-gesture.
+                let (row, rest) = arg.split_once('@').unwrap_or((arg, "0"));
+                let (group, extra) = rest.split_once('+').map(|(g, e)| (g, e.parse::<usize>().unwrap_or(0))).unwrap_or((rest, 0));
+                if let Some(id) = nth(self, row) {
+                    for more in self.visible().into_iter().filter(|v| *v != id).take(extra) {
+                        self.selected.insert(more);
+                    }
+                    if extra > 0 {
+                        self.selected.insert(id);
+                    }
+                    if self.begin_drag(id, cx).is_some() {
+                        let gi = group.parse::<usize>().ok().filter(|g| *g < self.groups.len());
+                        let spot = gi.and_then(|g| self.group_screen_top(g)).unwrap_or(200.0);
+                        let x = self.geo.get().map_or(300.0, |g| g.panel_x + 150.0);
+                        if let Some(d) = self.drag.as_mut() {
+                            d.over = gi;
+                            d.held_at = Some(point(px(x), px(spot + 20.0)));
+                        }
+                        if let Some(sid) = gi.map(|g| self.groups[g].state.id).filter(|s| self.collapsed.contains(s)) {
+                            self.toggle_collapsed(sid, cx);
+                        }
+                        self.rebuild();
+                    }
+                }
+            }
+            "drop" => self.drop_rows(None, cx),
+            "drag-cancel" => {
+                self.end_drag(cx);
+            }
             "copy" => self.copy_id(self.focused.unwrap_or(0), false, cx),
             _ => {}
         }
@@ -856,7 +1020,7 @@ impl TodosPage {
             }
         }
 
-        let (m_check, m_open, m_menu) = (me.clone(), me.clone(), me.clone());
+        let (m_check, m_open, m_menu, m_drag) = (me.clone(), me.clone(), me.clone(), me.clone());
         let check = div()
             .id(SharedString::from(format!("todo-chk-{id}")))
             .flex_shrink_0()
@@ -982,9 +1146,18 @@ impl TodosPage {
             .gap(px(6.0))
             .bg(col(bg))
             .hover(move |s| s.bg(col(hover_bg)))
+            .when(self.drag.as_ref().is_some_and(|d| d.ids.contains(&id)), |r| r.opacity(0.35))
             .on_mouse_down(MouseButton::Right, move |ev, _, app| {
                 let at = ev.position;
                 m_menu.update(app, |p, cx| p.open_row_menu(id, at, cx));
+            })
+            .on_drag(DragPayload(id), move |p, _, _, app| {
+                let info = m_drag.update(app, |t, cx| t.begin_drag(p.0, cx));
+                let (title, state, count) = match info {
+                    Some((t, s, c)) => (t, Some(s), c),
+                    None => (String::new(), None, 1),
+                };
+                app.new(|_| DragGhost { title, state, count })
             })
             .child(check)
             .child(body);
@@ -1218,6 +1391,11 @@ impl Render for TodosPage {
 impl TodosPage {
     fn list_view(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
+        // A real drag that ended outside the list (or was cancelled) leaves nothing behind.
+        if self.drag.as_ref().is_some_and(|d| d.held_at.is_none()) && !cx.has_active_drag() {
+            self.drag = None;
+            self.rebuild();
+        }
         let vp = window.viewport_size();
         let scroll = self.scroll();
         let scrolled_by_capture = CAPTURE_SCROLL.load(std::sync::atomic::Ordering::Relaxed);
@@ -1243,6 +1421,23 @@ impl TodosPage {
                 Flat::Row(gi, ri) => {
                     let last = ri + 1 == self.groups[gi].items.len();
                     rows = rows.child(self.row_el(&self.groups[gi].items[ri], last, &me, &today_iso));
+                }
+                Flat::Drop(_) => {
+                    rows = rows.child(
+                        div()
+                            .w_full()
+                            .h(px(DROP_H))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .border_b_1()
+                            .border_dashed()
+                            .border_color(col(rgba(122, 162, 247, 0.35)))
+                            .text_size(px(11.5))
+                            .text_color(col(TN_BLUE))
+                            .child("Drop here"),
+                    );
                 }
             }
         }
@@ -1290,6 +1485,24 @@ impl TodosPage {
             .child(div().absolute().top_0().left_0().right_0().h(px(1.0)).bg(col(wh(0.06))))
             .child(measure)
             .child(rows);
+        let panel = match self.drag.as_ref().and_then(|d| d.over).and_then(|gi| group_span(&self.layout, gi)) {
+            Some((top, bottom)) => panel.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(px(top))
+                    .w_full()
+                    .h(px(bottom - top))
+                    .border(px(1.0))
+                    .border_color(col(rgba(122, 162, 247, 0.45)))
+                    .bg(col(rgba(122, 162, 247, 0.08))),
+            ),
+            None => panel,
+        };
+        let panel = panel.on_drop(cx.listener(|this, _: &DragPayload, window, cx| {
+            let over = this.group_under(window.mouse_position());
+            this.drop_rows(over, cx);
+        }));
 
         let body: AnyElement = if self.loading {
             div().py(px(24.0)).flex().justify_center().text_size(px(13.0)).text_color(col(TN_TEXT_DIM)).child("Loading...").into_any_element()
@@ -1322,6 +1535,7 @@ impl TodosPage {
             .h_full()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| this.on_key(ev, window, cx)))
+            .on_drag_move(cx.listener(|this, ev: &DragMoveEvent<DragPayload>, _, cx| this.drag_to(ev.event.position, cx)))
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|this, _, window, cx| {
@@ -1359,6 +1573,9 @@ impl TodosPage {
                         .child(text),
                 ),
             );
+        }
+        if let Some((d, at)) = self.drag.as_ref().and_then(|d| d.held_at.map(|at| (d, at))) {
+            root = root.child(div().absolute().left(at.x).top(at.y).child(ghost_el(&d.title, Some(&d.state), d.ids.len())));
         }
         match &self.overlay {
             Overlay::None => {}
