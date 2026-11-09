@@ -12,6 +12,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration as Wait;
 
+use crate::claude_ui::CODE_FONT;
+
 /// Electron polls every 5 s so new saves from Neovim appear by themselves.
 const POLL: Wait = Wait::from_secs(5);
 
@@ -125,7 +127,7 @@ impl ActivityPage {
             .text_color(col(TN_TEXT_DIM))
             .hover(|s| s.text_color(col(TN_TEXT)).bg(col(rgba(122, 162, 247, 0.06))))
             .on_click(move |_, w, a| on_click(w, a))
-            .child(svg().path(icon).size(px(16.0)))
+            .child(svg().path(icon).size(px(16.0)).text_color(col(TN_TEXT_DIM)))
     }
 
     fn group_card(&self, g: &NvimActivityGroup, cx: &mut Context<Self>) -> impl IntoElement {
@@ -179,7 +181,7 @@ impl ActivityPage {
                         .items_center()
                         .justify_between()
                         .hover(|s| s.bg(col(rgba(122, 162, 247, 0.04))))
-                        .child(div().flex_1().min_w_0().mr(px(12.0)).truncate().font_family(MONO).text_size(px(12.0)).line_height(px(16.0)).text_color(col(TN_TEXT_DIM)).child(a.file.clone()))
+                        .child(div().flex_1().min_w_0().mr(px(12.0)).truncate().font_family(CODE_FONT).text_size(px(12.0)).line_height(px(14.4)).text_color(col(TN_TEXT_DIM)).child(a.file.clone()))
                         .child(ui_text(11.0).flex_shrink_0().text_color(col(TN_TEXT_DIM)).child(format_local_time(&a.recorded_at))),
                 );
             }

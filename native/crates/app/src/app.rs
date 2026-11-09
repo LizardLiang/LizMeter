@@ -453,6 +453,7 @@ impl Root {
             },
             move |_, app| {
                 click_me.update(app, |t, cx| {
+                    t.activity.update(cx, |a, _| a.hide());
                     t.page = Page::Gallery;
                     cx.notify();
                 })

@@ -15,6 +15,8 @@ use std::time::{Duration, Instant};
 
 const BLUE: crate::css::C = hex(0x7aa2f7);
 const PURPLE: crate::css::C = hex(0xbb9af7);
+/// What `monospace` resolves to in the renderer on Windows.
+pub const CODE_FONT: &str = "Consolas";
 
 /// A Claude Code session the user linked to the timer or the stopwatch (`SelectedClaudeSession`).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,8 +231,8 @@ impl ClaudeSessionSelect {
                             .flex_row()
                             .items_center()
                             .gap(px(8.0))
-                            .child(div().font_family(MONO).text_size(px(12.0)).line_height(px(15.0)).font_weight(FontWeight(600.0)).text_color(col(BLUE)).child(short))
-                            .child(ui_text(11.0).text_color(col(TN_TEXT_DIM)).child(relative_short(&s.preview.last_activity_at, now)))
+                            .child(div().font_family(CODE_FONT).text_size(px(12.0)).line_height(px(15.0)).font_weight(FontWeight(600.0)).text_color(col(BLUE)).child(short))
+                            .child(ui_text(11.0).ml(px(8.0)).text_color(col(TN_TEXT_DIM)).child(relative_short(&s.preview.last_activity_at, now)))
                             .child(ui_text(11.0).ml_auto().text_color(col(TN_TEXT_DIM)).child(last_segment(&s.project_display_path))),
                     );
                 if let Some(msg) = s.preview.first_user_message.as_ref().filter(|m| !m.is_empty()) {
@@ -272,12 +274,15 @@ impl Render for ClaudeSessionSelect {
         let me = cx.entity();
         let m_down = me.clone();
         let label = select_label(self.selected.as_ref(), &self.sessions);
-        let trigger = Glass::new(8.0, 0.0, 1.0, Spec::rrect(8.0).solid(rgba(16, 17, 32, 0.6)).border(1.0, rgba(59, 66, 97, 0.7)))
-            .el()
+        let trigger = div()
             .id(SharedString::from(format!("{}-trigger", self.id)))
             .w_full()
-            .h(px(33.0))
-            .px(px(13.0))
+            .px(px(12.0))
+            .py(px(8.0))
+            .rounded(px(6.0))
+            .border(px(1.0))
+            .border_color(col(rgba(122, 162, 247, 0.25)))
+            .bg(col(rgba(26, 27, 38, 0.8)))
             .flex()
             .flex_row()
             .items_center()
@@ -296,8 +301,8 @@ impl Render for ClaudeSessionSelect {
                     if s.open { s.close(cx) } else { s.open(cx) }
                 })
             })
-            .child(div().flex_1().min_w_0().truncate().font_family(BTN_FONT).text_size(px(14.0)).line_height(px(16.0)).child(label))
-            .child(svg().path("icons/caret.svg").size(px(12.0)).flex_shrink_0().text_color(col(TN_TEXT_DIM)));
+            .child(ui_text(13.0).flex_1().min_w_0().truncate().line_height(px(16.4)).child(label))
+            .child(ui_text(10.0).flex_shrink_0().text_color(col(TN_TEXT_DIM)).child(if self.open { "\u{25b2}" } else { "\u{25bc}" }));
         let mut wrap = div().relative().w_full().child(trigger);
         if self.open {
             wrap = wrap.child(deferred(self.list(cx)).with_priority(3));
@@ -410,7 +415,7 @@ pub fn stats_card(view: &StatsView, manage: Option<Box<dyn Fn(&mut Window, &mut 
     }
     let mut header = div().flex().flex_row().items_center().gap(px(6.0)).child(title());
     if let Some((text, color)) = view.status() {
-        header = header.child(ui_text(12.0).font_weight(FontWeight(600.0)).text_color(col(color)).child(spaced(&text.to_uppercase(), 0.6)));
+        header = header.child(ui_text(12.0).ml(px(6.0)).font_weight(FontWeight(600.0)).text_color(col(color)).child(spaced(&text.to_uppercase(), 0.6)));
     }
     if let Some(manage) = manage {
         header = header.child(div().ml_auto().child(blue_button("cc-manage", "Manage Sessions", move |w, a| manage(w, a))));
@@ -529,7 +534,7 @@ pub fn session_picker(
                             .text_size(px(10.0))
                             .child(if on { "\u{2713}" } else { "" }),
                     )
-                    .child(div().min_w(px(68.0)).font_family(MONO).text_size(px(11.0)).text_color(col(TN_TEXT_DIM)).child(short))
+                    .child(div().min_w(px(68.0)).font_family(CODE_FONT).text_size(px(11.0)).text_color(col(TN_TEXT_DIM)).child(short))
                     .child(ui_text(11.0).min_w(px(64.0)).text_color(col(TN_TEXT_DIM)).child(relative_long(&s.last_activity_at, v.now)))
                     .child(preview),
             );

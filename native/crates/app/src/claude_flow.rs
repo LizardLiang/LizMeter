@@ -282,6 +282,31 @@ impl Root {
         cx.notify();
     }
 
+    /// Capture hooks (`--do`): `bounce` leaves the page and comes back, `claude-link` links the
+    /// newest session, `claude-open` opens the session select.
+    pub fn capture_op(&mut self, op: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match op {
+            "bounce" => {
+                crate::ui::CAPTURE_SCROLL.store(0, std::sync::atomic::Ordering::Relaxed);
+                let (here, away) = match self.page {
+                    crate::app::Page::History => (1, 7),
+                    crate::app::Page::Stats => (7, 8),
+                    crate::app::Page::Tags => (8, 7),
+                    crate::app::Page::Settings => (9, 7),
+                    _ => (0, 7),
+                };
+                self.navigate(away, window, cx);
+                self.navigate(here, window, cx);
+            }
+            "claude-link" => self.capture_claude_link(!self.pomodoro, cx),
+            "claude-open" => {
+                let select = if self.pomodoro { self.cc_select_timer.clone() } else { self.cc_select_sw.clone() };
+                select.update(cx, |s, cx| s.open(cx));
+            }
+            _ => {}
+        }
+    }
+
     /// Capture hook: link the newest scanned session, as if picked from the select.
     pub fn capture_claude_link(&mut self, stopwatch: bool, cx: &mut Context<Self>) {
         let Some(s) = self.svc.claude_scan_all().into_iter().max_by(|a, b| a.preview.last_activity_at.cmp(&b.preview.last_activity_at)) else { return };

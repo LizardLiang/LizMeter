@@ -66,10 +66,12 @@ struct Args {
     steps: Vec<Step>,
     data_dir: Option<PathBuf>,
     edit_time: bool,
+    /// Capture hooks run once after the window opens: `bounce`, `claude-link`, `claude-open`.
+    ops: Vec<String>,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new(), data_dir: None, edit_time: false };
+    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new(), data_dir: None, edit_time: false, ops: Vec::new() };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -89,6 +91,7 @@ fn parse_args() -> Args {
                 }
             }
             "--edit-time" => a.edit_time = true,
+            "--do" => a.ops.extend(it.next().map(|v| v.split(',').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default()),
             "--data-dir" => a.data_dir = it.next().map(PathBuf::from),
             "--html" => a.html = it.next(),
             "--md" => a.md = it.next().map(PathBuf::from),
@@ -284,6 +287,21 @@ fn main() {
             }
         }
         cx.activate(!shot);
+        if !args.ops.is_empty() {
+            let ops = args.ops.clone();
+            cx.spawn(async move |cx| {
+                cx.background_executor().timer(Duration::from_millis(600)).await;
+                if let Some(ent) = handle.downcast::<Root>().and_then(|r| r.entity(cx).ok()) {
+                    for op in &ops {
+                        let _ = handle.update(cx, |_, window, cx| {
+                            ent.update(cx, |r, cx| r.capture_op(op, window, cx));
+                        });
+                        cx.background_executor().timer(Duration::from_millis(250)).await;
+                    }
+                }
+            })
+            .detach();
+        }
         {
             let steps = std::mem::take(&mut args_steps);
             let html = args_html.take();

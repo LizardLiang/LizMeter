@@ -93,6 +93,17 @@ fn trim_edges(toks: &mut Vec<Tok>) {
     }
 }
 
+/// The long-date pattern with the weekday `toLocaleDateString` adds for `weekday: "long"`: a
+/// pattern without one gets it in front (`dddd, MMMM d, yyyy`), or behind for a year-first
+/// pattern (`yyyy年M月d日 dddd`).
+pub fn with_weekday(long_date: &str) -> String {
+    let toks = tokenize(long_date);
+    if toks.iter().any(|t| matches!(t, Tok::Letter('d', n) if *n >= 3)) {
+        return long_date.to_string();
+    }
+    if matches!(toks.first(), Some(Tok::Letter('y', _))) { format!("{long_date} dddd") } else { format!("dddd, {long_date}") }
+}
+
 /// `dddd, MMMM d, yyyy` to `MMM d, yyyy` (or `MMM d` without the year).
 pub fn date_pattern(long_date: &str, with_year: bool) -> String {
     let mut toks = tokenize(long_date);
@@ -208,7 +219,7 @@ mod win {
             let am = info(LOCALE_S1159).unwrap_or_default();
             let short_date = info(LOCALE_SSHORTDATE)?;
             Some(Patterns {
-                long_date: long.clone(),
+                long_date: with_weekday(&long),
                 date_year: date_pattern(&long, true),
                 date: date_pattern(&long, false),
                 time: time_pattern(&time, &am),
@@ -305,6 +316,13 @@ pub fn weekday_short(y: i32, m: u32, d: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_long_date_gets_the_weekday_it_lacks() {
+        assert_eq!(with_weekday("yyyy'年'M'月'd'日'"), "yyyy'年'M'月'd'日' dddd");
+        assert_eq!(with_weekday("MMMM d, yyyy"), "dddd, MMMM d, yyyy");
+        assert_eq!(with_weekday("dddd, MMMM d, yyyy"), "dddd, MMMM d, yyyy");
+    }
 
     #[test]
     fn en_us_long_date_loses_weekday_and_full_month() {

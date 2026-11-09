@@ -9,6 +9,11 @@ use lizmeter_ui::scrollbar::{self, BarStyle};
 use std::sync::Arc;
 
 const BLUE: crate::css::C = hex(0x7aa2f7);
+use crate::claude_ui::CODE_FONT;
+
+/// The text column: the page's 640 px less its 28 px side padding. Wrapped text takes its height
+/// from this width, so it is set where gpui measures the paragraph.
+const TEXT_W: f32 = 584.0;
 
 pub struct ClaudePage {
     svc: Arc<Services>,
@@ -39,7 +44,7 @@ impl ClaudePage {
         const TAIL: &str = ".";
         let base = window.text_style().font();
         let run = |len: usize, font: Font| TextRun { len, font, color: col(TN_TEXT_DIM), background_color: None, underline: None, strikethrough: None };
-        let mono = Font { family: MONO.into(), ..base.clone() };
+        let mono = Font { family: CODE_FONT.into(), ..base.clone() };
         StyledText::new(format!("{HEAD}{CODE}{TAIL}")).with_runs(vec![run(HEAD.len(), base.clone()), run(CODE.len(), mono), run(TAIL.len(), base)])
     }
 }
@@ -57,6 +62,7 @@ impl Render for ClaudePage {
             .child(Self::heading("Claude Code", 22.0).text_color(col(BLUE)).mb(px(8.0)))
             .child(
                 ui_text(13.0)
+                    .max_w(px(TEXT_W))
                     .text_color(col(TN_TEXT_DIM))
                     .mb(px(24.0))
                     .child("Tracks Claude Code AI coding sessions during your LizMeter timer sessions. Select a project in Settings to enable tracking."),
@@ -65,7 +71,7 @@ impl Render for ClaudePage {
         if self.loading {
             body = body.child(ui_text(13.0).py(px(20.0)).text_color(col(TN_TEXT_DIM)).child("Loading projects\u{2026}"));
         } else if self.projects.is_empty() {
-            body = body.child(ui_text(13.0).py(px(20.0)).text_color(col(TN_TEXT_DIM)).child(Self::empty_text(window)));
+            body = body.child(ui_text(13.0).max_w(px(TEXT_W)).py(px(20.0)).text_color(col(TN_TEXT_DIM)).child(Self::empty_text(window)));
         }
         for p in &self.projects {
             body = body.child(
@@ -79,8 +85,8 @@ impl Render for ClaudePage {
                     .bg(col(rgba(122, 162, 247, 0.06)))
                     .flex()
                     .flex_col()
-                    .child(div().mb(px(4.0)).font_family(MONO).text_size(px(14.0)).line_height(px(18.0)).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT)).child(p.display_path.clone()))
-                    .child(div().font_family(MONO).text_size(px(11.0)).line_height(px(14.0)).text_color(col(TN_TEXT_DIM)).child(p.dir_name.clone())),
+                    .child(div().mb(px(4.0)).font_family(CODE_FONT).text_size(px(14.0)).line_height(px(16.5)).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT)).child(p.display_path.clone()))
+                    .child(div().font_family(CODE_FONT).text_size(px(11.0)).line_height(px(13.5)).text_color(col(TN_TEXT_DIM)).child(p.dir_name.clone())),
             );
         }
         div()
