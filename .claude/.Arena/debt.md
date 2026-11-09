@@ -272,7 +272,7 @@ collapsed.
 ## Native port, phase 6a (2026-11-09)
 
 - **Issue linking is todos only.** The native "Link issue" button and the stopwatch Start prompt list the app's todos with a search box and state chips. The Linear/Jira/GitHub tabs and the project and label chips of `TodoIssuePicker` come with phases 7 and 8. A fuzzy match here is a plain subsequence score, not `fuzzyMatch.ts`.
-- **Claude Code linking is not wired on the Timer page.** "Link Claude Code session" renders as a static select, and the timer saves with `save_session`, never `save_session_with_tracking`. Part C of phase 6 owns the Claude page and the tracker hand-off.
+- **Claude Code linking** (was not wired on the Timer page): done in phase 6c, see below.
 - **History "Log Work" / "Retry" pills have no handler** until phase 8 (Jira worklog).
 - **Stopwatch settings are not persisted** (as in Electron): 8 h maximum, prompt for issue on. Settings (phase 6b) writes them to `Root.sw_settings`; they reset on restart like Electron's.
 - **Date labels were en-US.** Fixed in phase 6b: `locale.rs` reads the Windows user locale.
@@ -285,3 +285,12 @@ collapsed.
 - **Fonts:** DirectWrite returns the regular face of JhengHei UI and Arial for weight 600; the vendored gpui maps 600..700 to bold for those two families (`direct_write.rs`), as Chromium does. Other families keep the requested weight.
 - **Stats 7d/14d/30d chart animation** grows a bar only when the same day (or tag) bar exists in both ranges, as the CSS height transition does on a keyed element.
 - **Settings number inputs** accept digits only (the browser also accepts `e`, `+`, `-`, `.`); the stopwatch hours field accepts digits and one decimal point.
+
+## Native port, phase 6c (2026-11-09)
+
+- **No scan on timer start from `claude_tracker.project_dir_name`.** Electron's `TomatoClock` scans that project when the timer starts and opens the session picker. Nothing in Electron writes the setting (no Settings control), so the native timer links a session only through the select. The picker panel itself is ported: it opens from "Manage Sessions" and from "Add" on the new-session notice.
+- **Linking a session scans on the UI thread.** `claude_scan(project)` and `claude_track_selected` run synchronously when a row is picked (Electron awaits them over IPC). The all-projects scan behind the open list runs on a background task. Measure the project scan on a large `~/.claude` before cutover.
+- **A failed save drops the tracked Claude Code numbers.** The tracker is stopped before the save, as in Electron; a retry after a database error saves the session without them.
+- **gpui `truncate()` shows no ellipsis in flex-resolved widths.** The text measure caches the untruncated line from the first pass, so Activity file names and the select label clip without the "…" Chromium draws. Fixed-width cases (the stopwatch issue badge) do show it.
+- **Claude page paragraphs take their height from a fixed 584 px column** (`TEXT_W`): gpui measures wrapped text before the flex width is known. A window narrower than the page's 640 px max wraps one line more than the box reserves.
+- **Long-date weekday is inferred.** `locale::with_weekday` adds the weekday to a Windows long-date pattern that lacks one (front for day-first locales, back for year-first ones such as zh-TW); a locale that glues the weekday on (ja: `2026年1月10日月曜日`) gets a space.
