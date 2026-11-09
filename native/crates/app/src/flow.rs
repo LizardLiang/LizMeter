@@ -87,8 +87,12 @@ impl Root {
             }
             PageEvent::SoundEnabled(on) => self.sound_enabled = *on,
             PageEvent::StopwatchSettings(sw) => self.sw_settings = *sw,
+            PageEvent::OpenTodo(id) => {
+                self.navigate(2, window, cx);
+                let id = *id;
+                self.todos.update(cx, |t, cx| t.highlight(id, window, cx));
+            }
             PageEvent::Relaunch => self.relaunch(cx),
-            _ => {}
         }
     }
 

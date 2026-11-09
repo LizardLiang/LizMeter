@@ -11,6 +11,7 @@ use crate::pages::history::HistoryPage;
 use crate::pages::settings::SettingsPage;
 use crate::pages::stats::StatsPage;
 use crate::pages::tags::TagsPage;
+use crate::pages::todos::TodosPage;
 use crate::tag_picker::TagPicker;
 use crate::ui::*;
 use crate::gallery;
@@ -30,6 +31,7 @@ pub enum Page {
     History,
     Stats,
     Tags,
+    Todos,
     Settings,
     Claude,
     Activity,
@@ -100,6 +102,7 @@ pub struct Root {
     pub cc_select_sw: Entity<ClaudeSessionSelect>,
     pub activity: Entity<ActivityPage>,
     pub claude_page: Entity<ClaudePage>,
+    pub todos: Entity<TodosPage>,
     /// A session was saved while History was not refreshed; the next History render reloads.
     pub history_stale: bool,
 }
@@ -140,6 +143,8 @@ impl Root {
 
         let activity = cx.new(|_| ActivityPage::new(svc.clone()));
         let claude_page = cx.new(|_| ClaudePage::new(svc.clone()));
+        let todos = cx.new(|cx| TodosPage::new(svc.clone(), window, cx));
+        cx.subscribe_in(&todos, window, Self::on_page_event::<TodosPage>).detach();
 
         let idle = claude_flow::idle_minutes_from(svc.get_setting_value("claude_tracker.idle_threshold_minutes").ok().flatten().as_deref());
         let cc_select_timer = cx.new(|_| ClaudeSessionSelect::new(svc.clone(), "cc-timer"));
@@ -186,6 +191,7 @@ impl Root {
             cc_select_sw,
             activity,
             claude_page,
+            todos,
             history_stale: false,
         };
         root.reload_tags(cx);
@@ -206,6 +212,9 @@ impl Root {
         }
         if page == Page::Claude {
             root.show_claude(cx);
+        }
+        if page == Page::Todos {
+            root.show_todos(window, cx);
         }
         root
     }
@@ -361,6 +370,12 @@ impl Root {
         cx.notify();
     }
 
+    pub fn show_todos(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.todos.update(cx, |t, cx| t.show(window, cx));
+        self.page = Page::Todos;
+        cx.notify();
+    }
+
     pub fn show_claude(&mut self, cx: &mut Context<Self>) {
         self.claude_page.update(cx, |c, cx| c.show(cx));
         self.page = Page::Claude;
@@ -383,6 +398,7 @@ impl Root {
         let active_idx = match self.page {
             Page::Timer => Some(0),
             Page::History => Some(1),
+            Page::Todos => Some(2),
             Page::Claude => Some(4),
             Page::Activity => Some(5),
             Page::Stats => Some(7),
@@ -467,6 +483,7 @@ impl Root {
         match index {
             0 => Page::Timer,
             1 => Page::History,
+            2 => Page::Todos,
             4 => Page::Claude,
             5 => Page::Activity,
             7 => Page::Stats,
@@ -488,6 +505,7 @@ impl Root {
                 cx.notify();
             }
             1 => self.show_history(window, cx),
+            2 => self.show_todos(window, cx),
             4 => self.show_claude(cx),
             5 => self.show_activity(cx),
             7 => self.show_stats(cx),
@@ -538,6 +556,7 @@ impl Render for Root {
             Page::Stats => self.stats.clone().into_any_element(),
             Page::Tags => self.tags_page.clone().into_any_element(),
             Page::Settings => self.settings.clone().into_any_element(),
+            Page::Todos => self.todos.clone().into_any_element(),
             Page::Claude => self.claude_page.clone().into_any_element(),
             Page::Activity => self.activity.clone().into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),

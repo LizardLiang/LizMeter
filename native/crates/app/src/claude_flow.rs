@@ -296,6 +296,7 @@ impl Root {
                     crate::app::Page::History => (1, 7),
                     crate::app::Page::Stats => (7, 8),
                     crate::app::Page::Tags => (8, 7),
+                    crate::app::Page::Todos => (2, 7),
                     crate::app::Page::Claude => (4, 7),
                     crate::app::Page::Activity => (5, 7),
                     crate::app::Page::Settings => (9, 7),
@@ -303,6 +304,10 @@ impl Root {
                 };
                 self.navigate(away, window, cx);
                 self.navigate(here, window, cx);
+            }
+            op if op.starts_with("todos-") => {
+                let op = op.trim_start_matches("todos-").to_string();
+                self.todos.update(cx, |t, cx| t.capture(&op, window, cx));
             }
             "claude-link" => self.capture_claude_link(!self.pomodoro, cx),
             "claude-open" => {

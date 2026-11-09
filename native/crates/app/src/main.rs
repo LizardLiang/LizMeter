@@ -15,6 +15,7 @@ mod fmt;
 mod locale;
 mod pages;
 mod rich_view;
+mod select;
 mod tag_picker;
 mod timer;
 pub use lizmeter_ui::{css, ui};
@@ -45,7 +46,7 @@ mod embedded {
     pub struct Assets;
     impl AssetSource for Assets {
         fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-            Ok(ICONS.iter().find(|(p, _)| *p == path).map(|(_, b)| Cow::Borrowed(*b)))
+            Ok(ICONS.iter().find(|(p, _)| *p == path).map(|(_, b)| Cow::Borrowed(*b)).or_else(|| crate::pages::todos_icons::load(path)))
         }
         fn list(&self, _path: &str) -> Result<Vec<SharedString>> {
             Ok(ICONS.iter().map(|(p, _)| SharedString::from(*p)).collect())
@@ -219,6 +220,7 @@ fn main() {
                 "tags" => (Page::Tags, true, false),
                 "settings" => (Page::Settings, true, false),
                 "claude" => (Page::Claude, true, false),
+                "todos" => (Page::Todos, true, false),
                 name if name.starts_with("activity") => (Page::Activity, true, false),
                 name if name.starts_with("stats") => (Page::Stats, true, false),
                 _ => (Page::Timer, true, false),

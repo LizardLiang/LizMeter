@@ -8,7 +8,10 @@ pub mod settings_sections;
 pub mod settings_ui;
 pub mod stats;
 pub mod tags;
+pub mod todos;
+pub mod todos_icons;
 pub mod todos_logic;
+pub mod todos_menus;
 pub mod stats_data;
 
 use lizmeter_core::{Session, StopwatchSettings, TimerSettings};
