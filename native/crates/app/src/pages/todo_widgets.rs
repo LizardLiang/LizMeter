@@ -12,6 +12,8 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 pub const LIST_MAX_H: f32 = 220.0;
+/// A form field: 12px text with 6px padding and a 1px border.
+pub const FIELD_H: f32 = 29.0;
 const COMBO_ROW_H: f32 = 30.0;
 const PANEL_W: f32 = 248.0;
 const PANEL_H: f32 = 316.0;
@@ -46,7 +48,8 @@ pub fn list_surface() -> Div {
 
 /// The frame of a select trigger or a combobox (`.trigger`).
 pub fn trigger_frame(focused: bool) -> Div {
-    div()
+        div()
+        .h(px(FIELD_H))
         .flex()
         .flex_row()
         .items_center()
@@ -68,7 +71,7 @@ pub fn dot(color: &str, filled: bool, size: f32, border: f32) -> Div {
 
 /// The bold 11px label above a form field (`.label` / `.sectionLabel`).
 pub fn field_label(text: &str) -> Div {
-    ui_text(11.0).line_height(px(14.0)).font_weight(FontWeight(700.0)).text_color(col(hex(0xa3abc9))).mb(px(5.0)).child(spaced(&text.to_uppercase(), 1.1))
+    ui_text(11.0).h(px(14.4)).flex_shrink_0().line_height(px(14.4)).font_weight(FontWeight(700.0)).text_color(col(hex(0xa3abc9))).mb(px(5.0)).child(spaced(&text.to_uppercase(), 1.1))
 }
 
 // ---- Dialog shell ----
@@ -92,7 +95,7 @@ pub fn dialog_glass(radius: f32) -> Div {
 /// `top` pins the dialog that far from the top (the pickers); `None` centres it.
 pub fn modal_overlay(id: &'static str, top: Option<f32>, dialog: impl IntoElement, on_close: impl Fn(&mut Window, &mut App) + 'static) -> Stateful<Div> {
     let entrance = animate(div().relative().child(dialog), id, 200, false, overshoot(), 1.0, |el, t| el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t))));
-    let mut o = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
+    let mut o = Glass::new(0.0, 16.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.06)))
         .el()
         .id(SharedString::from(format!("{id}-overlay")))
         .absolute()
@@ -111,10 +114,12 @@ pub fn modal_overlay(id: &'static str, top: Option<f32>, dialog: impl IntoElemen
     o.child(entrance)
 }
 
-/// A layer the size of the page area (everything under the title bar) that paints over the app.
-pub fn window_layer(window: &Window, priority: usize, child: impl IntoElement) -> impl IntoElement {
+/// A layer the size of the window under the title bar, painted in tree order over the sidebar and
+/// the page. It is not deferred, because gpui cannot defer a draw inside a deferred one and the
+/// dropdowns of the dialogs inside it are deferred themselves.
+pub fn window_layer(window: &Window, child: impl IntoElement) -> impl IntoElement {
     let vp = window.viewport_size();
-    deferred(anchored().position(point(px(0.0), px(32.0))).anchor(Corner::TopLeft).child(div().relative().w(vp.width).h(vp.height - px(32.0)).child(child))).with_priority(priority)
+    anchored().position(point(px(0.0), px(32.0))).anchor(Corner::TopLeft).child(div().relative().w(vp.width).h(vp.height - px(32.0)).child(child))
 }
 
 /// A dialog's footer buttons look: outline `Cancel`.
@@ -159,6 +164,7 @@ pub fn link_button(id: impl Into<ElementId>, text: &str) -> Stateful<Div> {
         .py(px(4.0))
         .rounded(px(6.0))
         .border(px(1.0))
+        .border_dashed()
         .border_color(col(rgba(86, 95, 137, 0.5)))
         .text_size(px(12.0))
         .line_height(px(16.0))
@@ -430,12 +436,12 @@ impl Render for Combobox {
         let focused = self.field.read(cx).focus_handle().is_focused(window);
         let matches = self.matches(&text);
         let mut frame = if self.bare {
-            div().flex().flex_row().items_center().min_w_0()
+            div().flex().flex_row().items_center().min_w_0().h(px(FIELD_H - 2.6))
         } else {
             trigger_frame(focused)
         };
-        frame = frame.flex_1().child(div().flex_1().min_w_0().when(!self.bare, |d| d.pl(px(10.0)).pr(px(4.0)).py(px(6.0))).child(self.field.clone()));
-        if !self.options.is_empty() && !self.bare {
+        frame = frame.flex_1().child(div().flex_1().min_w_0().pl(px(10.0)).pr(px(4.0)).child(self.field.clone()));
+        if !self.options.is_empty() {
             let m = me.clone();
             frame = frame.child(
                 div()
@@ -700,9 +706,9 @@ impl DatePicker {
                     .text_size(px(12.0))
                     .text_color(col(hex(0xa9b1d6)))
                     .cursor_pointer()
-                    .hover(|s| s.bg(col(rgba(122, 162, 247, 0.14))).text_color(col(TN_TEXT)))
                     .on_click(move |_, _, app| m.update(app, |p, cx| p.commit(super::todos_logic::iso(day), cx)))
                     .child(day.day().to_string());
+                cell = if is_sel { cell.hover(|s| s.bg(col(TN_BLUE)).text_color(col(hex(0x1a1b26)))) } else { cell.hover(|s| s.bg(col(rgba(122, 162, 247, 0.14))).text_color(col(TN_TEXT))) };
                 if is_cursor {
                     cell = cell.border_color(col(rgba(122, 162, 247, 0.35)));
                 }
@@ -710,7 +716,7 @@ impl DatePicker {
                     cell = cell.border_color(col(rgba(122, 162, 247, 0.45))).text_color(col(TN_BLUE));
                 }
                 if is_sel {
-                    cell = cell.bg(col(TN_BLUE)).border_color(col(TN_BLUE)).text_color(col(hex(0x1a1b26))).font_weight(FontWeight(700.0)).hover(|s| s.bg(col(TN_BLUE)).text_color(col(hex(0x1a1b26))));
+                    cell = cell.bg(col(TN_BLUE)).border_color(col(TN_BLUE)).text_color(col(hex(0x1a1b26))).font_weight(FontWeight(700.0));
                 }
                 row = row.child(cell);
             }

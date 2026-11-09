@@ -220,7 +220,7 @@ impl TodoAttachments {
                     .pt(px(6.0))
                     .pb(px(4.0))
                     .min_w_0()
-                    .child(div().truncate().text_size(px(12.0)).line_height(px(16.0)).text_color(col(TN_TEXT)).child(a.file_name.clone()))
+                    .child(div().w_full().truncate().text_size(px(12.0)).line_height(px(16.0)).text_color(col(TN_TEXT)).child(a.file_name.clone()))
                     .child(div().text_size(px(10.0)).line_height(px(13.0)).text_color(col(hex_a3())).child(format_bytes(a.size_bytes))),
             )
             .child(actions)
@@ -242,8 +242,10 @@ impl Render for TodoAttachments {
             .py(px(4.0))
             .rounded(px(6.0))
             .border(px(1.0))
+            .border_dashed()
             .border_color(col(rgba(86, 95, 137, 0.5)))
             .text_size(px(12.0))
+            .line_height(px(16.0))
             .text_color(col(hex_a3()))
             .child("Attach file");
         add = if creating {

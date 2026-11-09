@@ -427,9 +427,10 @@ impl ManageDialog {
     fn radio(&self, id: i64, default: bool, on: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let name = if default { "Default" } else { "Done" };
-        let mut mark = div().size(px(13.0)).flex_shrink_0().rounded(px(7.0)).border(px(1.0)).border_color(col(if on { TN_BLUE } else { rgba(122, 134, 180, 0.6) })).flex().items_center().justify_center();
+        let white = crate::css::hex(0xffffff);
+        let mut mark = div().size(px(13.0)).flex_shrink_0().rounded(px(7.0)).border(px(1.0)).border_color(col(if on { TN_BLUE } else { rgba(0, 0, 0, 0.35) })).bg(col(if on { TN_BLUE } else { white })).flex().items_center().justify_center();
         if on {
-            mark = mark.child(div().size(px(7.0)).rounded(px(4.0)).bg(col(TN_BLUE)));
+            mark = mark.child(div().size(px(9.0)).rounded(px(5.0)).bg(col(white)).flex().items_center().justify_center().child(div().size(px(5.0)).rounded(px(3.0)).bg(col(TN_BLUE))));
         }
         div()
             .id(SharedString::from(format!("role-{name}-{id}")))

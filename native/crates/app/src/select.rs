@@ -3,6 +3,7 @@
 use crate::controls::parse_color;
 use crate::css::rgba;
 use crate::ui::*;
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use std::time::{Duration, Instant};
 
@@ -218,7 +219,8 @@ impl Render for SelectBox {
             .gap(px(6.0))
             .min_w(px(self.min_w))
             .max_w(px(self.max_w))
-            .min_h(px(32.0))
+            .min_h(px(if self.fill { 0.0 } else { 32.0 }))
+            .when(self.fill, |d| d.h(px(29.0)))
             .pl(px(10.0))
             .pr(px(8.0))
             .rounded(px(8.0))

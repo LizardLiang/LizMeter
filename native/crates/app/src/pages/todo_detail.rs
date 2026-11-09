@@ -634,12 +634,12 @@ fn non_blank(s: &str) -> Option<String> {
 // ---- Rendering ----
 
 fn section_label(text: &str) -> Div {
-    ui_text(11.0).line_height(px(14.0)).font_weight(FontWeight(700.0)).text_color(col(TN_TEXT)).child(spaced(&text.to_uppercase(), 1.32))
+    ui_text(11.0).h(px(14.4)).flex_shrink_0().line_height(px(14.4)).font_weight(FontWeight(700.0)).text_color(col(TN_TEXT)).child(spaced(&text.to_uppercase(), 1.32))
 }
 
 /// The column of a rail field: its label, then the control.
 fn rail_field(label: &str, child: impl IntoElement) -> Div {
-    div().flex().flex_col().min_w_0().child(section_label(label).mb(px(5.0))).child(child)
+    div().flex().flex_col().min_w_0().child(div().h(px(20.0)).flex_shrink_0().pt(px(4.4)).child(section_label(label))).child(child)
 }
 
 fn icon_text_button(id: &'static str, glyph: &'static str, enabled: bool) -> Stateful<Div> {
@@ -755,14 +755,8 @@ impl TodoDetailPage {
             .child(item("detail-copy-prompt", pr_text, if pr_failed { TN_RED } else { TN_TEXT }, if pr_failed { red_bg } else { neutral }).on_click(move |_, _, a| m_pr.update(a, |p, cx| p.copy_prompt(cx))))
             .child(div().h(px(1.0)).mx(px(2.0)).my(px(4.0)).bg(col(rgba(86, 95, 137, 0.25))))
             .child(item("detail-delete", "Delete".into(), TN_RED, red_bg).on_click(move |_, _, a| m_del.update(a, |p, cx| p.delete(cx))));
-        let _ = todo;
-        div().child(backdrop(window, None, move |_, a| {
-            m_close.update(a, |p, cx| {
-                p.overflow = false;
-                cx.notify();
-            })
-        }))
-        .child(menu)
+        let _ = (todo, window, m_close);
+        menu
     }
 
     fn main_header(&self, todo: &Todo, me: &Entity<Self>) -> Div {
@@ -927,6 +921,10 @@ impl Render for TodoDetailPage {
         let me = cx.entity();
         let vp = window.viewport_size();
         let scroll = scrollbar::keyed(SCROLL_ID, BarStyle::Global);
+        let captured = CAPTURE_SCROLL.load(std::sync::atomic::Ordering::Relaxed);
+        if captured > 0 {
+            scroll.set_offset(point(px(0.0), px(-(captured as f32))));
+        }
         let max_w = page_max_width(f32::from(vp.width));
         let measured = self.width.get();
         let page_w = if measured > 0.0 { measured } else { max_w.min(f32::from(vp.width) - 64.0) };
@@ -993,8 +991,17 @@ impl Render for TodoDetailPage {
             }))
             .child(div().id("todo-detail-scroll").track_scroll(scroll.handle()).size_full().overflow_y_scroll().child(scroll.pad(content)))
             .child(scroll.bar());
+        if self.overflow {
+            let m = me.clone();
+            root = root.child(backdrop(window, None, move |_, a| {
+                m.update(a, |p, cx| {
+                    p.overflow = false;
+                    cx.notify();
+                })
+            }));
+        }
         if let Some((picker, _)) = &self.picker {
-            root = root.child(window_layer(window, 6, div().size_full().child(picker.clone())));
+            root = root.child(window_layer(window, div().size_full().child(picker.clone())));
         }
         root.into_any_element()
     }

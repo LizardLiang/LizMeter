@@ -380,7 +380,7 @@ impl Render for TodoEditDialog {
             .child(div().flex().flex_row().items_center().justify_between().mb(px(8.0)).child(field_label("Sub-issues").mb(px(0.0))))
             .child(hint_text("Create this todo first, then add sub-issues to it.").mt(px(0.0)));
 
-        let mut content = div().px(px(24.0)).py(px(22.0)).flex().flex_col().child(header).child(parent_row).child(title_field).child(notes_field).child(self.attachments.clone()).child(div().h(px(12.0))).child(grid(items, inner));
+        let mut content = div().px(px(24.0)).py(px(22.0)).flex().flex_col().child(header).child(parent_row).child(title_field).child(notes_field).child(self.attachments.clone()).child(grid(items, inner));
         if invalid {
             content = content.child(div().mt(px(8.0)).text_size(px(12.0)).text_color(col(TN_RED)).child("Start date must not be after the due date."));
         }
@@ -411,7 +411,7 @@ impl Render for TodoEditDialog {
             .child(div().relative().flex_1().min_h_0().child(div().id("edit-scroll").track_scroll(scroll.handle()).size_full().overflow_y_scroll().child(scroll.pad(content))).child(scroll.bar()));
         let close = me;
         let overlay = modal_overlay("edit", None, dialog, move |_, a| close.update(a, |_, cx| cx.emit(EditEvent::Close)));
-        window_layer(window, 6, div().size_full().child(overlay).children(self.picker.clone()).children(self.notes_modal.clone().map(|m| notes_modal_layer(m))))
+        window_layer(window, div().size_full().child(overlay).children(self.picker.clone()).children(self.notes_modal.clone().map(|m| notes_modal_layer(m))))
     }
 }
 
