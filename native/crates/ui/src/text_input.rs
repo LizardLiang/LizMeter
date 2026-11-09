@@ -152,33 +152,33 @@ pub struct TextField {
     blinking: bool,
 }
 
-struct LineLayouts {
-    lines: Vec<WrappedLine>,
+pub(crate) struct LineLayouts {
+    pub(crate) lines: Vec<WrappedLine>,
     /// byte offset where each logical line starts in the content
-    starts: Vec<usize>,
-    line_height: Pixels,
+    pub(crate) starts: Vec<usize>,
+    pub(crate) line_height: Pixels,
 }
 
 impl LineLayouts {
-    fn index_of_line(&self, offset: usize) -> usize {
+    pub(crate) fn index_of_line(&self, offset: usize) -> usize {
         match self.starts.binary_search(&offset) {
             Ok(i) => i,
             Err(i) => i - 1,
         }
     }
 
-    fn line_top(&self, i: usize) -> Pixels {
+    pub(crate) fn line_top(&self, i: usize) -> Pixels {
         self.lines[..i].iter().fold(px(0.0), |y, l| y + l.size(self.line_height).height)
     }
 
-    fn position_for_offset(&self, offset: usize) -> Point<Pixels> {
+    pub(crate) fn position_for_offset(&self, offset: usize) -> Point<Pixels> {
         let i = self.index_of_line(offset);
         let local = offset - self.starts[i];
         let p = self.lines[i].position_for_index(local, self.line_height).unwrap_or_default();
         point(p.x, p.y + self.line_top(i))
     }
 
-    fn offset_for_position(&self, p: Point<Pixels>) -> usize {
+    pub(crate) fn offset_for_position(&self, p: Point<Pixels>) -> usize {
         let mut top = px(0.0);
         for (i, l) in self.lines.iter().enumerate() {
             let h = l.size(self.line_height).height;
@@ -194,7 +194,7 @@ impl LineLayouts {
         0
     }
 
-    fn total_height(&self) -> Pixels {
+    pub(crate) fn total_height(&self) -> Pixels {
         self.line_top(self.lines.len())
     }
 }
@@ -672,7 +672,7 @@ impl Render for TextField {
     }
 }
 
-fn shape(text: &str, style: &FieldStyle, runs: Vec<TextRun>, wrap: Option<Pixels>, window: &Window) -> Vec<WrappedLine> {
+pub(crate) fn shape(text: &str, style: &FieldStyle, runs: Vec<TextRun>, wrap: Option<Pixels>, window: &Window) -> Vec<WrappedLine> {
     window
         .text_system()
         .shape_text(SharedString::from(text.to_string()), style.size, &runs, wrap, None)
@@ -680,7 +680,7 @@ fn shape(text: &str, style: &FieldStyle, runs: Vec<TextRun>, wrap: Option<Pixels
         .unwrap_or_default()
 }
 
-fn run(len: usize, style: &FieldStyle, color: Hsla, underline: bool) -> TextRun {
+pub(crate) fn run(len: usize, style: &FieldStyle, color: Hsla, underline: bool) -> TextRun {
     TextRun {
         len,
         font: style.font(),
@@ -718,7 +718,7 @@ struct Prepaint {
     scroll_x: Pixels,
 }
 
-fn build_layout(text: &str, style: &FieldStyle, marked: Option<Range<usize>>, wrap: Option<Pixels>, window: &Window) -> LineLayouts {
+pub(crate) fn build_layout(text: &str, style: &FieldStyle, marked: Option<Range<usize>>, wrap: Option<Pixels>, window: &Window) -> LineLayouts {
     let lines = shape(text, style, runs_for(text, style, marked), wrap, window);
     let mut starts = Vec::with_capacity(lines.len());
     let mut pos = 0;
@@ -900,4 +900,25 @@ impl TextArea {
         let placeholder = placeholder.to_string();
         cx.new(|cx| TextField::new(false, style, &placeholder, window, cx))
     }
+}
+
+/// Highlight rectangles (local to the layout origin) for the byte range `sel` of one text block.
+pub(crate) fn selection_rects(layout: &LineLayouts, sel: Range<usize>, width: Pixels, extend_to_edge: bool) -> Vec<Bounds<Pixels>> {
+    let lh = layout.line_height;
+    let a = layout.position_for_offset(sel.start);
+    let b = layout.position_for_offset(sel.end);
+    let rows = ((b.y - a.y) / lh).round() as i32;
+    let mut out = Vec::new();
+    for r in 0..=rows {
+        let y = a.y + lh * r as f32;
+        let x0 = if r == 0 { a.x } else { px(0.0) };
+        let mut x1 = if r == rows { b.x } else { width };
+        if r != rows && !extend_to_edge {
+            x1 = x1.max(x0 + px(4.0));
+        }
+        if x1 > x0 {
+            out.push(Bounds::new(point(x0, y), size(x1 - x0, lh)));
+        }
+    }
+    out
 }

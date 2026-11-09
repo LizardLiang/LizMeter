@@ -6,6 +6,7 @@ use crate::timer::{self, Status, TimerType};
 use crate::ui::*;
 use crate::{gallery, modal};
 use gpui::*;
+use lizmeter_ui::rich_input::{RichEvent, RichInput, RichMode};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
 
@@ -28,11 +29,14 @@ pub struct Root {
     pub hover_nav: Option<usize>,
     ever_hovered: HashSet<usize>,
     pub modal_open: bool,
-    pub description: Option<&'static str>,
+    pub rich: Entity<RichInput>,
+    rich_modal: Option<Entity<RichInput>>,
 }
 
 impl Root {
-    pub fn new(page: Page, pomodoro: bool, modal_open: bool, hover_nav: Option<usize>) -> Self {
+    pub fn new(page: Page, pomodoro: bool, modal_open: bool, hover_nav: Option<usize>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let rich = cx.new(|cx| RichInput::new("", "Describe what you\u{2019}ll be working on\u{2026}", RichMode::Inline, window, cx));
+        cx.subscribe_in(&rich, window, Self::on_rich_event).detach();
         let ttype = TimerType::Work;
         Self {
             page,
@@ -45,8 +49,38 @@ impl Root {
             hover_nav,
             ever_hovered: hover_nav.into_iter().collect(),
             modal_open,
-            description: None,
+            rich,
+            rich_modal: None,
         }
+    }
+
+    fn on_rich_event(&mut self, _: &Entity<RichInput>, ev: &RichEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match ev {
+            RichEvent::Expand => self.open_rich_modal(window, cx),
+            RichEvent::ModalDone(html) => {
+                self.rich.update(cx, |r, cx| r.set_html(html, cx));
+                self.close_rich_modal(window, cx);
+            }
+            RichEvent::ModalCancel => self.close_rich_modal(window, cx),
+            RichEvent::Changed(_) => {}
+        }
+    }
+
+    pub fn open_rich_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let html = self.rich.read(cx).html();
+        let modal = cx.new(|cx| RichInput::new(&html, "Describe what you\u{2019}ll be working on\u{2026}", RichMode::Modal, window, cx));
+        cx.subscribe_in(&modal, window, Self::on_rich_event).detach();
+        let focus = modal.read(cx).focus_handle().clone();
+        window.focus(&focus);
+        self.rich_modal = Some(modal);
+        cx.notify();
+    }
+
+    fn close_rich_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.rich_modal = None;
+        let focus = self.rich.read(cx).focus_handle().clone();
+        window.focus(&focus);
+        cx.notify();
     }
 
     pub fn start(&mut self, cx: &mut Context<Self>) {
@@ -83,6 +117,10 @@ impl Root {
 
     /// Wakes once per second boundary while running and stops itself afterwards, so an idle
     /// timer costs no CPU.
+    pub fn focused_rich(&self) -> &Entity<RichInput> {
+        self.rich_modal.as_ref().unwrap_or(&self.rich)
+    }
+
     fn run_ticks(&mut self, cx: &mut Context<Self>) {
         cx.spawn(async move |this, cx| {
             loop {
@@ -171,7 +209,7 @@ impl Root {
                             .text_color(col(TN_TEXT_DIM))
                             .child(spaced("SESSION DESCRIPTION", 1.32)),
                     )
-                    .child(timer::rich_input(95.8, self.description)),
+                    .child(self.rich.clone()),
             )
             .child(div().mt(px(10.0)).flex().flex_row().child(timer::link_issue_button()))
             .child(timer::controls(
@@ -216,7 +254,7 @@ impl Root {
         let mut el = glass.el().w_full().p(px(25.0)).flex().flex_col().gap(px(16.0));
         el = el
             .child(ui_text(11.0).h(px(14.0)).line_height(px(14.0)).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT)).child(spaced("STOPWATCH", 1.5)))
-            .child(timer::rich_input(95.8, self.description))
+            .child(self.rich.clone())
             .child(select)
             .child(div().flex().flex_row().child(timer::link_issue_button()))
             .child(
@@ -398,6 +436,7 @@ impl Render for Root {
                     .child(sidebar)
                     .child(page),
             )
+            .children(self.rich_modal.clone().map(|m| deferred(div().absolute().top(px(32.0)).left_0().right_0().bottom_0().child(m)).with_priority(5)))
             .child(deferred(chrome::titlebar(None)).with_priority(9))
             .into_any_element()
     }

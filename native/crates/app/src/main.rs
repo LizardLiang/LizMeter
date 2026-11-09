@@ -52,10 +52,13 @@ struct Args {
     hover_nav: Option<usize>,
     running: bool,
     composite: Option<u32>,
+    focus: bool,
+    html: Option<String>,
+    steps: Vec<Step>,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None };
+    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, steps: Vec::new() };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -68,6 +71,13 @@ fn parse_args() -> Args {
                     ui::ANIM_TIME.store(ms, std::sync::atomic::Ordering::Relaxed);
                 }
             }
+            "--focus" => a.focus = true,
+            "--html" => a.html = it.next(),
+            "--type" => a.steps.extend(it.next().map(Step::Type)),
+            "--keys" => a.steps.extend(it.next().map(Step::Keys)),
+            "--ime" => a.steps.extend(it.next().map(Step::Ime)),
+            "--expand" => a.steps.push(Step::Expand),
+            "--dump" => a.steps.push(Step::Dump),
             "--composite" => a.composite = it.next().and_then(|v| u32::from_str_radix(v.trim_start_matches('#'), 16).ok()),
             _ => {}
         }
@@ -109,15 +119,20 @@ fn make_topmost(window: &Window) {
 }
 
 fn main() {
-    let args = parse_args();
+    let mut args = parse_args();
     let shot = args.screenshot.is_some();
     if shot {
         ui::FREEZE.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+    let mut args_steps = std::mem::take(&mut args.steps);
+    let mut args_html = args.html.take();
+    let args_focus = args.focus;
     Application::new().with_assets(embedded::Assets).run(move |cx: &mut App| {
         cx.text_system()
             .add_fonts(vec![std::borrow::Cow::Borrowed(include_bytes!("../assets/fonts/JetBrainsMono-Bold.ttf") as &[u8])])
             .expect("font");
+        lizmeter_ui::text_input::bind_keys(cx);
+        lizmeter_ui::rich_input::bind_keys(cx);
         let is_widget = args.page == "widget";
         let handle: AnyWindowHandle = if is_widget {
             let display = cx.primary_display().map(|d| d.bounds()).unwrap_or(Bounds::new(point(px(0.0), px(0.0)), size(px(1920.0), px(1080.0))));
@@ -165,11 +180,11 @@ fn main() {
                         window_min_size: Some(size(px(600.0), px(400.0))),
                         ..Default::default()
                     },
-                    |_, cx| {
+                    |window, cx| {
                         cx.new(|cx| {
-                            let mut r = Root::new(page, pomodoro, modal, hover);
+                            let mut r = Root::new(page, pomodoro, modal, hover, window, cx);
                             if running || modal {
-                                r.description = Some("Review native spike");
+                                r.rich.update(cx, |ri, cx| ri.set_html("<p>Review native spike</p>", cx));
                             }
                             if running {
                                 r.start(cx);
@@ -182,6 +197,30 @@ fn main() {
             w.into()
         };
         cx.activate(!shot);
+        {
+            let steps = std::mem::take(&mut args_steps);
+            let html = args_html.take();
+            let focus = args_focus;
+            if focus || html.is_some() || !steps.is_empty() {
+                cx.spawn(async move |cx| {
+                    cx.background_executor().timer(Duration::from_millis(700)).await;
+                    if let Some(root) = handle.downcast::<Root>() {
+                        let ent = root.entity(cx).ok();
+                        if let Some(ent) = ent {
+                            let _ = handle.update(cx, |_, window, cx| {
+                                if let Some(h) = &html {
+                                    ent.read(cx).rich.clone().update(cx, |r, cx| r.set_html(h, cx));
+                                }
+                                let f = ent.read(cx).focused_rich().read(cx).focus_handle().clone();
+                                window.focus(&f);
+                                run_steps(&ent, &steps, window, cx);
+                            });
+                        }
+                    }
+                })
+                .detach();
+            }
+        }
 
         if let Some(path) = args.screenshot.clone() {
             let composite = args.composite;
@@ -199,4 +238,46 @@ fn main() {
             .detach();
         }
     });
+}
+
+/// Scripted input for captures and tests (`--type`, `--keys`, `--ime`, `--expand`), applied in order
+/// through the same entry points the platform uses (keystroke dispatch, platform input handler).
+enum Step {
+    Type(String),
+    Keys(String),
+    Ime(String),
+    Expand,
+    Dump,
+}
+
+fn run_steps(root: &Entity<Root>, steps: &[Step], window: &mut Window, cx: &mut App) {
+    use gpui::EntityInputHandler;
+    for s in steps {
+        let target = root.read(cx).focused_rich().clone();
+        match s {
+            Step::Type(text) => {
+                for ch in text.chars() {
+                    target.update(cx, |r, cx| r.replace_text_in_range(None, &ch.to_string(), window, cx));
+                }
+            }
+            Step::Keys(list) => {
+                for k in list.split_whitespace() {
+                    if let Ok(ks) = Keystroke::parse(k) {
+                        window.dispatch_keystroke(ks, cx);
+                    }
+                }
+            }
+            Step::Ime(pre) => {
+                let n = pre.encode_utf16().count();
+                target.update(cx, |r, cx| r.replace_and_mark_text_in_range(None, pre, Some(n..n), window, cx));
+                let b = target.update(cx, |r, cx| {
+                    let range = r.marked_text_range(window, cx).unwrap_or(0..0);
+                    r.bounds_for_range(range.start..range.start, Bounds::default(), window, cx)
+                });
+                eprintln!("ime composition caret bounds (relative to the surface): {b:?}");
+            }
+            Step::Expand => root.update(cx, |r, cx| r.open_rich_modal(window, cx)),
+            Step::Dump => eprintln!("html: {}", target.read(cx).html()),
+        }
+    }
 }
