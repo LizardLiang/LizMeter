@@ -25,6 +25,10 @@ pub struct TagPicker {
     color: String,
     error: Option<String>,
     name: Entity<TextField>,
+    /// When an outside mouse-down last closed the dropdown; the click on the row that follows in
+    /// the same gesture must not reopen it.
+    closed_by_out: Option<std::time::Instant>,
+    suppress_toggle: bool,
 }
 
 impl TagPicker {
@@ -36,7 +40,7 @@ impl TagPicker {
             TextFieldEvent::Changed => {}
         })
         .detach();
-        Self { id: id.into(), all_tags: vec![], selected: vec![], open: false, creating: false, color: TAG_COLORS[0].to_string(), error: None, name }
+        Self { id: id.into(), all_tags: vec![], selected: vec![], open: false, creating: false, color: TAG_COLORS[0].to_string(), error: None, name, closed_by_out: None, suppress_toggle: false }
     }
 
     pub fn set_tags(&mut self, all: Vec<Tag>, selected: Vec<i64>, cx: &mut Context<Self>) {
@@ -205,6 +209,7 @@ impl TagPicker {
                 m_out.update(app, |p, cx| {
                     if p.open {
                         p.open = false;
+                        p.closed_by_out = Some(std::time::Instant::now());
                         p.reset(cx);
                     }
                 })
@@ -227,8 +232,20 @@ impl Render for TagPicker {
             row = row.child(tag_badge(&t, Some(Box::new(move |_, app| m.update(app, |_, cx| cx.emit(TagPickerEvent::Remove(id)))))));
         }
         let m = me.clone();
-        let toggle = row.id(SharedString::from(format!("{}-row", self.id))).cursor_pointer().on_click(move |_, _, app| {
+        let m_down = me.clone();
+        let toggle = row
+            .id(SharedString::from(format!("{}-row", self.id)))
+            .cursor_pointer()
+            .on_mouse_down(MouseButton::Left, move |_, _, app| {
+                m_down.update(app, |p, _| {
+                    p.suppress_toggle = p.closed_by_out.take().is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(80));
+                })
+            })
+            .on_click(move |_, _, app| {
             m.update(app, |p, cx| {
+                if std::mem::take(&mut p.suppress_toggle) {
+                    return;
+                }
                 p.open = !p.open;
                 if !p.open {
                     p.reset(cx);

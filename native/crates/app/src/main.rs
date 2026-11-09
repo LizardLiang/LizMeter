@@ -206,6 +206,8 @@ fn main() {
                 "modal" => (Page::Timer, false, true),
                 "stopwatch" => (Page::Timer, false, false),
                 "history" => (Page::History, true, false),
+                "tags" => (Page::Tags, true, false),
+                name if name.starts_with("stats") => (Page::Stats, true, false),
                 _ => (Page::Timer, true, false),
             };
             let bounds = Bounds::centered(None, size(px(args.size.0), px(args.size.1)), cx);
@@ -236,6 +238,9 @@ fn main() {
                                         n.set_image_base(b);
                                     }
                                 });
+                            }
+                            if let Some(spec) = page_name.strip_prefix("stats") {
+                                r.stats.update(cx, |s, _| s.preset(spec.trim_start_matches(':')));
                             }
                             if page_name == "notes-modal" {
                                 r.open_notes_modal(window, cx);

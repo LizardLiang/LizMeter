@@ -74,7 +74,7 @@ impl Root {
         cx.notify();
     }
 
-    pub fn on_page_event(&mut self, _: &Entity<crate::pages::history::HistoryPage>, ev: &PageEvent, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn on_page_event<T: 'static>(&mut self, _: &Entity<T>, ev: &PageEvent, window: &mut Window, cx: &mut Context<Self>) {
         match ev {
             PageEvent::Resume(session) => self.restore_session(session, window, cx),
             PageEvent::SessionsChanged => self.reload_tags(cx),

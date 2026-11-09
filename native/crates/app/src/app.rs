@@ -4,6 +4,8 @@ use crate::chrome::{self, NAV_ITEMS, NavButton};
 use crate::engine::{Countdown, Status, Stopwatch};
 use crate::modal::IssuePrompt;
 use crate::pages::history::HistoryPage;
+use crate::pages::stats::StatsPage;
+use crate::pages::tags::TagsPage;
 use crate::tag_picker::TagPicker;
 use crate::ui::*;
 use crate::gallery;
@@ -21,6 +23,8 @@ use std::sync::Arc;
 pub enum Page {
     Timer,
     History,
+    Stats,
+    Tags,
     Gallery,
     Anim(usize),
     TextSample,
@@ -80,6 +84,8 @@ pub struct Root {
     pub prompt: Option<(Entity<IssuePrompt>, PromptPurpose)>,
     pub edit: Option<TimeEdit>,
     pub history: Entity<HistoryPage>,
+    pub stats: Entity<StatsPage>,
+    pub tags_page: Entity<TagsPage>,
     /// A session was saved while History was not refreshed; the next History render reloads.
     pub history_stale: bool,
 }
@@ -110,7 +116,11 @@ impl Root {
         cx.subscribe(&tag_picker, Self::on_tag_event).detach();
 
         let history = cx.new(|_| HistoryPage::new(svc.clone()));
-        cx.subscribe_in(&history, window, Self::on_page_event).detach();
+        cx.subscribe_in(&history, window, Self::on_page_event::<HistoryPage>).detach();
+
+        let stats = cx.new(|_| StatsPage::new(svc.clone()));
+        let tags_page = cx.new(|cx| TagsPage::new(svc.clone(), window, cx));
+        cx.subscribe_in(&tags_page, window, Self::on_page_event::<TagsPage>).detach();
 
         let mut root = Self {
             svc,
@@ -143,11 +153,19 @@ impl Root {
             prompt: None,
             edit: None,
             history,
+            stats,
+            tags_page,
             history_stale: false,
         };
         root.reload_tags(cx);
         if page == Page::History {
             root.show_history(window, cx);
+        }
+        if page == Page::Stats {
+            root.show_stats(cx);
+        }
+        if page == Page::Tags {
+            root.show_tags(cx);
         }
         root
     }
@@ -278,6 +296,18 @@ impl Root {
         cx.notify();
     }
 
+    pub fn show_stats(&mut self, cx: &mut Context<Self>) {
+        self.stats.update(cx, |s, cx| s.refresh(cx));
+        self.page = Page::Stats;
+        cx.notify();
+    }
+
+    pub fn show_tags(&mut self, cx: &mut Context<Self>) {
+        self.tags_page.update(cx, |t, cx| t.refresh(cx));
+        self.page = Page::Tags;
+        cx.notify();
+    }
+
     fn sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let mut col_el = chrome::sidebar_glass()
@@ -294,6 +324,8 @@ impl Root {
         let active_idx = match self.page {
             Page::Timer => Some(0),
             Page::History => Some(1),
+            Page::Stats => Some(7),
+            Page::Tags => Some(8),
             Page::Other(i) => Some(i),
             Page::Notes(_) => Some(2),
             Page::Gallery | Page::Anim(_) | Page::TextSample | Page::EmojiSample => None,
@@ -374,6 +406,8 @@ impl Root {
                 cx.notify();
             }
             1 => self.show_history(window, cx),
+            7 => self.show_stats(cx),
+            8 => self.show_tags(cx),
             i => {
                 self.page = Page::Other(i);
                 cx.notify();
@@ -416,6 +450,8 @@ impl Render for Root {
                 }
                 self.history.clone().into_any_element()
             }
+            Page::Stats => self.stats.clone().into_any_element(),
+            Page::Tags => self.tags_page.clone().into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),
             Page::Notes(v) => {
                 let width = if v == MdVariant::Framed { 640.0 } else { 720.0 };

@@ -1,6 +1,9 @@
 //! The pages of the main window that run on real services.
 
 pub mod history;
+pub mod stats;
+pub mod tags;
+pub mod stats_data;
 
 use lizmeter_core::{Session, StopwatchSettings, TimerSettings};
 

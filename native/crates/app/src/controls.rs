@@ -200,6 +200,17 @@ pub fn input_frame(field: &Entity<TextField>, width: Option<f32>, focused: bool)
     d
 }
 
+/// A page text input: glass frame with the focus ring of the SCSS `.input:focus` rule
+/// (`border-color` 50% blue and a 3px 8% blue ring).
+pub fn glass_field(field: &Entity<TextField>, focused: bool, px_x: f32, px_y: f32) -> Div {
+    let border = if focused { rgba(122, 162, 247, 0.5) } else { rgba(41, 46, 66, 0.8) };
+    let mut d = Glass::new(8.0, 8.0, 1.0, Spec::rrect(8.0).solid(rgba(12, 13, 24, 0.55)).border(1.0, border)).el().px(px(px_x)).py(px(px_y)).min_w_0().child(field.clone());
+    if focused {
+        d = d.shadow(shadows(&[Sh { dx: 0.0, dy: 0.0, blur: 0.0, spread: 3.0, color: rgba(122, 162, 247, 0.08) }]));
+    }
+    d
+}
+
 pub fn field_style(size: f32) -> FieldStyle {
     FieldStyle::new(UI_FONT, size, (size * 1.3).round(), col(TN_TEXT))
 }
@@ -255,9 +266,12 @@ pub fn color_swatches(prefix: &'static str, selected: &str, on_pick: impl Fn(&st
         let on = c.eq_ignore_ascii_case(selected);
         let pick = on_pick.clone();
         let color = parse_color(c);
+        let mut swatch = div().id(SharedString::from(format!("{prefix}-{c}")));
+        if on {
+            swatch = swatch.shadow(shadows(&[Sh { dx: 0.0, dy: 0.0, blur: 0.0, spread: 1.0, color }]));
+        }
         row = row.child(
-            div()
-                .id(SharedString::from(format!("{prefix}-{c}")))
+            swatch
                 .size(px(20.0))
                 .flex_shrink_0()
                 .rounded(px(10.0))
