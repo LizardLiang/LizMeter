@@ -198,6 +198,11 @@ impl TodoDetailPage {
         page
     }
 
+    /// False when the todo was gone (or unreadable) at the first load.
+    pub fn is_loaded(&self) -> bool {
+        self.todo.is_some()
+    }
+
     pub fn todo_id(&self) -> i64 {
         self.todo_id
     }
@@ -395,7 +400,13 @@ impl TodoDetailPage {
             Draft::Title => {
                 let value = self.title.read(cx).text().to_string();
                 let trimmed = value.trim().to_string();
-                if value == self.title_committed || trimmed.is_empty() {
+                if value == self.title_committed {
+                    return;
+                }
+                if trimmed.is_empty() {
+                    let saved = self.title_committed.clone();
+                    self.title.update(cx, |f, cx| f.set_text(&saved, cx));
+                    self.title_prev = saved;
                     return;
                 }
                 let previous = std::mem::replace(&mut self.title_committed, value);

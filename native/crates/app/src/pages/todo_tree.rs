@@ -23,7 +23,7 @@ pub fn descendant_ids(todos: &[Todo], root: i64) -> HashSet<i64> {
     found
 }
 
-/// Every todo above `start`, nearest first, bounded by the same visited guard.
+/// Every todo above `start`, bounded by the same visited guard.
 pub fn ancestor_ids(todos: &[Todo], start: i64) -> HashSet<i64> {
     let by_id: HashMap<i64, &Todo> = todos.iter().map(|t| (t.id, t)).collect();
     let mut found = HashSet::new();

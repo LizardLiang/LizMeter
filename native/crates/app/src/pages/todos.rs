@@ -245,6 +245,12 @@ impl TodosPage {
                 self.groups = group_todos(&todos, &states);
                 self.todo_count = todos.len();
                 self.states = states;
+                if self.project_filter.is_some_and(|id| !projects.iter().any(|p| p.id == id)) {
+                    self.project_filter = None;
+                }
+                if self.label_filter.is_some_and(|id| !labels.iter().any(|l| l.id == id)) {
+                    self.label_filter = None;
+                }
                 self.projects = projects;
                 self.labels = labels;
                 self.error = None;
@@ -431,6 +437,7 @@ impl TodosPage {
 
     /// The create dialog: in `state_id`'s group, and under `parent` when given.
     fn open_create(&mut self, state_id: Option<i64>, parent: Option<(i64, String)>, window: &mut Window, cx: &mut Context<Self>) {
+        self.overlay = Overlay::None;
         let svc = self.svc.clone();
         let dialog = cx.new(|cx| TodoEditDialog::new(svc, state_id, parent, window, cx));
         cx.subscribe_in(&dialog, window, |this, _, ev: &EditEvent, window, cx| match ev {
@@ -448,6 +455,7 @@ impl TodosPage {
     }
 
     fn open_manage(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.overlay = Overlay::None;
         let svc = self.svc.clone();
         let dialog = cx.new(|cx| ManageDialog::new(svc, window, cx));
         cx.subscribe_in(&dialog, window, |this, _, _: &ManageEvent, window, cx| {
@@ -462,6 +470,7 @@ impl TodosPage {
     /// The parent or child picker for a row.
     fn open_link(&mut self, kind: Link, todo_id: i64, window: &mut Window, cx: &mut Context<Self>) {
         let Some(todo) = self.todo(todo_id).cloned() else { return };
+        self.overlay = Overlay::None;
         let (heading, mode) = match kind {
             Link::Child => (format!("File an existing todo under #{} {}", todo.id, todo.title), PickerMode::Child { todo: todo.id }),
             Link::Parent => (format!("Nest #{} {} under", todo.id, todo.title), PickerMode::Parent { todo: Some(todo.id), current_parent: todo.parent_id }),
@@ -488,6 +497,10 @@ impl TodosPage {
         self.dialog = Dialog::None;
         let (svc, visible) = (self.svc.clone(), self.visible());
         let page = cx.new(|cx| TodoDetailPage::new(svc, id, visible, window, cx));
+        if !page.read(cx).is_loaded() {
+            self.reload(cx);
+            return;
+        }
         cx.subscribe_in(&page, window, |this, _, ev: &DetailEvent, window, cx| match ev {
             DetailEvent::Back(id) => {
                 this.detail = None;

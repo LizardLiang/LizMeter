@@ -274,7 +274,8 @@ impl TodoEditDialog {
         if name.is_empty() {
             return Ok(None);
         }
-        if let Some(p) = self.projects.iter().find(|p| p.name.eq_ignore_ascii_case(name)) {
+        let fresh = self.svc.list_todo_projects().unwrap_or_else(|_| self.projects.clone());
+        if let Some(p) = fresh.iter().find(|p| p.name.eq_ignore_ascii_case(name)) {
             return Ok(Some(p.id));
         }
         self.svc.create_todo_project(&CreateTodoProjectInput { name: name.to_string(), color: None }).map(|p| Some(p.id)).map_err(|e| e.to_string())

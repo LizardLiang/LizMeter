@@ -159,7 +159,7 @@ impl ManageDialog {
                     }
                 }
                 None => {
-                    let f = limited_input(13.0, "", 32, window, cx);
+                    let f = limited_input(13.0, "", match tab { Tab::States => 32, Tab::Projects => 60, Tab::Labels => 40 }, window, cx);
                     cx.subscribe_in(&f, window, move |this, f, ev: &TextFieldEvent, window, cx| match ev {
                         TextFieldEvent::Submit => this.commit_row(tab, id, window, cx),
                         TextFieldEvent::Cancel => this.reset_row(tab, id, f.clone(), cx),
