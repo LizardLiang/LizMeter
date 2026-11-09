@@ -1,0 +1,6 @@
+[package]
+name = "lizmeter-db"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

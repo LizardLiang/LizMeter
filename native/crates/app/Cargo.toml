@@ -1,0 +1,16 @@
+[package]
+name = "lizmeter-app"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "lizmeter"
+path = "src/main.rs"
+
+[dependencies]
+lizmeter-ui = { path = "../ui" }
+gpui.workspace = true
+png.workspace = true
+image.workspace = true
+raw-window-handle.workspace = true
+windows.workspace = true

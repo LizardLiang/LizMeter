@@ -1,9 +1,12 @@
-[package]
-name = "lizmeter-native"
+[workspace]
+resolver = "2"
+members = ["crates/core", "crates/db", "crates/sync", "crates/services", "crates/ui", "crates/app"]
+
+[workspace.package]
 version = "0.0.1"
 edition = "2021"
 
-[dependencies]
+[workspace.dependencies]
 gpui = "=0.2.2"
 png = "0.18"
 image = { version = "0.25", default-features = false }

@@ -2,11 +2,11 @@
 
 mod app;
 mod chrome;
-mod css;
+
 mod gallery;
 mod modal;
 mod timer;
-mod ui;
+pub use lizmeter_ui::{css, ui};
 mod widget;
 
 use app::{Page, Root};

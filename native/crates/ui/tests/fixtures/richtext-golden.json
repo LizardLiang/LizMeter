@@ -1,0 +1,178 @@
+[
+  {
+    "input": "",
+    "output": "<p></p>"
+  },
+  {
+    "input": "<p></p>",
+    "output": "<p></p>"
+  },
+  {
+    "input": "<p>plain</p>",
+    "output": "<p>plain</p>"
+  },
+  {
+    "input": "<p>Linked session test</p>",
+    "output": "<p>Linked session test</p>"
+  },
+  {
+    "input": "plain legacy text",
+    "output": "<p>plain legacy text</p>"
+  },
+  {
+    "input": "<p>a &amp; b &lt;c&gt; &quot;q&quot; 'x'</p>",
+    "output": "<p>a &amp; b &lt;c&gt; \"q\" 'x'</p>"
+  },
+  {
+    "input": "<p>nbsp&nbsp;here</p>",
+    "output": "<p>nbsp&nbsp;here</p>"
+  },
+  {
+    "input": "<p>中文輸入 日本語 emoji 🍅</p>",
+    "output": "<p>中文輸入 日本語 emoji 🍅</p>"
+  },
+  {
+    "input": "<p><strong>bold</strong></p>",
+    "output": "<p><strong>bold</strong></p>"
+  },
+  {
+    "input": "<p><em>it</em></p>",
+    "output": "<p><em>it</em></p>"
+  },
+  {
+    "input": "<p><s>strike</s></p>",
+    "output": "<p><s>strike</s></p>"
+  },
+  {
+    "input": "<p><u>under</u></p>",
+    "output": "<p><u>under</u></p>"
+  },
+  {
+    "input": "<p><code>code</code></p>",
+    "output": "<p><code>code</code></p>"
+  },
+  {
+    "input": "<p><strong><em>bi</em></strong></p>",
+    "output": "<p><strong><em>bi</em></strong></p>"
+  },
+  {
+    "input": "<p><em><strong>ib</strong></em></p>",
+    "output": "<p><strong><em>ib</em></strong></p>"
+  },
+  {
+    "input": "<p><strong>a<em>b</em>c</strong></p>",
+    "output": "<p><strong>a<em>b</em>c</strong></p>"
+  },
+  {
+    "input": "<p><strong><em><s>all</s></em></strong></p>",
+    "output": "<p><strong><em><s>all</s></em></strong></p>"
+  },
+  {
+    "input": "<p><code><strong>codebold</strong></code></p>",
+    "output": "<p><code>codebold</code></p>"
+  },
+  {
+    "input": "<p><strong>bold</strong> and <em>it</em> then <code>c</code></p>",
+    "output": "<p><strong>bold</strong> and <em>it</em> then <code>c</code></p>"
+  },
+  {
+    "input": "<p>line one<br>line two</p>",
+    "output": "<p>line one<br>line two</p>"
+  },
+  {
+    "input": "<p><strong>x<br>y</strong></p>",
+    "output": "<p><strong>x<br>y</strong></p>"
+  },
+  {
+    "input": "<ul><li><p>one</p></li><li><p>two</p></li></ul>",
+    "output": "<ul><li><p>one</p></li><li><p>two</p></li></ul>"
+  },
+  {
+    "input": "<ol><li><p>one</p></li><li><p>two</p></li></ol>",
+    "output": "<ol><li><p>one</p></li><li><p>two</p></li></ol>"
+  },
+  {
+    "input": "<ol start=\"3\"><li><p>three</p></li></ol>",
+    "output": "<ol start=\"3\"><li><p>three</p></li></ol>"
+  },
+  {
+    "input": "<ul><li><p>a</p><ul><li><p>nested</p></li></ul></li></ul>",
+    "output": "<ul><li><p>a</p><ul><li><p>nested</p></li></ul></li></ul>"
+  },
+  {
+    "input": "<ol><li><p>a</p><ul><li><p>mix</p></li></ul></li></ol>",
+    "output": "<ol><li><p>a</p><ul><li><p>mix</p></li></ul></li></ol>"
+  },
+  {
+    "input": "<p>before</p><ul><li><p>item</p></li></ul><p>after</p>",
+    "output": "<p>before</p><ul><li><p>item</p></li></ul><p>after</p>"
+  },
+  {
+    "input": "<ul><li><p><strong>b</strong> item</p></li></ul>",
+    "output": "<ul><li><p><strong>b</strong> item</p></li></ul>"
+  },
+  {
+    "input": "<p>one</p><p>two</p>",
+    "output": "<p>one</p><p>two</p>"
+  },
+  {
+    "input": "<p></p><p>x</p><p></p>",
+    "output": "<p></p><p>x</p><p></p>"
+  },
+  {
+    "input": "<ul><li><p></p></li></ul>",
+    "output": "<ul><li><p></p></li></ul>"
+  },
+  {
+    "input": "<p>a  b   c</p>",
+    "output": "<p>a b c</p>"
+  },
+  {
+    "input": "<p> lead and trail </p>",
+    "output": "<p>lead and trail</p>"
+  },
+  {
+    "input": "<p><a href=\"https://example.com\">link</a></p>",
+    "output": "<p><a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://example.com\">link</a></p>"
+  },
+  {
+    "input": "<p>see https://example.com/x?y=1&amp;z=2 now</p>",
+    "output": "<p>see https://example.com/x?y=1&amp;z=2 now</p>"
+  },
+  {
+    "input": "<ul><li>bare li text</li></ul>",
+    "output": "<ul><li><p>bare li text</p></li></ul>"
+  },
+  {
+    "input": "<h1>heading dropped</h1>",
+    "output": "<p>heading dropped</p>"
+  },
+  {
+    "input": "<blockquote><p>quote dropped</p></blockquote>",
+    "output": "<p>quote dropped</p>"
+  },
+  {
+    "input": "<pre><code>block</code></pre>",
+    "output": "<p><code>block</code></p>"
+  },
+  {
+    "input": "<p><u><s><em><strong>x</strong></em></s></u></p>",
+    "output": "<p><strong><em><s><u>x</u></s></em></strong></p>"
+  },
+  {
+    "input": "<p><s><u>su</u></s> <u><s>us</s></u></p>",
+    "output": "<p><s><u>su</u></s> <s><u>us</u></s></p>"
+  },
+  {
+    "input": "<p><a href=\"https://e.com\"><strong>x</strong></a> <strong><a href=\"https://e.com\">y</a></strong></p>",
+    "output": "<p><a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://e.com\"><strong>x</strong></a> <a target=\"_blank\" rel=\"noopener noreferrer nofollow\" href=\"https://e.com\"><strong>y</strong></a></p>"
+  },
+  {
+    "input": "<p><strong>a</strong><strong>b</strong> <em>c</em><strong>d</strong></p>",
+    "output": "<p><strong>ab</strong> <em>c</em><strong>d</strong></p>"
+  },
+  {
+    "input": "<p><b>b tag</b> <i>i tag</i> <strike>strike tag</strike> <del>del tag</del></p>",
+    "output": "<p><strong>b tag</strong> <em>i tag</em> <s>strike tag</s> <s>del tag</s></p>"
+  }
+]
