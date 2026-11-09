@@ -616,9 +616,45 @@ impl TodoDetailPage {
             "child-picker" => self.open_picker(Picking::Child, window, cx),
             "start" => self.fields.start.update(cx, |d, cx| d.open_panel(window, cx)),
             "state" => self.fields.state.update(cx, |s, cx| s.open_list(window, cx)),
-            "project" => {
+            "title" => {
                 let t = arg.to_string();
-                self.fields.project.update(cx, |c, cx| c.set_text(&t, cx));
+                self.title.update(cx, |f, cx| f.set_text(&t, cx));
+                self.commit(Draft::Title, cx);
+            }
+            "notes" => {
+                let t = arg.replace("\\n", "\n");
+                self.notes.update(cx, |n, cx| n.set_text(&t, cx));
+                self.commit(Draft::Notes, cx);
+            }
+            "child" => {
+                let t = arg.to_string();
+                self.new_child.update(cx, |f, cx| f.set_text(&t, cx));
+                self.add_child(cx);
+            }
+            "link-child" => {
+                if let Ok(id) = arg.parse() {
+                    self.write(UpdateTodoInput { id, parent_id: Some(Some(self.todo_id)), ..Default::default() }, cx);
+                }
+            }
+            "set-parent" => {
+                if let Ok(id) = arg.parse() {
+                    self.write(UpdateTodoInput { id: self.todo_id, parent_id: Some(Some(id)), ..Default::default() }, cx);
+                }
+            }
+            "unparent" => drop(self.write(UpdateTodoInput { id: self.todo_id, parent_id: Some(None), ..Default::default() }, cx)),
+            "state-id" => {
+                if let Ok(id) = arg.parse() {
+                    self.write(UpdateTodoInput { id: self.todo_id, state_id: Some(id), ..Default::default() }, cx);
+                }
+            }
+            "label" => self.commit_label(arg, cx),
+            "project-set" => self.commit_project(arg, cx),
+            "milestone-set" => self.commit_milestone(arg, cx),
+            "due" => drop(self.write(UpdateTodoInput { id: self.todo_id, due_date: Some(non_blank(arg)), ..Default::default() }, cx)),
+            "attach" => {
+                let req = lizmeter_ui::md_editor::AttachRequest { upload: 0, name: arg.rsplit(['\\', '/']).next().unwrap_or(arg).to_string(), source: lizmeter_ui::md_editor::FileSource::Path(arg.into()) };
+                self.error = store_upload(&self.svc, self.todo_id, &req).err();
+                self.reload(cx);
             }
             _ => {}
         }

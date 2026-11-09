@@ -52,6 +52,23 @@ enum Dialog {
     Picker(Entity<TodoPicker>),
 }
 
+/// A cloneable view of the open dialog, for the capture hooks.
+enum DialogHandle {
+    None,
+    Create(Entity<TodoEditDialog>),
+    Manage(Entity<ManageDialog>),
+}
+
+impl Dialog {
+    fn clone_handle(&self) -> DialogHandle {
+        match self {
+            Dialog::Create(d) => DialogHandle::Create(d.clone()),
+            Dialog::Manage(d) => DialogHandle::Manage(d.clone()),
+            _ => DialogHandle::None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Link {
     /// File an existing todo under this one.
@@ -693,7 +710,16 @@ impl TodosPage {
                     self.open_create_under(id, window, cx);
                 }
             }
+            "list" => self.close_detail(cx),
             "manage" => self.open_manage(window, cx),
+            "dialog-op" => {
+                let op = arg.to_string();
+                match self.dialog.clone_handle() {
+                    DialogHandle::Create(d) => d.update(cx, |d, cx| d.capture(&op, window, cx)),
+                    DialogHandle::Manage(d) => d.update(cx, |d, cx| d.capture(&op, window, cx)),
+                    DialogHandle::None => {}
+                }
+            }
             "link" => {
                 let (kind, n) = arg.split_once('@').unwrap_or((arg, "0"));
                 if let Some(id) = nth(self, n) {
@@ -1339,9 +1365,9 @@ impl TodosPage {
         }
         match &self.dialog {
             Dialog::None => {}
-            Dialog::Create(d) => root = root.child(window_layer(window, 6, d.clone())),
-            Dialog::Manage(d) => root = root.child(window_layer(window, 6, d.clone())),
-            Dialog::Picker(d) => root = root.child(window_layer(window, 6, d.clone())),
+            Dialog::Create(d) => root = root.child(window_layer(window, d.clone())),
+            Dialog::Manage(d) => root = root.child(window_layer(window, d.clone())),
+            Dialog::Picker(d) => root = root.child(window_layer(window, d.clone())),
         }
         root
     }

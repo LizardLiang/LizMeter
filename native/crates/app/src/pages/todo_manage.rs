@@ -181,6 +181,38 @@ impl ManageDialog {
         cx.notify();
     }
 
+    /// Capture hooks (`--do todos-dialog-op:...`): switch tabs and add rows without a keyboard.
+    pub fn capture(&mut self, op: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (name, arg) = op.split_once(':').unwrap_or((op, ""));
+        match name {
+            "tab" => {
+                self.tab = match arg {
+                    "projects" => Tab::Projects,
+                    "labels" => Tab::Labels,
+                    _ => Tab::States,
+                };
+                self.pending = None;
+            }
+            "add" => {
+                let tab = self.tab;
+                if let Some(f) = self.add_name.get(&tab).cloned() {
+                    let t = arg.to_string();
+                    f.update(cx, |f, cx| f.set_text(&t, cx));
+                    self.add(tab, window, cx);
+                }
+            }
+            "delete" => {
+                if let Ok(id) = arg.parse() {
+                    let tab = self.tab;
+                    self.ask_delete(tab, id, cx);
+                }
+            }
+            "confirm" => self.confirm_delete(window, cx),
+            _ => {}
+        }
+        cx.notify();
+    }
+
     fn server_value(&self, tab: Tab, id: i64) -> Option<String> {
         match tab {
             Tab::States => self.states.iter().find(|s| s.id == id).map(|s| s.label.clone()),

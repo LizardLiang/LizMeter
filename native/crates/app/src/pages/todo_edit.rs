@@ -161,6 +161,37 @@ impl TodoEditDialog {
         }
     }
 
+    /// Capture hooks (`--do todos-dialog-op:...`): fill the form and submit it without a keyboard.
+    pub fn capture(&mut self, op: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (name, arg) = op.split_once(':').unwrap_or((op, ""));
+        match name {
+            "title" => {
+                let t = arg.to_string();
+                self.title.update(cx, |f, cx| f.set_text(&t, cx));
+            }
+            "notes" => {
+                let t = arg.replace("\\n", "\n");
+                self.notes.update(cx, |n, cx| n.set_text(&t, cx));
+            }
+            "label" => self.add_label(arg, cx),
+            "project" => {
+                let t = arg.to_string();
+                self.fields.project.update(cx, |c, cx| c.set_text(&t, cx));
+            }
+            "priority" => {
+                self.priority = arg.parse().unwrap_or(0);
+                self.fields.set_priority(self.priority, cx);
+            }
+            "due" => {
+                self.due_date = arg.to_string();
+                self.fields.due.update(cx, |d, cx| d.set_value(arg, cx));
+            }
+            "submit" => self.submit(window, cx),
+            _ => {}
+        }
+        cx.notify();
+    }
+
     pub fn is_picker_open(&self) -> bool {
         self.picker.is_some() || self.notes_modal.is_some()
     }
