@@ -68,7 +68,7 @@ pub fn dot(color: &str, filled: bool, size: f32, border: f32) -> Div {
 
 /// The bold 11px label above a form field (`.label` / `.sectionLabel`).
 pub fn field_label(text: &str) -> Div {
-    ui_text(11.0).line_height(px(14.0)).font_weight(FontWeight(700.0)).text_color(col(hex(0xa3abc9))).mb(px(5.0)).child(spaced(&text.to_uppercase(), 1.32))
+    ui_text(11.0).line_height(px(14.0)).font_weight(FontWeight(700.0)).text_color(col(hex(0xa3abc9))).mb(px(5.0)).child(spaced(&text.to_uppercase(), 1.1))
 }
 
 // ---- Dialog shell ----
@@ -602,7 +602,7 @@ impl DatePicker {
         self.open
     }
 
-    fn open_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_panel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.cursor = parse_ymd(&self.value).unwrap_or_else(super::todos_logic::today);
         self.open = true;
         window.focus(&self.focus);

@@ -12,6 +12,7 @@ pub mod todos;
 pub mod todos_icons;
 pub mod todos_logic;
 pub mod todo_attachments;
+pub mod todo_detail;
 pub mod todo_edit;
 pub mod todo_fields;
 pub mod todo_manage;

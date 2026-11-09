@@ -59,13 +59,23 @@ pub fn field(label: &str, child: impl IntoElement) -> Div {
 
 /// How many columns `repeat(auto-fit, minmax(9rem, 1fr))` makes of `inner_w` with a 10px gap.
 pub fn grid_columns(inner_w: f32) -> usize {
-    (((inner_w + 10.0) / (144.0 + 10.0)).floor() as usize).max(1)
+    columns(inner_w, 144.0, 10.0)
+}
+
+/// How many columns of at least `min` fit in `inner_w` with `gap` between them.
+pub fn columns(inner_w: f32, min: f32, gap: f32) -> usize {
+    (((inner_w + gap) / (min + gap)).floor() as usize).max(1)
 }
 
 /// Lays the fields out in the auto-fit grid. A wide item takes a whole row.
 pub fn grid(items: Vec<(bool, AnyElement)>, inner_w: f32) -> Div {
-    let cols = grid_columns(inner_w);
-    let col_w = (inner_w - 10.0 * (cols as f32 - 1.0)) / cols as f32;
+    grid_of(items, inner_w, 144.0, 10.0)
+}
+
+/// The same grid with its own column minimum and gap.
+pub fn grid_of(items: Vec<(bool, AnyElement)>, inner_w: f32, min: f32, gap: f32) -> Div {
+    let cols = columns(inner_w, min, gap);
+    let col_w = (inner_w - gap * (cols as f32 - 1.0)) / cols as f32;
     let mut rows: Vec<Div> = vec![];
     let mut current: Option<(Div, usize)> = None;
     for (wide, el) in items {
@@ -76,7 +86,7 @@ pub fn grid(items: Vec<(bool, AnyElement)>, inner_w: f32) -> Div {
             rows.push(div().flex().flex_row().w_full().child(div().w_full().child(el)));
             continue;
         }
-        let (r, n) = current.take().unwrap_or((div().flex().flex_row().gap(px(10.0)), 0));
+        let (r, n) = current.take().unwrap_or((div().flex().flex_row().gap(px(gap)), 0));
         let r = r.child(div().w(px(col_w)).flex_shrink_0().child(el));
         if n + 1 == cols {
             rows.push(r);
@@ -87,7 +97,7 @@ pub fn grid(items: Vec<(bool, AnyElement)>, inner_w: f32) -> Div {
     if let Some((r, _)) = current {
         rows.push(r);
     }
-    div().flex().flex_col().gap(px(10.0)).children(rows)
+    div().flex().flex_col().gap(px(gap)).children(rows)
 }
 
 #[cfg(test)]
