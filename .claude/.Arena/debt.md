@@ -274,5 +274,14 @@ collapsed.
 - **Issue linking is todos only.** The native "Link issue" button and the stopwatch Start prompt list the app's todos with a search box and state chips. The Linear/Jira/GitHub tabs and the project and label chips of `TodoIssuePicker` come with phases 7 and 8. A fuzzy match here is a plain subsequence score, not `fuzzyMatch.ts`.
 - **Claude Code linking is not wired on the Timer page.** "Link Claude Code session" renders as a static select, and the timer saves with `save_session`, never `save_session_with_tracking`. Part C of phase 6 owns the Claude page and the tracker hand-off.
 - **History "Log Work" / "Retry" pills have no handler** until phase 8 (Jira worklog).
-- **Stopwatch settings are not persisted** (as in Electron): 8 h maximum, prompt for issue on. Settings page (part B) must write them to `Root.sw_settings`.
-- **Date labels are en-US.** The Electron build follows the machine locale (zh-TW here: `10月29日`, `上午11:14`).
+- **Stopwatch settings are not persisted** (as in Electron): 8 h maximum, prompt for issue on. Settings (phase 6b) writes them to `Root.sw_settings`; they reset on restart like Electron's.
+- **Date labels were en-US.** Fixed in phase 6b: `locale.rs` reads the Windows user locale.
+
+## Native port, phase 6b (2026-11-09)
+
+- **Settings: issue-tracker, widget avatar and music controls are inert.** GitHub, Linear and Jira forms render and validate empty input, then report that saving arrives with the provider port (phase 8). Widget enable, visibility and reset-position write the `widget_*` settings keys (the widget itself is phase 11); the avatar slots and the music cache controls (limit, usage, clear, yt-dlp version) do nothing until phases 9 and 11.
+- **Data-folder move and sync controls were not exercised against real folders** (session rule). The move runs on a background task, then `PageEvent::Relaunch` starts a new process through `cmd` after a 2 s ping delay and quits. Check this once on a scratch data folder before cutover.
+- **Date format is a reshaped Windows pattern, not ICU.** `locale.rs` takes the long-date and time patterns of the user locale and drops weekday, seconds and (for same-year dates) the year. Locales whose ICU short-month shape differs from that rule (for example some `de`/`ru` forms) can read differently from Electron.
+- **Fonts:** DirectWrite returns the regular face of JhengHei UI and Arial for weight 600; the vendored gpui maps 600..700 to bold for those two families (`direct_write.rs`), as Chromium does. Other families keep the requested weight.
+- **Stats 7d/14d/30d chart animation** grows a bar only when the same day (or tag) bar exists in both ranges, as the CSS height transition does on a keyed element.
+- **Settings number inputs** accept digits only (the browser also accepts `e`, `+`, `-`, `.`); the stopwatch hours field accepts digits and one decimal point.

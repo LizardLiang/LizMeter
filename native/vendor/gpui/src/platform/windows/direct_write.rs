@@ -395,6 +395,15 @@ impl DirectWriteState {
         font_fallbacks: Option<&FontFallbacks>,
         is_system_font: bool,
     ) -> Option<FontId> {
+        // CSS font matching takes the heavier face for a weight of 600 and up. DirectWrite hands
+        // back the regular face of these two-weight families for 600, so ask for bold directly.
+        let font_weight = if (600.0..700.0).contains(&font_weight.0)
+            && matches!(family_name, "Microsoft JhengHei UI" | "Arial")
+        {
+            FontWeight::BOLD
+        } else {
+            font_weight
+        };
         let collection = if is_system_font {
             &self.system_font_collection
         } else {

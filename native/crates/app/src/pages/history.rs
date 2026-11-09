@@ -176,7 +176,7 @@ impl HistoryPage {
                 .font_weight(FontWeight(700.0))
                 .child(spaced(label, 0.88)),
         );
-        top = top.child(div().flex_1().text_size(px(16.0)).font_weight(FontWeight(700.0)).text_color(col(TN_TEXT)).child(format_duration(s.actual_duration_seconds)));
+        top = top.child(div().flex_1().text_size(px(16.0)).line_height(px(20.0)).font_weight(FontWeight(700.0)).text_color(col(TN_TEXT)).child(format_duration(s.actual_duration_seconds)));
         top = top.child(div().flex_shrink_0().text_size(px(12.0)).text_color(col(TN_TEXT_DIM)).child(if hide_date { format_local_time(&s.completed_at) } else { format!("{} \u{b7} {}", format_date(&s.completed_at), format_local_time(&s.completed_at)) }));
         if s.issue_provider == Some(IssueProviderKind::Jira) && s.issue_id.is_some() && s.actual_duration_seconds >= 60 {
             top = top.child(match s.worklog_status {
@@ -267,6 +267,7 @@ fn group_header(id: String, expanded: bool, pad: (f32, f32), left: Div, right: D
         .gap(px(6.0))
         .py(px(pad.0))
         .px(px(pad.1))
+        .line_height(px(15.0))
         .rounded(px(4.0))
         .border_b_1()
         .border_color(col(rgba(41, 46, 66, 0.7)))
@@ -392,11 +393,14 @@ impl Render for HistoryPage {
                     toggle(&mut p.expanded_day, &k);
                     cx.notify();
                 })
-            }));
+            }).mb(px(2.0)));
             if open {
                 for s in &d.sessions {
                     block = block.child(self.card(s, true, cx));
                 }
+            } else {
+                // The collapsed content is an empty box that still takes its 8px flex gap.
+                block = block.child(div());
             }
             list = list.child(block);
         }
