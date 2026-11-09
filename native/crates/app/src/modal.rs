@@ -72,6 +72,7 @@ pub struct IssuePrompt {
 
 impl IssuePrompt {
     pub fn new(svc: &Arc<Services>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        lizmeter_ui::scrollbar::reset("prompt-list");
         let search = TextInput::new(field_style(13.0), "Search by title or #id\u{2026}", window, cx);
         cx.subscribe(&search, |this, s, ev: &TextFieldEvent, cx| match ev {
             TextFieldEvent::Changed => {

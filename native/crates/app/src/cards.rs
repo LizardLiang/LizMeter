@@ -1,6 +1,7 @@
 //! The Timer page: mode toggle, the Pomodoro card and the Stopwatch card.
 
 use crate::app::{PromptPurpose, Root};
+use crate::claude_ui::{PickerState, PickerView, StatsView, new_session_notice, session_picker, stats_card};
 use crate::css::{Spec, TRANSPARENT, hex, linear, rgba};
 use crate::engine::Status;
 use crate::flow::now_ms;
@@ -38,6 +39,12 @@ impl Root {
             .overflow_y_scroll();
         page = page.child(div().mb(px(16.0)).child(toggle)).child(card);
         if self.pomodoro && self.timer_active() {
+            page = page.child(self.claude_section(cx));
+        }
+        if !self.pomodoro && self.stopwatch_active() && self.cc.is_tracking() {
+            page = page.child(self.claude_stats(false, cx));
+        }
+        if self.pomodoro && self.timer_active() {
             page = page.child(
                 div()
                     .pt(px(16.0))
@@ -52,6 +59,39 @@ impl Root {
             );
         }
         div().w(px(480.0)).h_full().child(page).child(scroll.bar())
+    }
+
+    fn claude_stats(&self, with_manage: bool, cx: &mut Context<Self>) -> Div {
+        let (manage, add, dismiss) = (cx.entity(), cx.entity(), cx.entity());
+        let view = StatsView { live: self.cc.live.as_ref(), idle_threshold_minutes: self.cc.idle_minutes, now: chrono::Utc::now() };
+        let manage: Option<Box<dyn Fn(&mut Window, &mut App)>> = (with_manage && self.cc.is_tracking()).then(|| -> Box<dyn Fn(&mut Window, &mut App)> { Box::new(move |_, app| manage.update(app, |t, cx| t.cc_open_picker(cx))) });
+        let notice = match (&self.cc.new_session, with_manage) {
+            (Some(_), true) => Some(new_session_notice(move |_, app| add.update(app, |t, cx| t.cc_add_new_session(cx)), move |_, app| dismiss.update(app, |t, cx| t.cc_dismiss_new_session(cx)))),
+            _ => None,
+        };
+        stats_card(&view, manage, notice)
+    }
+
+    /// Under the Pomodoro card while it runs: the session select, the picker and the live stats.
+    fn claude_section(&self, cx: &mut Context<Self>) -> Div {
+        let mut col_el = div().flex().flex_col();
+        if self.cc.picker == PickerState::Hidden {
+            col_el = col_el.child(div().mt(px(12.0)).child(self.cc_select_timer.clone()));
+        } else {
+            let (toggle, check, skip, confirm) = (cx.entity(), cx.entity(), cx.entity(), cx.entity());
+            let view = PickerView { state: self.cc.picker, sessions: &self.cc.discovered, checked: &self.cc.checked, tracked: self.cc.tracked.len(), now: chrono::Utc::now() };
+            col_el = col_el.child(session_picker(
+                &view,
+                move |_, app| toggle.update(app, |t, cx| t.cc_toggle_picker(cx)),
+                move |uuid, _, app| check.update(app, |t, cx| t.cc_check(uuid, cx)),
+                move |_, app| skip.update(app, |t, cx| t.cc_skip(cx)),
+                move |_, app| confirm.update(app, |t, cx| t.cc_confirm(cx)),
+            ));
+        }
+        if self.cc.is_tracking() || self.cc.picker == PickerState::Collapsed {
+            col_el = col_el.child(self.claude_stats(true, cx));
+        }
+        col_el
     }
 
     fn link_button(&self, issue: Option<(String, String)>, purpose: PromptPurpose, cx: &mut Context<Self>) -> AnyElement {
@@ -151,25 +191,13 @@ impl Root {
                 .inset(-1.0, 0.0, bk(0.06)),
         )
         .shadows(&[sh(0.0, 12.0, 40.0, bk(0.40)), sh(0.0, 4.0, 12.0, bk(0.25))]);
-        let select = Glass::new(8.0, 0.0, 1.0, Spec::rrect(8.0).solid(rgba(16, 17, 32, 0.6)).border(1.0, rgba(59, 66, 97, 0.7)))
-            .el()
-            .w_full()
-            .h(px(33.0))
-            .px(px(13.0))
-            .flex()
-            .flex_row()
-            .items_center()
-            .justify_between()
-            .text_color(col(TN_TEXT_DIM))
-            .child(btn_like_w("Link Claude Code session\u{2026}", 14.0, 400.0))
-            .child(svg().path("icons/caret.svg").size(px(12.0)).text_color(col(TN_TEXT_DIM)));
         self.sw_rich.update(cx, |r, cx| r.set_disabled(active, cx));
 
         let mut el = glass.el().w_full().flex_shrink_0().p(px(25.0)).flex().flex_col().gap(px(16.0));
         el = el
             .child(ui_text(11.0).h(px(14.0)).line_height(px(14.0)).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT)).child(spaced("STOPWATCH", 1.5)))
             .child(self.sw_rich.clone())
-            .child(select);
+            .child(self.cc_select_sw.clone());
         if status == Status::Idle {
             let issue = self.sw_issue.as_ref().map(|i| (issue_ref_id(i), issue_ref_title(i).to_string()));
             el = el.child(div().w_full().flex().flex_row().child(self.link_button(issue, PromptPurpose::LinkStopwatch, cx)));

@@ -1,8 +1,12 @@
 //! The main window view: titlebar, root background, sidebar, and the pages.
 
 use crate::chrome::{self, NAV_ITEMS, NavButton};
+use crate::claude_flow::{self, ClaudeState};
+use crate::claude_ui::ClaudeSessionSelect;
 use crate::engine::{Countdown, Status, Stopwatch};
 use crate::modal::IssuePrompt;
+use crate::pages::activity::ActivityPage;
+use crate::pages::claude::ClaudePage;
 use crate::pages::history::HistoryPage;
 use crate::pages::settings::SettingsPage;
 use crate::pages::stats::StatsPage;
@@ -27,6 +31,8 @@ pub enum Page {
     Stats,
     Tags,
     Settings,
+    Claude,
+    Activity,
     Gallery,
     Anim(usize),
     TextSample,
@@ -89,6 +95,11 @@ pub struct Root {
     pub stats: Entity<StatsPage>,
     pub tags_page: Entity<TagsPage>,
     pub settings: Entity<SettingsPage>,
+    pub cc: ClaudeState,
+    pub cc_select_timer: Entity<ClaudeSessionSelect>,
+    pub cc_select_sw: Entity<ClaudeSessionSelect>,
+    pub activity: Entity<ActivityPage>,
+    pub claude_page: Entity<ClaudePage>,
     /// A session was saved while History was not refreshed; the next History render reloads.
     pub history_stale: bool,
 }
@@ -127,6 +138,15 @@ impl Root {
         let settings_page = cx.new(|cx| SettingsPage::new(svc.clone(), window, cx));
         cx.subscribe_in(&settings_page, window, Self::on_page_event::<SettingsPage>).detach();
 
+        let activity = cx.new(|_| ActivityPage::new(svc.clone()));
+        let claude_page = cx.new(|_| ClaudePage::new(svc.clone()));
+
+        let idle = claude_flow::idle_minutes_from(svc.get_setting_value("claude_tracker.idle_threshold_minutes").ok().flatten().as_deref());
+        let cc_select_timer = cx.new(|_| ClaudeSessionSelect::new(svc.clone(), "cc-timer"));
+        cx.subscribe(&cc_select_timer, |this, _, ev, cx| this.on_claude_select(false, ev, cx)).detach();
+        let cc_select_sw = cx.new(|_| ClaudeSessionSelect::new(svc.clone(), "cc-sw"));
+        cx.subscribe(&cc_select_sw, |this, _, ev, cx| this.on_claude_select(true, ev, cx)).detach();
+
         let mut root = Self {
             svc,
             page,
@@ -161,6 +181,11 @@ impl Root {
             stats,
             tags_page,
             settings: settings_page,
+            cc: ClaudeState::new(idle),
+            cc_select_timer,
+            cc_select_sw,
+            activity,
+            claude_page,
             history_stale: false,
         };
         root.reload_tags(cx);
@@ -175,6 +200,12 @@ impl Root {
         }
         if page == Page::Settings {
             root.show_settings(cx);
+        }
+        if page == Page::Activity {
+            root.show_activity(cx);
+        }
+        if page == Page::Claude {
+            root.show_claude(cx);
         }
         root
     }
@@ -324,6 +355,18 @@ impl Root {
         cx.notify();
     }
 
+    pub fn show_activity(&mut self, cx: &mut Context<Self>) {
+        self.activity.update(cx, |a, cx| a.show(cx));
+        self.page = Page::Activity;
+        cx.notify();
+    }
+
+    pub fn show_claude(&mut self, cx: &mut Context<Self>) {
+        self.claude_page.update(cx, |c, cx| c.show(cx));
+        self.page = Page::Claude;
+        cx.notify();
+    }
+
     fn sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let mut col_el = chrome::sidebar_glass()
@@ -340,6 +383,8 @@ impl Root {
         let active_idx = match self.page {
             Page::Timer => Some(0),
             Page::History => Some(1),
+            Page::Claude => Some(4),
+            Page::Activity => Some(5),
             Page::Stats => Some(7),
             Page::Tags => Some(8),
             Page::Settings => Some(9),
@@ -416,14 +461,34 @@ impl Root {
         col_el
     }
 
+    /// The page a nav rail button opens.
+    pub fn page_for(index: usize) -> Page {
+        match index {
+            0 => Page::Timer,
+            1 => Page::History,
+            4 => Page::Claude,
+            5 => Page::Activity,
+            7 => Page::Stats,
+            8 => Page::Tags,
+            9 => Page::Settings,
+            i => Page::Other(i),
+        }
+    }
+
     pub fn navigate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
         self.settings.update(cx, |s, _| s.hide());
+        self.activity.update(cx, |a, _| a.hide());
+        if self.page != Self::page_for(index) {
+            lizmeter_ui::scrollbar::reset_all();
+        }
         match index {
             0 => {
                 self.page = Page::Timer;
                 cx.notify();
             }
             1 => self.show_history(window, cx),
+            4 => self.show_claude(cx),
+            5 => self.show_activity(cx),
             7 => self.show_stats(cx),
             8 => self.show_tags(cx),
             9 => self.show_settings(cx),
@@ -472,6 +537,8 @@ impl Render for Root {
             Page::Stats => self.stats.clone().into_any_element(),
             Page::Tags => self.tags_page.clone().into_any_element(),
             Page::Settings => self.settings.clone().into_any_element(),
+            Page::Claude => self.claude_page.clone().into_any_element(),
+            Page::Activity => self.activity.clone().into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),
             Page::Notes(v) => {
                 let width = if v == MdVariant::Framed { 640.0 } else { 720.0 };

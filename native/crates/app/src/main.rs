@@ -2,6 +2,8 @@
 
 mod app;
 mod cards;
+mod claude_flow;
+mod claude_ui;
 mod chrome;
 
 mod gallery;
@@ -37,7 +39,7 @@ mod embedded {
     icons!(
         "clock", "list", "check-square", "issues", "zap", "activity", "music", "chart", "tag", "gear", "link", "spinner",
         "win-min", "win-max", "win-close", "bold", "italic", "strike", "bullets", "numbered", "code", "expand", "play",
-        "pause", "stop", "caret", "spark"
+        "pause", "stop", "caret", "spark", "chevron-down", "chevron-right", "chevron-left", "file"
     );
 
     pub struct Assets;
@@ -213,6 +215,8 @@ fn main() {
                 "history" => (Page::History, true, false),
                 "tags" => (Page::Tags, true, false),
                 "settings" => (Page::Settings, true, false),
+                "claude" => (Page::Claude, true, false),
+                name if name.starts_with("activity") => (Page::Activity, true, false),
                 name if name.starts_with("stats") => (Page::Stats, true, false),
                 _ => (Page::Timer, true, false),
             };
@@ -247,6 +251,10 @@ fn main() {
                             }
                             if let Some(spec) = page_name.strip_prefix("stats") {
                                 r.stats.update(cx, |s, _| s.preset(spec.trim_start_matches(':')));
+                            }
+                            if let Some(spec) = page_name.strip_prefix("activity") {
+                                r.activity.update(cx, |a, _| a.preset(spec.trim_start_matches(':')));
+                                r.show_activity(cx);
                             }
                             if page_name == "notes-modal" {
                                 r.open_notes_modal(window, cx);

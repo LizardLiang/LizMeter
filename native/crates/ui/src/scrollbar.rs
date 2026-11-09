@@ -72,6 +72,20 @@ pub fn keyed(id: &'static str, style: BarStyle) -> Scroll {
     KEYED.with(|m| m.borrow_mut().entry(id).or_insert_with(|| Scroll::new(style)).clone())
 }
 
+/// Sends one keyed scroller back to the top.
+pub fn reset(id: &'static str) {
+    KEYED.with(|m| {
+        if let Some(s) = m.borrow().get(id) {
+            s.set_scrolled(0.0);
+        }
+    });
+}
+
+/// Sends every keyed scroller back to the top: a page the user opens starts at its top.
+pub fn reset_all() {
+    KEYED.with(|m| m.borrow().values().for_each(|s| s.set_scrolled(0.0)));
+}
+
 struct Geo {
     bounds: Bounds<Pixels>,
     track: f32,
@@ -245,7 +259,8 @@ impl Element for ScrollbarElement {
 
 #[cfg(test)]
 mod tests {
-    use super::{MIN_THUMB, scrolled_for_thumb_start, thumb};
+    use super::{BarStyle, MIN_THUMB, keyed, reset, reset_all, scrolled_for_thumb_start, thumb};
+    use gpui::{point, px};
 
     #[test]
     fn fits_has_no_thumb() {
@@ -298,5 +313,17 @@ mod tests {
             let (start, _) = thumb(300.0, 600.0, s).unwrap();
             assert!((scrolled_for_thumb_start(300.0, 600.0, start) - s).abs() < 1e-3);
         }
+    }
+
+    #[test]
+    fn reset_sends_keyed_scrollers_to_the_top() {
+        let (a, b) = (keyed("reset-a", BarStyle::Global), keyed("reset-b", BarStyle::Global));
+        a.handle().set_offset(point(px(0.0), px(-120.0)));
+        b.handle().set_offset(point(px(0.0), px(-80.0)));
+        reset("reset-a");
+        assert_eq!(a.handle().offset().y, px(0.0));
+        assert_eq!(b.handle().offset().y, px(-80.0));
+        reset_all();
+        assert_eq!(b.handle().offset().y, px(0.0));
     }
 }

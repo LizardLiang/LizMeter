@@ -1,5 +1,7 @@
 //! The pages of the main window that run on real services.
 
+pub mod activity;
+pub mod claude;
 pub mod history;
 pub mod settings;
 pub mod settings_sections;

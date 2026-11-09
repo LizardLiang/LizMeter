@@ -184,12 +184,14 @@ impl Root {
 
     pub fn pause(&mut self, cx: &mut Context<Self>) {
         self.countdown.pause(now_ms());
+        self.cc_pause();
         cx.notify();
     }
 
     pub fn resume(&mut self, cx: &mut Context<Self>) {
         let now = now_ms();
         self.countdown.resume(now);
+        self.cc_resume();
         self.shown_cd = self.countdown.remaining_seconds(now);
         self.schedule_ticks(cx);
         cx.notify();
@@ -198,6 +200,7 @@ impl Root {
     pub fn reset(&mut self, cx: &mut Context<Self>) {
         let restored = self.countdown.status == Status::Idle && self.countdown.restored_planned.is_some();
         self.countdown.reset();
+        self.cc_reset(cx);
         self.shown_cd = self.countdown.remaining_seconds(now_ms());
         self.pending_issue = None;
         if restored {
@@ -237,7 +240,9 @@ impl Root {
             self.svc.host().play_notification_sound();
         }
         let input = input_for(&self.title_html, ty, self.countdown.planned_seconds(), self.countdown.actual_seconds(), self.pending_issue.as_ref());
-        match self.svc.save_session(&input) {
+        let tracked = self.cc_collect();
+        self.set_claude_link(false, None, cx);
+        match self.save_tracked(&input, tracked) {
             Ok(session) => {
                 self.save_error = None;
                 self.assign_pending_tags(&session);
@@ -340,6 +345,7 @@ impl Root {
     pub fn start_stopwatch(&mut self, cx: &mut Context<Self>) {
         let now = now_ms();
         self.stopwatch.start(now);
+        self.cc_stopwatch_started(cx);
         self.shown_sw = self.stopwatch.elapsed_seconds(now);
         self.sw_save_error = None;
         self.schedule_ticks(cx);
@@ -348,12 +354,14 @@ impl Root {
 
     pub fn pause_stopwatch(&mut self, cx: &mut Context<Self>) {
         self.stopwatch.pause(now_ms());
+        self.cc_pause();
         cx.notify();
     }
 
     pub fn resume_stopwatch(&mut self, cx: &mut Context<Self>) {
         let now = now_ms();
         self.stopwatch.resume(now);
+        self.cc_resume();
         self.shown_sw = self.stopwatch.elapsed_seconds(now);
         self.schedule_ticks(cx);
         cx.notify();
@@ -363,12 +371,14 @@ impl Root {
         let now = now_ms();
         let Some(secs) = self.stopwatch.stop(now) else { return };
         self.shown_sw = secs;
+        let tracked = self.cc_collect();
         let saved = match self.stopwatch.restored_session_id.clone() {
             Some(id) => self.svc.update_session_duration(&id, secs),
-            None => self.svc.save_session(&input_for(&self.sw_title_html, TimerType::Stopwatch, 0, secs, self.sw_issue.as_ref())),
+            None => self.save_tracked(&input_for(&self.sw_title_html, TimerType::Stopwatch, 0, secs, self.sw_issue.as_ref()), tracked),
         };
         match saved {
             Ok(_) => {
+                self.set_claude_link(true, None, cx);
                 self.sw_save_error = None;
                 self.stopwatch.restored_session_id = None;
                 self.history_stale = true;
@@ -415,6 +425,9 @@ impl Root {
                 self.pending_issue = issue;
             }
             self.pomodoro = true;
+        }
+        if self.page != crate::app::Page::Timer {
+            lizmeter_ui::scrollbar::reset_all();
         }
         self.page = crate::app::Page::Timer;
         let _ = window;

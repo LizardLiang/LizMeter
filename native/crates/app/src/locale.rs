@@ -191,6 +191,7 @@ mod win {
     }
 
     pub struct Patterns {
+        pub long_date: String,
         pub date_year: String,
         pub date: String,
         pub time: String,
@@ -207,6 +208,7 @@ mod win {
             let am = info(LOCALE_S1159).unwrap_or_default();
             let short_date = info(LOCALE_SSHORTDATE)?;
             Some(Patterns {
+                long_date: long.clone(),
                 date_year: date_pattern(&long, true),
                 date: date_pattern(&long, false),
                 time: time_pattern(&time, &am),
@@ -252,6 +254,18 @@ pub fn month_day(y: i32, m: u32, d: u32, with_year: bool) -> String {
     } else {
         format!("{name} {d}")
     }
+}
+
+/// `toLocaleDateString(undefined, {weekday, year, month, day: "long"})`: "Monday, November 9, 2026".
+pub fn long_date(y: i32, m: u32, d: u32) -> String {
+    #[cfg(windows)]
+    if let Some(p) = win::patterns() {
+        if let Some(s) = win::format_date(&p.long_date, y, m, d) {
+            return s;
+        }
+    }
+    use chrono::NaiveDate;
+    NaiveDate::from_ymd_opt(y, m, d).map(|n| n.format("%A, %B %-d, %Y").to_string()).unwrap_or_default()
 }
 
 /// "上午11:14" / "11:14 AM".
