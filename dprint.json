@@ -8,7 +8,7 @@
   },
   "json": {},
   "includes": ["src/**/*.{ts,tsx}", "*.json"],
-  "excludes": ["node_modules", "dist"],
+  "excludes": ["node_modules", "dist", ".claude"],
   "plugins": [
     "https://plugins.dprint.dev/typescript-0.93.4.wasm",
     "https://plugins.dprint.dev/json-0.19.4.wasm"
