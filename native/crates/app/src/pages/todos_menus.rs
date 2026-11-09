@@ -315,7 +315,7 @@ fn divider() -> Div {
     div().h(px(1.0)).mx(px(6.0)).my(px(4.0)).bg(col(rgba(86, 95, 137, 0.25)))
 }
 
-/// The panel of the right-click menu. `on_choice` runs for every item and for Escape.
+/// The panel of the right-click menu. `on_choice` runs for every item and for a click outside the panel.
 pub fn action_menu(window: &Window, p: ActionMenuProps, on_choice: Rc<dyn Fn(ActionChoice, &mut Window, &mut App)>) -> impl IntoElement {
     let has_parent = p.todo.parent_id.is_some();
     let est = (p.states.len() as f32 + MENU_FIXED_ROWS + if has_parent { 1.0 } else { 0.0 }) * MENU_ROW_H;

@@ -92,6 +92,8 @@ pub struct TodosPage {
     geo: Rc<Cell<Option<Geo>>>,
     /// The latest row action that reaches a part 7B dialog or page.
     pub pending: Option<Pending7b>,
+    /// A row to centre once the list has been measured.
+    scroll_target: Option<i64>,
 }
 
 impl EventEmitter<PageEvent> for TodosPage {}
@@ -100,7 +102,7 @@ impl TodosPage {
     pub fn new(svc: Arc<Services>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let project_select = cx.new(|cx| SelectBox::new("todo-project-filter", "", 136.0, 192.0, false, cx));
         cx.subscribe_in(&project_select, window, |this, _, ev: &SelectEvent, window, cx| {
-            let SelectEvent::Change(v) = ev;
+            let SelectEvent::Change(v) = ev else { return window.focus(&this.focus) };
             this.project_filter = v.parse().ok();
             this.reload(cx);
             window.focus(&this.focus);
@@ -108,7 +110,7 @@ impl TodosPage {
         .detach();
         let label_select = cx.new(|cx| SelectBox::new("todo-label-filter", "", 136.0, 192.0, false, cx));
         cx.subscribe_in(&label_select, window, |this, _, ev: &SelectEvent, window, cx| {
-            let SelectEvent::Change(v) = ev;
+            let SelectEvent::Change(v) = ev else { return window.focus(&this.focus) };
             this.label_filter = v.parse().ok();
             this.reload(cx);
             window.focus(&this.focus);
@@ -116,7 +118,7 @@ impl TodosPage {
         .detach();
         let bulk_select = cx.new(|cx| SelectBox::new("todo-bulk-state", "Move to...", 136.0, 4000.0, true, cx));
         cx.subscribe_in(&bulk_select, window, |this, _, ev: &SelectEvent, window, cx| {
-            let SelectEvent::Change(v) = ev;
+            let SelectEvent::Change(v) = ev else { return window.focus(&this.focus) };
             if let Ok(state_id) = v.parse::<i64>() {
                 let ids: Vec<i64> = this.selected.iter().copied().collect();
                 this.set_state_of(&ids, state_id);
@@ -154,6 +156,7 @@ impl TodosPage {
             bulk_select,
             geo: Rc::new(Cell::new(None)),
             pending: None,
+            scroll_target: None,
         }
     }
 
@@ -172,7 +175,7 @@ impl TodosPage {
             self.save_collapsed();
             self.rebuild();
         }
-        self.scroll_to(id, true);
+        self.scroll_target = Some(id);
         self.flash = Some((id, Instant::now()));
         cx.spawn(async move |this, cx| {
             let frames = FLASH_MS / 50 + 1;
@@ -183,7 +186,9 @@ impl TodosPage {
                 }
             }
             let _ = this.update(cx, |p, cx| {
-                p.flash = None;
+                if p.flash.is_some_and(|(fid, at)| fid == id && at.elapsed() >= Duration::from_millis(FLASH_MS)) {
+                    p.flash = None;
+                }
                 cx.notify();
             });
         })
@@ -1050,6 +1055,11 @@ impl Render for TodosPage {
         let scrolled_by_capture = CAPTURE_SCROLL.load(std::sync::atomic::Ordering::Relaxed);
         if scrolled_by_capture > 0 {
             scroll.set_offset(point(px(0.0), px(-(scrolled_by_capture as f32))));
+        }
+        if self.geo.get().is_some() {
+            if let Some(id) = self.scroll_target.take() {
+                self.scroll_to(id, true);
+            }
         }
         let geo = self.geo.get();
         let fallback = Geo { panel_x: 64.0 + 160.0, panel_y: 100.0, panel_h: 0.0, vp_top: 32.0, vp_h: f32::from(vp.height) - 32.0 };

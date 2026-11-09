@@ -296,12 +296,12 @@ pub fn accept_query(accept: Accept, query: &str) -> Option<QuickItem> {
     }
 }
 
-/// The rows a menu shows for a query: the typed value first when nothing listed matches it exactly.
+/// The rows a menu shows for a query: the typed value first when no listed row has that label or value.
 pub fn quick_rows(items: &[QuickItem], accept: Accept, query: &str) -> Vec<QuickItem> {
     let needle = query.trim().to_lowercase();
     let matches: Vec<QuickItem> = if needle.is_empty() { items.to_vec() } else { items.iter().filter(|i| i.label.to_lowercase().contains(&needle)).cloned().collect() };
     let trimmed = query.trim();
-    let typed = if trimmed.is_empty() || matches.iter().any(|i| i.label.to_lowercase() == trimmed.to_lowercase()) { None } else { accept_query(accept, trimmed) };
+    let typed = if trimmed.is_empty() || matches.iter().any(|i| i.label.to_lowercase() == trimmed.to_lowercase() || i.value == trimmed) { None } else { accept_query(accept, trimmed) };
     typed.into_iter().chain(matches).collect()
 }
 
@@ -350,7 +350,7 @@ pub fn format_todo_id(id: i64) -> String {
 pub fn collapse_line_breaks(value: &str) -> String {
     let mut out = String::with_capacity(value.len());
     let mut run = String::new();
-    let mut flush = |run: &mut String, out: &mut String| {
+    let flush = |run: &mut String, out: &mut String| {
         if run.contains(['\n', '\r']) {
             out.push(' ');
         } else {
@@ -556,6 +556,8 @@ mod tests {
         let rows = quick_rows(&cfg.items, cfg.accept, "2026-12-24");
         assert_eq!(rows[0].value, "2026-12-24");
         assert!(quick_rows(&cfg.items, cfg.accept, "2026-12-34").is_empty());
+        let today_rows = quick_rows(&cfg.items, cfg.accept, "2026-11-09");
+        assert_eq!(today_rows.len(), 1, "a date a shortcut already covers is not offered twice");
         assert_eq!(resolve_pick(QuickKind::Due, ""), Some(QuickPick::Due(None)));
         assert_eq!(resolve_pick(QuickKind::Due, "2026-12-24"), Some(QuickPick::Due(Some("2026-12-24".into()))));
     }

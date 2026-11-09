@@ -22,6 +22,8 @@ impl SelectOption {
 
 pub enum SelectEvent {
     Change(String),
+    /// The list closed without a pick.
+    Closed,
 }
 
 impl EventEmitter<SelectEvent> for SelectBox {}
@@ -90,6 +92,7 @@ impl SelectBox {
 
     fn close(&mut self, cx: &mut Context<Self>) {
         self.open = false;
+        cx.emit(SelectEvent::Closed);
         cx.notify();
     }
 
