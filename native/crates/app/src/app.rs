@@ -481,7 +481,23 @@ impl Render for Root {
                     .flex()
                     .justify_center()
                     .overflow_hidden()
-                    .child(div().id("notes-page").w(px(width)).h_full().pt(px(32.0)).px(px(24.0)).overflow_y_scroll().child(self.notes.clone()))
+                    .child({
+                        let scroll = lizmeter_ui::scrollbar::keyed("notes-page", lizmeter_ui::scrollbar::BarStyle::Global);
+                        div()
+                            .w(px(width))
+                            .h_full()
+                            .child(
+                                div()
+                                    .id("notes-page")
+                                    .track_scroll(scroll.handle())
+                                    .size_full()
+                                    .pt(px(32.0))
+                                    .px(px(24.0))
+                                    .overflow_y_scroll()
+                                    .child(self.notes.clone()),
+                            )
+                            .child(scroll.bar())
+                    })
                     .into_any_element()
             }
             Page::Anim(_) | Page::TextSample | Page::EmojiSample => unreachable!(),

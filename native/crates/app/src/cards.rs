@@ -25,7 +25,17 @@ impl Root {
         let disabled = self.timer_active() || self.stopwatch_active();
         let toggle = timer::mode_toggle(self.pomodoro, disabled, move |pomodoro, _, app| me.update(app, |t, cx| t.set_pomodoro(pomodoro, cx)));
         let card = if self.pomodoro { self.pomodoro_card(cx).into_any_element() } else { self.stopwatch_card(cx).into_any_element() };
-        let mut page = div().id("timer-page").w(px(480.0)).h_full().pt(px(32.0)).px(px(24.0)).pb(px(24.0)).flex().flex_col().overflow_y_scroll();
+        let scroll = lizmeter_ui::scrollbar::keyed("timer-page", lizmeter_ui::scrollbar::BarStyle::Global);
+        let mut page = div()
+            .id("timer-page")
+            .track_scroll(scroll.handle())
+            .size_full()
+            .pt(px(32.0))
+            .px(px(24.0))
+            .pb(px(24.0))
+            .flex()
+            .flex_col()
+            .overflow_y_scroll();
         page = page.child(div().mb(px(16.0)).child(toggle)).child(card);
         if self.pomodoro && self.timer_active() {
             page = page.child(
@@ -41,7 +51,7 @@ impl Root {
                     .child(self.tag_picker.clone()),
             );
         }
-        page
+        div().w(px(480.0)).h_full().child(page).child(scroll.bar())
     }
 
     fn link_button(&self, issue: Option<(String, String)>, purpose: PromptPurpose, cx: &mut Context<Self>) -> AnyElement {

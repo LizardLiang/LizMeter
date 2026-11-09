@@ -208,16 +208,22 @@ impl Render for IssuePrompt {
             );
         }
 
-        let mut list = div().id("prompt-list").h(px(196.0)).flex_shrink_0().flex().flex_col().overflow_y_scroll();
+        let scroll = lizmeter_ui::scrollbar::keyed("prompt-list", lizmeter_ui::scrollbar::BarStyle::Global);
+        let mut rows = div().flex().flex_col();
         if let Some(e) = &self.error {
-            list = list.child(crate::controls::state_message(e.clone(), TN_RED, false));
+            rows = rows.child(crate::controls::state_message(e.clone(), TN_RED, false));
         } else if matches.is_empty() {
             let filtered = !self.query.trim().is_empty() || self.state_filter.is_some();
-            list = list.child(crate::controls::state_message(if filtered { "No matching todos" } else { "No todos yet" }, TN_TEXT_DIM, false));
+            rows = rows.child(crate::controls::state_message(if filtered { "No matching todos" } else { "No todos yet" }, TN_TEXT_DIM, false));
         }
         for (i, t) in matches.iter().enumerate() {
-            list = list.child(self.row(t, i == self.active, cx));
+            rows = rows.child(self.row(t, i == self.active, cx));
         }
+        let list = div()
+            .h(px(196.0))
+            .flex_shrink_0()
+            .child(div().id("prompt-list").track_scroll(scroll.handle()).size_full().overflow_y_scroll().child(scroll.pad(rows)))
+            .child(scroll.bar());
 
         let search = div()
             .relative()
