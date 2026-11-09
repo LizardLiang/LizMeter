@@ -9,6 +9,7 @@ pub mod settings_ui;
 pub mod stats;
 pub mod tags;
 pub mod todos;
+pub mod worklog;
 pub mod todos_icons;
 pub mod todos_logic;
 pub mod todo_attachments;
