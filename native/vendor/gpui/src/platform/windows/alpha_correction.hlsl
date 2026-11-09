@@ -6,7 +6,10 @@ float color_brightness(float3 color) {
 float light_on_dark_contrast(float enhancedContrast, float3 color) {
     float brightness = color_brightness(color);
     float multiplier = saturate(4.0f * (0.75f - brightness));
-    return enhancedContrast * multiplier;
+    // LizMeter: Chromium (Skia) draws light text on a dark surface heavier than DirectWrite's
+    // grayscale defaults, so light text gets its own boost on top of the dim-text contrast.
+    float bright_boost = 1.2f * saturate(4.0f * (brightness - 0.70f));
+    return enhancedContrast * multiplier + bright_boost;
 }
 
 float enhance_contrast(float alpha, float k) {

@@ -319,3 +319,44 @@ fn _unused() -> C {
 fn _css() {
     let _ = css::TRANSPARENT;
 }
+
+pub const SAMPLE_TEXT: &str = "The quick brown fox jumps over the lazy dog 0123456789 \u{4f60}\u{597d}\u{4e16}\u{754c}";
+
+/// (size px, weight, color) rows of the text-contrast comparison page; `tools/textsample.html` mirrors it.
+pub const SAMPLE_ROWS: [(f32, f32, u32); 7] = [
+    (12.0, 400.0, 0xa9b1d6),
+    (13.0, 400.0, 0xc0caf5),
+    (14.0, 400.0, 0xc0caf5),
+    (14.0, 400.0, 0x565f89),
+    (12.0, 400.0, 0x7a8194),
+    (13.0, 600.0, 0xc0caf5),
+    (15.0, 400.0, 0xc0caf5),
+];
+
+/// Plain text rows on the app background, for pixel comparison against Chromium.
+pub fn text_sample() -> impl IntoElement {
+    let mut col_el = div().size_full().bg(col(TN_BG)).font_family(UI_FONT).pl(px(20.0)).pt(px(20.0)).flex().flex_col();
+    for (size, weight, color) in SAMPLE_ROWS {
+        col_el = col_el.child(
+            div()
+                .h(px(30.0))
+                .line_height(px(30.0))
+                .text_size(px(size))
+                .font_weight(FontWeight(weight))
+                .text_color(col(hex(color)))
+                .child(SAMPLE_TEXT),
+        );
+    }
+    col_el
+}
+
+/// Emoji row used to compare colour-glyph rendering with Chromium (`tools/emoji.html`).
+pub fn emoji_sample() -> impl IntoElement {
+    div()
+        .size_full()
+        .bg(col(TN_BG))
+        .pl(px(20.0))
+        .pt(px(20.0))
+        .child(div().h(px(48.0)).line_height(px(48.0)).text_size(px(32.0)).font_family("Segoe UI Emoji").text_color(col(TN_TEXT)).child("\u{1F345} \u{1F600} \u{2764}\u{FE0F} \u{1F44D} \u{1F680} \u{1F525}"))
+        .child(div().h(px(48.0)).line_height(px(48.0)).text_size(px(14.0)).font_family("Segoe UI Emoji").text_color(col(TN_TEXT)).child("\u{1F345} \u{1F600} \u{2764}\u{FE0F} \u{1F44D} \u{1F680} \u{1F525} inline 14px"))
+}

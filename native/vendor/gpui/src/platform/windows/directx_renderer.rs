@@ -683,12 +683,10 @@ impl DirectXRenderer {
     pub(crate) fn get_font_info() -> &'static FontInfo {
         static CACHED_FONT_INFO: OnceLock<FontInfo> = OnceLock::new();
         CACHED_FONT_INFO.get_or_init(|| unsafe {
-            let factory: IDWriteFactory5 = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).unwrap();
-            let render_params: IDWriteRenderingParams1 =
-                factory.CreateRenderingParams().unwrap().cast().unwrap();
             FontInfo {
-                gamma_ratios: Self::get_gamma_ratios(render_params.GetGamma()),
-                grayscale_enhanced_contrast: render_params.GetGrayscaleEnhancedContrast(),
+                // LizMeter: tuned against Chromium text on the same surface (native/tools/textsample.html).
+                gamma_ratios: Self::get_gamma_ratios(2.2),
+                grayscale_enhanced_contrast: 0.6,
             }
         })
     }

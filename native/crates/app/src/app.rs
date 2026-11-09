@@ -15,6 +15,8 @@ pub enum Page {
     Timer,
     Gallery,
     Anim(usize),
+    TextSample,
+    EmojiSample,
     Other(usize),
 }
 
@@ -315,7 +317,7 @@ impl Root {
         let active_idx = match self.page {
             Page::Timer => Some(0),
             Page::Other(i) => Some(i),
-            Page::Gallery | Page::Anim(_) => None,
+            Page::Gallery | Page::Anim(_) | Page::TextSample | Page::EmojiSample => None,
         };
         let running_dot = match self.status {
             Status::Running => Some(true),
@@ -400,13 +402,19 @@ fn btn_like_w(text: &str, size: f32, weight: f32) -> Div {
 
 impl Render for Root {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.page == Page::EmojiSample {
+            return gallery::emoji_sample().into_any_element();
+        }
+        if self.page == Page::TextSample {
+            return gallery::text_sample().into_any_element();
+        }
         if let Page::Anim(i) = self.page {
             return gallery::anim_page(i).into_any_element();
         }
         let page = match self.page {
             Page::Timer => div().flex_1().h_full().flex().justify_center().overflow_hidden().child(self.timer_page(cx)).into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),
-            Page::Anim(_) => unreachable!(),
+            Page::Anim(_) | Page::TextSample | Page::EmojiSample => unreachable!(),
             Page::Other(i) => div()
                 .flex_1()
                 .h_full()

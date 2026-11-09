@@ -160,6 +160,8 @@ fn main() {
         } else {
             let (page, pomodoro, modal) = match args.page.as_str() {
                 "gallery" => (Page::Gallery, true, false),
+                "textsample" => (Page::TextSample, true, false),
+                "emojisample" => (Page::EmojiSample, true, false),
                 name if name.starts_with("anim:") => {
                     let i = gallery::ANIM_NAMES.iter().position(|n| *n == &name[5..]).expect("unknown animation");
                     (Page::Anim(i), true, false)
