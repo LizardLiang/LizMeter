@@ -83,8 +83,8 @@ impl Countdown {
             return None;
         }
         // The display shows round(left / 1000): it flips when `left` crosses an x.5 s mark.
-        let to_boundary = (self.left_ms(now) + 500).rem_euclid(1000);
-        Some(if to_boundary == 0 { 1000 } else { to_boundary as u64 })
+        // One millisecond past the x.5 s mark, so the wake lands after the display flipped.
+        Some((self.left_ms(now) + 500).rem_euclid(1000) as u64 + 1)
     }
 
     pub fn set_type(&mut self, ty: TimerType) {
@@ -374,10 +374,10 @@ mod tests {
         let mut c = cd();
         assert_eq!(c.next_wake_ms(0), None);
         c.start(0);
-        // 1500 s is shown; it flips to 1499 once 1499.5 s are left, 500 ms from now.
-        assert_eq!(c.next_wake_ms(0), Some(500));
-        assert_eq!(c.next_wake_ms(500), Some(1000));
-        assert_eq!(c.next_wake_ms(600), Some(900));
+        // 1500 s is shown; it flips to 1499 once less than 1499.5 s are left, 501 ms from now.
+        assert_eq!(c.next_wake_ms(0), Some(501));
+        assert_eq!(c.next_wake_ms(500), Some(1));
+        assert_eq!(c.next_wake_ms(600), Some(901));
     }
 
     #[test]

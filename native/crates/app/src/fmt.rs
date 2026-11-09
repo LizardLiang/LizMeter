@@ -231,7 +231,7 @@ pub fn strip_html(html: &str) -> String {
             _ => {}
         }
     }
-    out.trim().to_string()
+    out.replace("&nbsp;", " ").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&amp;", "&").trim().to_string()
 }
 
 /// The text shown for an issue link: `#12`, `ENG-4`, `PROJ-7`.
@@ -377,6 +377,8 @@ mod tests {
         assert_eq!(strip_html("<p>Hello <strong>world</strong></p>"), "Hello world");
         assert_eq!(strip_html("<p></p>"), "");
         assert_eq!(strip_html("  plain  "), "plain");
+        assert_eq!(strip_html("<p>A &amp; B</p>"), "A & B");
+        assert_eq!(strip_html("<p>&nbsp;</p>"), "");
     }
 
     #[test]

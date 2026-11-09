@@ -30,6 +30,7 @@ pub struct HistoryPage {
     expanded_day: HashSet<String>,
     /// The filter the expand sets were seeded for.
     seeded_for: Option<Option<i64>>,
+    seeded_empty: bool,
     pickers: HashMap<String, Entity<TagPicker>>,
     pub timer_active: bool,
 }
@@ -66,6 +67,7 @@ impl HistoryPage {
             expanded_date: HashSet::new(),
             expanded_day: HashSet::new(),
             seeded_for: None,
+            seeded_empty: true,
             pickers: HashMap::new(),
             timer_active: false,
         }
@@ -89,8 +91,9 @@ impl HistoryPage {
 
     pub fn refresh(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.load();
-        if self.seeded_for != Some(self.tag_filter) {
+        if self.seeded_for != Some(self.tag_filter) || (self.seeded_empty && !self.sessions.is_empty()) {
             self.seeded_for = Some(self.tag_filter);
+            self.seeded_empty = self.sessions.is_empty();
             self.expanded_issue.clear();
             self.expanded_date.clear();
             let grouped = group_by_issue(&self.sessions, chrono::Local::now());
@@ -129,21 +132,22 @@ impl HistoryPage {
                 self.svc.create_tag(&CreateTagInput { name: name.clone(), color: color.clone() }).and_then(|t| self.svc.assign_tag(&assign(t.id)))
             }
         };
+        self.load();
         if let Err(e) = res {
             self.error = Some(e.to_string());
         }
-        self.load();
         self.sync_pickers(cx);
         cx.notify();
         cx.emit(PageEvent::SessionsChanged);
     }
 
     fn delete(&mut self, id: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if let Err(e) = self.svc.delete_session(id) {
-            self.error = Some(e.to_string());
-        }
+        let res = self.svc.delete_session(id);
         self.pickers.remove(id);
         self.refresh(window, cx);
+        if let Err(e) = res {
+            self.error = Some(e.to_string());
+        }
         cx.emit(PageEvent::SessionsChanged);
     }
 

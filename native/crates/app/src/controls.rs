@@ -96,8 +96,8 @@ pub fn soft_button(id: impl Into<ElementId>, label: &str, active: bool, radius: 
 
 pub fn parse_color(s: &str) -> C {
     let h = s.trim_start_matches('#');
-    match u32::from_str_radix(&h[..h.len().min(6)], 16) {
-        Ok(v) if h.len() >= 6 => hex(v),
+    match h.get(..6).map(|d| u32::from_str_radix(d, 16)) {
+        Some(Ok(v)) => hex(v),
         _ => TN_MUTED,
     }
 }

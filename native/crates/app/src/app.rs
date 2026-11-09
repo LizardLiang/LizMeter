@@ -80,6 +80,8 @@ pub struct Root {
     pub prompt: Option<(Entity<IssuePrompt>, PromptPurpose)>,
     pub edit: Option<TimeEdit>,
     pub history: Entity<HistoryPage>,
+    /// A session was saved while History was not refreshed; the next History render reloads.
+    pub history_stale: bool,
 }
 
 impl Root {
@@ -141,6 +143,7 @@ impl Root {
             prompt: None,
             edit: None,
             history,
+            history_stale: false,
         };
         root.reload_tags(cx);
         if page == Page::History {
@@ -266,7 +269,7 @@ impl Root {
     }
 
     pub fn show_history(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let active = self.countdown.status != Status::Idle;
+        let active = self.countdown.status != Status::Idle || self.stopwatch_active();
         self.history.update(cx, |h, cx| {
             h.timer_active = active;
             h.refresh(window, cx);
@@ -397,7 +400,22 @@ impl Render for Root {
         }
         let page = match self.page {
             Page::Timer => div().flex_1().h_full().flex().justify_center().overflow_hidden().child(self.timer_page(window, cx)).into_any_element(),
-            Page::History => self.history.clone().into_any_element(),
+            Page::History => {
+                let active = self.countdown.status != Status::Idle || self.stopwatch_active();
+                if self.history_stale {
+                    self.history_stale = false;
+                    self.history.update(cx, |h, cx| {
+                        h.timer_active = active;
+                        h.refresh(window, cx);
+                    });
+                } else if self.history.read(cx).timer_active != active {
+                    self.history.update(cx, |h, cx| {
+                        h.timer_active = active;
+                        cx.notify();
+                    });
+                }
+                self.history.clone().into_any_element()
+            }
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),
             Page::Notes(v) => {
                 let width = if v == MdVariant::Framed { 640.0 } else { 720.0 };

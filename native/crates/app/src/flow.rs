@@ -221,6 +221,7 @@ impl Root {
                 self.pending_tags.clear();
                 self.pending_issue = None;
                 self.reload_tags(cx);
+                self.history_stale = true;
             }
             Err(e) => self.save_error = Some(e.to_string()),
         }
@@ -339,12 +340,16 @@ impl Root {
         let now = now_ms();
         let Some(secs) = self.stopwatch.stop(now) else { return };
         self.shown_sw = secs;
-        let saved = match self.stopwatch.restored_session_id.take() {
+        let saved = match self.stopwatch.restored_session_id.clone() {
             Some(id) => self.svc.update_session_duration(&id, secs),
             None => self.svc.save_session(&input_for(&self.sw_title_html, TimerType::Stopwatch, 0, secs, self.sw_issue.as_ref())),
         };
         match saved {
-            Ok(_) => self.sw_save_error = None,
+            Ok(_) => {
+                self.sw_save_error = None;
+                self.stopwatch.restored_session_id = None;
+                self.history_stale = true;
+            }
             Err(e) => self.sw_save_error = Some(e.to_string()),
         }
         cx.notify();
@@ -376,7 +381,7 @@ impl Root {
             self.sw_rich.update(cx, |r, cx| r.set_html(&s.title, cx));
             self.pomodoro = false;
         } else {
-            if self.countdown.status != Status::Idle {
+            if self.countdown.status != Status::Idle || self.stopwatch_active() {
                 return;
             }
             self.countdown.restore(s.timer_type, s.planned_duration_seconds, s.actual_duration_seconds);
