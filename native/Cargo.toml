@@ -1,0 +1,17 @@
+[package]
+name = "lizmeter-native"
+version = "0.0.1"
+edition = "2021"
+
+[dependencies]
+gpui = "=0.2.2"
+png = "0.18"
+image = { version = "0.25", default-features = false }
+raw-window-handle = "0.6"
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[patch.crates-io]
+gpui = { path = "vendor/gpui" }
+
+[profile.release]
+opt-level = 3
