@@ -4,7 +4,7 @@ use crate::controls::field_style;
 use crate::css::{Spec, TRANSPARENT, linear, rgba};
 use crate::ui::*;
 use gpui::*;
-use lizmeter_core::{IssueRef, ListTodosInput, Todo, TodoLabel, TodoProject, TodoState};
+use lizmeter_core::{IssueRef, JiraIssue, LinearIssue, ListTodosInput, Todo, TodoLabel, TodoProject, TodoState};
 use lizmeter_services::Services;
 use lizmeter_ui::text_input::{TextField, TextFieldEvent, TextInput};
 use std::sync::Arc;
@@ -88,11 +88,19 @@ pub struct IssuePrompt {
     active: usize,
     error: Option<String>,
     focus: FocusHandle,
+    /// Whether Linear / Jira answer, and the issues they sent back (`IssuePromptDialog`'s tracker section).
+    has_linear: bool,
+    has_jira: bool,
+    loading: bool,
+    linear: Vec<LinearIssue>,
+    jira: Vec<JiraIssue>,
+    tracker_error: Option<String>,
 }
 
 impl IssuePrompt {
     pub fn new(svc: &Arc<Services>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         lizmeter_ui::scrollbar::reset("prompt-list");
+        lizmeter_ui::scrollbar::reset("prompt-trackers");
         let search = TextInput::new(field_style(13.0), "Search by title or #id\u{2026}", window, cx);
         cx.subscribe(&search, |this, s, ev: &TextFieldEvent, cx| match ev {
             TextFieldEvent::Changed => {
@@ -113,7 +121,73 @@ impl IssuePrompt {
         let labels = svc.list_todo_labels().unwrap_or_default();
         let focus = search.read(cx).focus_handle().clone();
         window.focus(&focus);
-        Self { todos, states, projects, labels, chips: TodoChips::default(), search, query: String::new(), active: 0, error, focus }
+        let mut this = Self { todos, states, projects, labels, chips: TodoChips::default(), search, query: String::new(), active: 0, error, focus, has_linear: false, has_jira: false, loading: false, linear: vec![], jira: vec![], tracker_error: None };
+        this.load_trackers(svc, cx);
+        this
+    }
+
+    /// The tracker section: ask which providers are set up, then fetch their issues off the UI thread.
+    fn load_trackers(&mut self, svc: &Arc<Services>, cx: &mut Context<Self>) {
+        let status = svc.linear_provider_status().and_then(|l| svc.jira_provider_status().map(|j| (l, j)));
+        let (linear, jira) = match status {
+            Ok((l, j)) => (l.configured && l.team_selected, j.configured),
+            Err(e) => {
+                self.tracker_error = Some(e.to_string());
+                return;
+            }
+        };
+        self.has_linear = linear;
+        self.has_jira = jira;
+        if !linear && !jira {
+            return;
+        }
+        self.loading = true;
+        let svc = svc.clone();
+        cx.spawn(async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let l = if linear { svc.linear_issues(false)? } else { vec![] };
+                    let j = if jira { svc.jira_issues(false)? } else { vec![] };
+                    Ok::<_, lizmeter_services::ServiceError>((l, j))
+                })
+                .await;
+            let _ = this.update(cx, |p, cx| {
+                match result {
+                    Ok((l, j)) => {
+                        p.linear = l;
+                        p.jira = j;
+                    }
+                    Err(e) => p.tracker_error = Some(e.to_string()),
+                }
+                p.loading = false;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// A row of the tracker section: key in cyan, then the title (`.issueRow`).
+    fn tracker_row(&self, id: String, key: String, title: String, issue: IssueRef, cx: &mut Context<Self>) -> impl IntoElement {
+        let me = cx.entity();
+        div()
+            .id(SharedString::from(format!("tracker-{id}")))
+            .w_full()
+            .px(px(12.0))
+            .py(px(10.0))
+            .rounded(px(6.0))
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(10.0))
+            .font_family("Arial")
+            .text_size(px(13.0))
+            .text_color(col(TN_TEXT))
+            .cursor_pointer()
+            .hover(|s| s.bg(col(rgba(122, 162, 247, 0.1))))
+            .on_click(move |_, _, app| me.update(app, |_, cx| cx.emit(PromptEvent::Select(issue.clone()))))
+            .child(div().flex_shrink_0().font_weight(FontWeight(600.0)).text_color(col(TN_CYAN)).child(key))
+            .child(div().min_w_0().truncate().child(title))
     }
 
     fn pick_active(&mut self, cx: &mut Context<Self>) {
@@ -192,6 +266,58 @@ fn section(label: &str, first: bool) -> Div {
         d = d.mt(px(12.0)).pt(px(12.0)).h(px(27.0)).border_t_1().border_color(col(rgba(86, 95, 137, 0.25)));
     }
     d
+}
+
+impl IssuePrompt {
+    /// Capture hook: the tracker section as it looks in one state (`rows`, `loading`, `error`, `none-found`).
+    /// The issues are made up here; no provider answers before phase 8.
+    pub fn capture(&mut self, state: &str, cx: &mut Context<Self>) {
+        self.has_linear = true;
+        self.has_jira = true;
+        self.loading = state == "loading";
+        self.tracker_error = (state == "error").then(|| "Request failed: 401 Unauthorized".to_string());
+        if state == "rows" {
+            self.linear = vec![LinearIssue { id: "a".into(), identifier: "LIZ-14".into(), title: "Sync the oplog on resume".into(), url: "u".into(), priority: 2, state: lizmeter_core::LinearIssueState { name: "In Progress".into(), kind: "started".into() }, updated_at: String::new() }];
+            self.jira = vec![JiraIssue { id: "1".into(), key: "PROJ-12".into(), title: "Wire the worklog dialog".into(), url: "u".into(), status: "In Progress".into(), priority: None, assignee: None, issue_type: None, labels: vec![] }];
+        }
+        cx.notify();
+    }
+
+    /// "Loading issues...", then the "Issue trackers" heading with the providers' rows or the reason there are none.
+    fn tracker_section(&self, cx: &mut Context<Self>) -> Div {
+        let status = |text: String| ui_text(13.0).py(px(24.0)).px(px(20.0)).text_center().text_color(col(TN_MUTED)).child(text);
+        let mut out = div().flex().flex_col();
+        if self.loading {
+            return out.child(status("Loading issues...".into()));
+        }
+        out = out.child(section("Issue trackers", false));
+        if !self.has_linear && !self.has_jira {
+            return out.child(status("No issue providers configured. Set up Linear or Jira in Settings.".into()));
+        }
+        let mut rows = div().flex().flex_col();
+        for i in self.linear.clone() {
+            let issue = IssueRef::Linear { identifier: i.identifier.clone(), title: i.title.clone(), url: i.url.clone() };
+            rows = rows.child(self.tracker_row(i.id.clone(), i.identifier, i.title, issue, cx));
+        }
+        for i in self.jira.clone() {
+            let issue = IssueRef::Jira { key: i.key.clone(), title: i.title.clone(), url: i.url.clone() };
+            rows = rows.child(self.tracker_row(i.id.clone(), i.key, i.title, issue, cx));
+        }
+        if self.linear.is_empty() && self.jira.is_empty() {
+            return out.child(status("No issues found.".into()));
+        }
+        // The rows scroll in their own box, so a long list never pushes past the dialog's fixed height.
+        let scroll = lizmeter_ui::scrollbar::keyed("prompt-trackers", lizmeter_ui::scrollbar::BarStyle::Global);
+        out = out.child(
+            div()
+                .relative()
+                .flex_shrink_0()
+                .max_h(px(150.0))
+                .child(div().id("prompt-trackers").track_scroll(scroll.handle()).max_h(px(150.0)).overflow_y_scroll().child(scroll.pad(rows)))
+                .child(scroll.bar()),
+        );
+        out
+    }
 }
 
 impl Render for IssuePrompt {
@@ -291,15 +417,7 @@ impl Render for IssuePrompt {
             .child(search)
             .child(chips)
             .child(list)
-            .child(section("Issue trackers", false))
-            .child(
-                ui_text(13.0)
-                    .py(px(24.0))
-                    .px(px(20.0))
-                    .text_center()
-                    .text_color(col(TN_MUTED))
-                    .child("No issue providers configured. Set up Linear or Jira in Settings."),
-            );
+            .child(self.tracker_section(cx));
 
         let spec = Spec::rrect(18.0)
             .fill(linear(135.0, &[(0.0, wh(0.07)), (0.32, wh(0.01)), (0.55, TRANSPARENT)]))
@@ -334,6 +452,7 @@ impl Render for IssuePrompt {
                 cx.notify();
             }))
             .child(header)
+            .children(self.tracker_error.clone().map(|e| ui_text(13.0).flex_shrink_0().py(px(12.0)).px(px(20.0)).text_center().text_color(col(TN_RED)).child(e)))
             .child(body);
 
         // modalEntrance 0.2s cubic-bezier(0.34, 1.56, 0.64, 1): opacity, translateY(8 -> 0)

@@ -317,6 +317,15 @@ impl Root {
                 let op = op.trim_start_matches("issues-").to_string();
                 self.issues.update(cx, |p, cx| p.capture(&op, cx));
             }
+            op if op.starts_with("prompt-") => {
+                let state = op.trim_start_matches("prompt-").to_string();
+                if self.prompt.is_none() {
+                    self.open_prompt(crate::app::PromptPurpose::LinkTimer, window, cx);
+                }
+                if let Some((p, _)) = self.prompt.clone() {
+                    p.update(cx, |p, cx| p.capture(&state, cx));
+                }
+            }
             "claude-link" => self.capture_claude_link(!self.pomodoro, cx),
             "claude-open" => {
                 let select = if self.pomodoro { self.cc_select_timer.clone() } else { self.cc_select_sw.clone() };

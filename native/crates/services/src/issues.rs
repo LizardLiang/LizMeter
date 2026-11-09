@@ -6,7 +6,8 @@
 use crate::error::{fail, Result};
 use crate::Services;
 use lizmeter_core::{
-    Issue, IssueComment, IssueProviderStatus, IssuesListInput, JiraIssue, LinearIssue, WorklogLogInput, WorklogLogResult,
+    Issue, IssueComment, IssueProviderStatus, IssuesListInput, JiraIssue, JiraProviderStatus, LinearIssue, LinearProviderStatus, WorklogLogInput,
+    WorklogLogResult,
 };
 
 const NOT_AVAILABLE: &str = "is not available yet (phase 8)";
@@ -22,6 +23,16 @@ impl Services {
             jira_configured: false,
             jira_domain_set: false,
         })
+    }
+
+    /// `linear:provider-status`.
+    pub fn linear_provider_status(&self) -> Result<LinearProviderStatus> {
+        Ok(LinearProviderStatus { configured: false, team_selected: false, team_name: None })
+    }
+
+    /// `jira:provider-status`.
+    pub fn jira_provider_status(&self) -> Result<JiraProviderStatus> {
+        Ok(JiraProviderStatus { configured: false, domain_set: false, project_key_set: false, auth_type: None })
     }
 
     /// `issues:list`.
