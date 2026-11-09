@@ -75,7 +75,7 @@ fn fold(p: &Path) -> OsString {
     p.as_os_str().to_string_lossy().to_lowercase().into()
 }
 
-fn same_path(a: &Path, b: &Path) -> bool {
+pub fn same_path(a: &Path, b: &Path) -> bool {
     fold(&resolve_path(a)) == fold(&resolve_path(b))
 }
 

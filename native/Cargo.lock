@@ -3114,6 +3114,18 @@ dependencies = [
 [[package]]
 name = "lizmeter-services"
 version = "0.0.1"
+dependencies = [
+ "chrono",
+ "lizmeter-core",
+ "lizmeter-db",
+ "lizmeter-sync",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.21",
+ "windows 0.61.3",
+]
 
 [[package]]
 name = "lizmeter-sync"

@@ -546,6 +546,23 @@ pub struct TodoAttachment {
     pub created_at: String,
 }
 
+/// Opens the OS file picker, then attaches whatever was chosen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTodoAttachmentInput {
+    pub todo_id: i64,
+}
+
+/// Paste or drop: the caller already holds the bytes, so no picker is involved.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AddTodoAttachmentBufferInput {
+    pub todo_id: i64,
+    pub file_name: String,
+    pub mime_type: String,
+    pub data: Vec<u8>,
+}
+
 pub const ATTACHMENT_MAX_BYTES: u64 = 25 * 1024 * 1024;
 pub const ATTACHMENT_IMAGE_EXTENSIONS: [&str; 6] = ["png", "jpg", "jpeg", "gif", "webp", "avif"];
 
