@@ -97,7 +97,8 @@ impl Database {
         Ok(())
     }
 
-    /// Activity recorded during one local calendar day (`YYYY-MM-DD`), newest first.
+    /// Activity recorded in the 24 hours after local midnight of `YYYY-MM-DD` (as the TS does: a DST
+    /// day of 23 or 25 hours is shifted by an hour), newest first.
     pub fn list_nvim_activity_by_date(&self, date: &str) -> Result<Vec<NvimActivity>> {
         if !matches_date_shape(date) {
             return fail(format!("Invalid date format: \"{date}\". Expected YYYY-MM-DD."));

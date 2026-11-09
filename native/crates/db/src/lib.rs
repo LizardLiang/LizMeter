@@ -50,9 +50,20 @@ impl Database {
     }
 
     pub fn open_with_sync(path: impl AsRef<Path>, sync: Box<dyn SyncHook>) -> Result<Self> {
-        let conn = Connection::open(path.as_ref())?;
+        let path = path.as_ref();
+        if path.as_os_str() != ":memory:" {
+            if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        let conn = Connection::open(path)?;
         let db = Database { conn, sync };
         db.init()?;
+        if db.sync.is_noop() && is_sync_enabled(&db.conn)? {
+            return Err(DbError::Message(
+                "Sync is enabled on this database: open it with the sync engine, not without a sync hook".into(),
+            ));
+        }
         Ok(db)
     }
 

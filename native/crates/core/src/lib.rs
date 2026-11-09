@@ -720,7 +720,9 @@ pub struct ClaudeCodeSessionData {
     pub idle_period_count: i64,
     pub first_activity_at: Option<String>,
     pub last_activity_at: Option<String>,
+    #[serde(default)]
     pub files_edited: Vec<String>,
+    #[serde(default)]
     pub idle_periods: Vec<ClaudeCodeIdlePeriod>,
 }
 

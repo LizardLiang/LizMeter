@@ -255,3 +255,5 @@ collapsed.
 - **Attachment URL resolver** (`resolveAttachmentPath`, traversal guard) is not ported yet: Phase 5 with the `app-media` scheme.
 - **Numbers the typed API narrows.** `SaveSessionInput` durations are `i64`; the TS accepted any JS number (a float planned duration would have been stored as REAL). Fractional input now fails at deserialisation.
 - **Schema dump tool runs under node, not bun.** `native/tools/schema-dump/dump.mjs` bundles with esbuild and runs the real better-sqlite3 (the repo copy is built for Electron's ABI; the bundled run resolves another copy). Same approach as `scripts/verify-real-better-sqlite3.mjs`.
+- **Unknown `source` on todo create** (`"robot"`) fails deserialisation; TS fell back to `"user"`. The pipe layer (Phase 10) must map unknown values to `user` before building `CreateTodoInput`.
+- **`Database::open` refuses a `sync.enabled` database** until the Phase 4 sync hook is passed to `open_with_sync`; opening a synced dev DB natively before then fails by design.

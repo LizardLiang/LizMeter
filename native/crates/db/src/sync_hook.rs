@@ -33,6 +33,11 @@ impl LinkOp {
 pub type Fields = Vec<(&'static str, Value)>;
 
 pub trait SyncHook: Send {
+    /// True for [`NoSync`]: a hook that publishes nothing. `Database` refuses to pair it with a
+    /// database whose `sync.enabled` setting is `true`.
+    fn is_noop(&self) -> bool {
+        false
+    }
     /// The explicit numeric id a synced `todos` insert must use, or `None` for AUTOINCREMENT.
     fn allocate_todo_id(&self, conn: &Connection) -> Result<Option<i64>>;
     fn record_upsert(&self, conn: &Connection, table: &str, row_uuid: &str, fields: &Fields) -> Result<()>;
@@ -45,6 +50,9 @@ pub trait SyncHook: Send {
 pub struct NoSync;
 
 impl SyncHook for NoSync {
+    fn is_noop(&self) -> bool {
+        true
+    }
     fn allocate_todo_id(&self, _: &Connection) -> Result<Option<i64>> {
         Ok(None)
     }

@@ -205,6 +205,7 @@ impl DataLocation {
     }
 
     fn write_pointer(&self, dir: Option<&Path>) -> Result<()> {
+        fs::create_dir_all(&self.default_data_dir)?;
         let file = self.pointer_file();
         match dir {
             None => {
@@ -271,6 +272,7 @@ impl DataLocation {
     /// Marks this device as an adopter (implies [`mark_private_db`](Self::mark_private_db)). Must be
     /// called before the first `Database::open` of the process that completes an adoption.
     pub fn mark_device_as_adopted(&self) -> Result<()> {
+        fs::create_dir_all(&self.default_data_dir)?;
         let body = serde_json::to_string_pretty(&serde_json::json!({ "adoptedAt": crate::util::now_iso() }))?;
         fs::write(self.adopted_marker(), format!("{body}\n"))?;
         self.mark_private_db()
@@ -286,6 +288,7 @@ impl DataLocation {
         if self.private_db_marker().exists() {
             return Ok(());
         }
+        fs::create_dir_all(&self.default_data_dir)?;
         let body = serde_json::to_string_pretty(&serde_json::json!({ "privateSince": crate::util::now_iso() }))?;
         fs::write(self.private_db_marker(), format!("{body}\n"))?;
         Ok(())

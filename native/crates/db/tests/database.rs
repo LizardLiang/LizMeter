@@ -312,3 +312,14 @@ fn tc405_listing_1000_sessions_is_fast() {
     assert_eq!(r.total, 1000);
     assert!(start.elapsed().as_millis() < 500);
 }
+
+#[test]
+fn opening_a_sync_enabled_database_without_a_sync_hook_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("nested").join("lizmeter.db");
+    let db = Database::open(&path).unwrap();
+    lizmeter_db::set_sync_enabled(db.conn(), true).unwrap();
+    db.close().unwrap();
+    let e = Database::open(&path).err().unwrap();
+    assert!(e.to_string().contains("Sync is enabled"));
+}

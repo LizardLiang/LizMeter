@@ -345,7 +345,7 @@ fn legacy_project_text_becomes_rows() {
 }
 
 #[test]
-fn legacy_project_text_collapses_case_trims_and_skips_blank() {
+fn legacy_project_text_collapses_case_and_skips_blank() {
     let db = db();
     let (a, b, c) = (db.create_todo(&todo("a")).unwrap(), db.create_todo(&todo("b")).unwrap(), db.create_todo(&todo("c")).unwrap());
     make_legacy_project_column(&db);
@@ -361,6 +361,7 @@ fn legacy_project_text_collapses_case_trims_and_skips_blank() {
     make_legacy_project_column(&padded);
     set_legacy_project(&padded, p.id, Some("  LizMeter  "));
     padded.migrate_todos_to_states_now().unwrap();
+    // Parity with TS: the padded todo itself is not repointed (see debt.md).
     assert_eq!(padded.list_todo_projects().unwrap().into_iter().map(|x| x.name).collect::<Vec<_>>(), ["LizMeter"]);
     assert!(todos.iter().find(|t| t.title == "c").unwrap().project.is_none());
     // Running again is a no-op.

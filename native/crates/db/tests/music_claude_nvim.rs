@@ -228,7 +228,7 @@ fn with_cc(sessions: Vec<ClaudeCodeSessionData>) -> SaveSessionWithTrackingInput
 }
 
 #[test]
-fn tracking_save_inserts_session_and_cc_data_atomically() {
+fn tracking_save_inserts_session_and_cc_data() {
     let db = db();
     let data = cc("069362b8-73da-42cb-b6f2-33f94fb220d9");
     let session = db.save_session_with_tracking(&with_cc(vec![data.clone()])).unwrap();
@@ -305,7 +305,7 @@ fn deleting_the_session_cascades_to_cc_data() {
 }
 
 #[test]
-fn tracking_save_is_atomic_and_list_still_works() {
+fn invalid_tracking_save_writes_nothing_and_list_still_works() {
     let db = db();
     let s = db.save_session_with_tracking(&with_cc(vec![cc("u1")])).unwrap();
     // An invalid duration must fail before anything is written.
