@@ -853,7 +853,8 @@ impl DirectWriteState {
         Ok(bitmap_data)
     }
 
-    /// Draws the glyph with Direct2D so COLRv1 paint trees (gradients, transforms, clips) render in full.
+    /// Draws the glyph with Direct2D `DrawPaintGlyphRun` so COLRv1 gradients and transforms render.
+    /// The tile keeps the monochrome outline bounds computed by the caller. Returns `Err` when nothing was drawn.
     fn rasterize_color_paint(
         &self,
         params: &RenderGlyphParams,
@@ -984,6 +985,10 @@ impl DirectWriteState {
         }
         unsafe { device_context.Unmap(&staging, 0) };
 
+        anyhow::ensure!(
+            rasterized.chunks_exact(4).any(|px| px[3] != 0),
+            "paint glyph run drew nothing"
+        );
         for chunk in rasterized.chunks_exact_mut(4) {
             let a = chunk[3] as f32;
             if a > 0.0 {
