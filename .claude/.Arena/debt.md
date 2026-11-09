@@ -304,3 +304,15 @@ collapsed.
 - **A `margin-left: auto` flex child collapses the band's gaps in this gpui.** The group band uses a `flex_1` spacer instead of `ml_auto`.
 - **`use gpui::*` brings `gpui::test` into scope.** A `#[cfg(test)]` module that does `use super::*` then recurses at `#[test]`: import the tested items by name.
 - **Window-size and DPI for the Todos shot** match Electron within a frame offset of about 9 physical px (native window border); every measured row, band and menu metric lands within 1-2 physical px.
+
+## Native port, phase 7b (2026-11-10)
+
+- **gpui cannot defer a draw inside a deferred one** (`cannot call defer_draw during deferred drawing`, a panic). The todo dialogs live in `todo_widgets::window_layer`, an `anchored` layer that is not deferred, so the dropdown lists inside them (`SelectBox`, `Combobox`, `DatePicker`) can stay deferred. Never wrap a dialog that holds a dropdown in `deferred(...)`. The detail page's overflow menu and its backdrop are siblings, not nested, for the same reason.
+- **gpui allows one `.hover(...)` per element.** A second call panics (`hover style already set`); choose the hover style before building the element (the selected calendar day does).
+- **No `todo:changed` push reaches the detail page.** It reloads after its own writes and when opened. A title or notes field that holds an unsaved edit, or has focus, keeps its draft over an outside write; the page adopts the outside value on the next reload once the field is idle. Wire a change signal with the pipe server (phase 10) and the merge pass.
+- **Title field multi-line paste.** A paste with line breaks collapses them to spaces and puts the caret at the end. Enter in the title is detected as "one typed line break" and moves focus to the notes, as Electron does; a one-character paste of a lone line break looks the same.
+- **Combobox: a click on the field while the list is open closes the list** (the list closes on any mouse-down outside it). Electron keeps it open. Typing opens it again.
+- **Calendar and weekday names are English** (`DatePicker` month label and S M T W T F S). Electron localises both. The date shown on the trigger uses the system pattern.
+- **Radio buttons of the state manager are drawn, not native.** Electron shows Chromium's accent radio; the drawn one matches it at 13 px within a pixel.
+- **No Tab-order walk.** The detail page and the dialogs take the mouse and the keys the controls handle themselves; Tab does not move between the form fields yet.
+- **TodoIssuePicker is the todo section of `modal.rs`.** It now carries the project and label chips of `TodoIssuePicker.tsx`. The dialog is still the fixed 480 px box; the todo list shrinks when the chips wrap. The Timer's issue dropdown is not a separate native component yet (part 7C).
