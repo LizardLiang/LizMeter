@@ -128,6 +128,18 @@ impl FieldStyle {
     }
 }
 
+const MASK_CHAR: char = '•';
+
+/// Byte offset in the bullet string that stands for `off` bytes into `content`.
+fn mask_offset(content: &str, off: usize) -> usize {
+    content[..off.min(content.len())].chars().count() * MASK_CHAR.len_utf8()
+}
+
+/// Byte offset into `content` for a byte offset in its bullet string.
+fn unmask_offset(content: &str, shown: usize) -> usize {
+    content.char_indices().nth(shown / MASK_CHAR.len_utf8()).map(|(i, _)| i).unwrap_or(content.len())
+}
+
 pub enum TextFieldEvent {
     Changed,
     Submit,
@@ -151,6 +163,8 @@ pub struct TextField {
     blink_epoch: usize,
     blinking: bool,
     blink_gen: usize,
+    mask: bool,
+    right_align: bool,
 }
 
 pub(crate) struct LineLayouts {
@@ -225,6 +239,47 @@ impl TextField {
             blink_epoch: 0,
             blinking: false,
             blink_gen: 0,
+            mask: false,
+            right_align: false,
+        }
+    }
+
+    /// Shows one bullet per character (a password field); copy and cut are disabled.
+    pub fn with_mask(mut self) -> Self {
+        self.mask = true;
+        self
+    }
+
+    /// Single-line text that sits against the right edge while it is shorter than the field.
+    pub fn with_right_align(mut self) -> Self {
+        self.right_align = true;
+        self
+    }
+
+    /// The text the field draws: the content, or one bullet per character when masked.
+    fn shown_text(&self) -> String {
+        if self.mask {
+            MASK_CHAR.to_string().repeat(self.buf.content().chars().count())
+        } else {
+            self.buf.content().to_string()
+        }
+    }
+
+    /// A content byte offset as an offset into the drawn text.
+    fn to_shown(&self, off: usize) -> usize {
+        if self.mask {
+            mask_offset(self.buf.content(), off)
+        } else {
+            off
+        }
+    }
+
+    /// An offset into the drawn text as a content byte offset.
+    fn from_shown(&self, off: usize) -> usize {
+        if self.mask {
+            unmask_offset(self.buf.content(), off)
+        } else {
+            off
         }
     }
 
@@ -456,13 +511,13 @@ impl TextField {
     }
 
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
-        if self.buf.has_selection() {
+        if self.buf.has_selection() && !self.mask {
             cx.write_to_clipboard(ClipboardItem::new_string(self.buf.selected_text().to_string()));
         }
     }
 
     fn cut(&mut self, _: &Cut, _: &mut Window, cx: &mut Context<Self>) {
-        if self.buf.has_selection() {
+        if self.buf.has_selection() && !self.mask {
             cx.write_to_clipboard(ClipboardItem::new_string(self.buf.selected_text().to_string()));
             self.buf.replace(None, "", EditKind::Other);
             self.changed(cx);
@@ -485,7 +540,7 @@ impl TextField {
 
     fn offset_for_mouse(&self, p: Point<Pixels>) -> usize {
         let (Some(layout), Some(bounds)) = (&self.layout, self.bounds) else { return 0 };
-        layout.offset_for_position(point(p.x - bounds.left() + self.scroll_x, p.y - bounds.top()))
+        self.from_shown(layout.offset_for_position(point(p.x - bounds.left() + self.scroll_x, p.y - bounds.top())))
     }
 
     fn on_mouse_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -605,8 +660,8 @@ impl EntityInputHandler for TextField {
     ) -> Option<Bounds<Pixels>> {
         let layout = self.layout.as_ref()?;
         let r = self.buf.range_from_utf16(&range_utf16);
-        let a = layout.position_for_offset(r.start);
-        let b = layout.position_for_offset(r.end);
+        let a = layout.position_for_offset(self.to_shown(r.start));
+        let b = layout.position_for_offset(self.to_shown(r.end));
         let x0 = element_bounds.left() + a.x - self.scroll_x;
         let x1 = if b.y == a.y { element_bounds.left() + b.x - self.scroll_x } else { x0 };
         Some(Bounds::new(
@@ -618,7 +673,7 @@ impl EntityInputHandler for TextField {
     fn character_index_for_point(&mut self, p: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
         let bounds = self.bounds?;
         let layout = self.layout.as_ref()?;
-        let o = layout.offset_for_position(point(p.x - bounds.left() + self.scroll_x, p.y - bounds.top()));
+        let o = self.from_shown(layout.offset_for_position(point(p.x - bounds.left() + self.scroll_x, p.y - bounds.top())));
         Some(self.buf.offset_to_utf16(o))
     }
 }
@@ -796,8 +851,9 @@ impl Element for FieldElement {
         let style = field.style.clone();
         let single = field.buf.is_single_line();
         let wrap = (!single).then_some(bounds.size.width);
-        let content = field.buf.content().to_string();
-        let layout = build_layout(&content, &style, field.buf.marked_range(), wrap, window);
+        let content = field.shown_text();
+        let marked = if field.mask { None } else { field.buf.marked_range() };
+        let layout = build_layout(&content, &style, marked, wrap, window);
         let placeholder = if content.is_empty() {
             let txt = field.placeholder.to_string();
             let runs = vec![run(txt.len(), &style, style.placeholder_color, false)];
@@ -805,9 +861,10 @@ impl Element for FieldElement {
         } else {
             Vec::new()
         };
-        let sel = field.buf.selection();
+        let raw_sel = field.buf.selection();
+        let sel = field.to_shown(raw_sel.start)..field.to_shown(raw_sel.end);
         let focused = field.focus.is_focused(window);
-        let caret_pos = layout.position_for_offset(field.buf.head());
+        let caret_pos = layout.position_for_offset(field.to_shown(field.buf.head()));
 
         let mut scroll_x = field.scroll_x;
         if single {
@@ -818,6 +875,12 @@ impl Element for FieldElement {
                 scroll_x = caret_pos.x + px(2.0) - bounds.size.width;
             }
             scroll_x = scroll_x.max(px(0.0));
+            if field.right_align {
+                let text_w = layout.position_for_offset(content.len()).x;
+                if text_w + px(2.0) < bounds.size.width {
+                    scroll_x = text_w + px(2.0) - bounds.size.width;
+                }
+            }
         }
         let origin = bounds.origin - point(scroll_x, px(0.0));
 
@@ -925,4 +988,19 @@ pub(crate) fn selection_rects(layout: &LineLayouts, sel: Range<usize>, width: Pi
         }
     }
     out
+}
+
+#[cfg(test)]
+mod mask_tests {
+    use super::{mask_offset, unmask_offset, MASK_CHAR};
+
+    #[test]
+    fn bullets_map_back_to_the_characters_they_hide() {
+        let text = "ab中c";
+        for (i, _) in text.char_indices() {
+            assert_eq!(unmask_offset(text, mask_offset(text, i)), i);
+        }
+        assert_eq!(mask_offset(text, text.len()), 4 * MASK_CHAR.len_utf8());
+        assert_eq!(unmask_offset(text, 4 * MASK_CHAR.len_utf8()), text.len());
+    }
 }

@@ -81,6 +81,11 @@ fn parse_args() -> Args {
                 }
             }
             "--focus" => a.focus = true,
+            "--scroll" => {
+                if let Some(px) = it.next().and_then(|v| v.parse::<u32>().ok()) {
+                    ui::CAPTURE_SCROLL.store(px, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
             "--edit-time" => a.edit_time = true,
             "--data-dir" => a.data_dir = it.next().map(PathBuf::from),
             "--html" => a.html = it.next(),
@@ -207,6 +212,7 @@ fn main() {
                 "stopwatch" => (Page::Timer, false, false),
                 "history" => (Page::History, true, false),
                 "tags" => (Page::Tags, true, false),
+                "settings" => (Page::Settings, true, false),
                 name if name.starts_with("stats") => (Page::Stats, true, false),
                 _ => (Page::Timer, true, false),
             };

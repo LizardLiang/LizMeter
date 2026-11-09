@@ -40,6 +40,9 @@ pub fn anim_time() -> Option<f32> {
     }
 }
 
+/// `--scroll <px>`: page bodies render scrolled by this much, so a screenshot reaches a long page's lower parts.
+pub static CAPTURE_SCROLL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 pub fn frozen() -> bool {
     FREEZE.load(std::sync::atomic::Ordering::Relaxed)
 }

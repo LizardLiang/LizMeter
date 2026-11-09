@@ -4,6 +4,7 @@ use crate::chrome::{self, NAV_ITEMS, NavButton};
 use crate::engine::{Countdown, Status, Stopwatch};
 use crate::modal::IssuePrompt;
 use crate::pages::history::HistoryPage;
+use crate::pages::settings::SettingsPage;
 use crate::pages::stats::StatsPage;
 use crate::pages::tags::TagsPage;
 use crate::tag_picker::TagPicker;
@@ -25,6 +26,7 @@ pub enum Page {
     History,
     Stats,
     Tags,
+    Settings,
     Gallery,
     Anim(usize),
     TextSample,
@@ -86,6 +88,7 @@ pub struct Root {
     pub history: Entity<HistoryPage>,
     pub stats: Entity<StatsPage>,
     pub tags_page: Entity<TagsPage>,
+    pub settings: Entity<SettingsPage>,
     /// A session was saved while History was not refreshed; the next History render reloads.
     pub history_stale: bool,
 }
@@ -121,6 +124,8 @@ impl Root {
         let stats = cx.new(|_| StatsPage::new(svc.clone()));
         let tags_page = cx.new(|cx| TagsPage::new(svc.clone(), window, cx));
         cx.subscribe_in(&tags_page, window, Self::on_page_event::<TagsPage>).detach();
+        let settings_page = cx.new(|cx| SettingsPage::new(svc.clone(), window, cx));
+        cx.subscribe_in(&settings_page, window, Self::on_page_event::<SettingsPage>).detach();
 
         let mut root = Self {
             svc,
@@ -155,6 +160,7 @@ impl Root {
             history,
             stats,
             tags_page,
+            settings: settings_page,
             history_stale: false,
         };
         root.reload_tags(cx);
@@ -166,6 +172,9 @@ impl Root {
         }
         if page == Page::Tags {
             root.show_tags(cx);
+        }
+        if page == Page::Settings {
+            root.show_settings(cx);
         }
         root
     }
@@ -308,6 +317,13 @@ impl Root {
         cx.notify();
     }
 
+    pub fn show_settings(&mut self, cx: &mut Context<Self>) {
+        let (sound, sw) = (self.sound_enabled, self.sw_settings);
+        self.settings.update(cx, |s, cx| s.show(sound, sw, cx));
+        self.page = Page::Settings;
+        cx.notify();
+    }
+
     fn sidebar(&mut self, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let mut col_el = chrome::sidebar_glass()
@@ -326,6 +342,7 @@ impl Root {
             Page::History => Some(1),
             Page::Stats => Some(7),
             Page::Tags => Some(8),
+            Page::Settings => Some(9),
             Page::Other(i) => Some(i),
             Page::Notes(_) => Some(2),
             Page::Gallery | Page::Anim(_) | Page::TextSample | Page::EmojiSample => None,
@@ -400,6 +417,7 @@ impl Root {
     }
 
     pub fn navigate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.settings.update(cx, |s, _| s.hide());
         match index {
             0 => {
                 self.page = Page::Timer;
@@ -408,6 +426,7 @@ impl Root {
             1 => self.show_history(window, cx),
             7 => self.show_stats(cx),
             8 => self.show_tags(cx),
+            9 => self.show_settings(cx),
             i => {
                 self.page = Page::Other(i);
                 cx.notify();
@@ -452,6 +471,7 @@ impl Render for Root {
             }
             Page::Stats => self.stats.clone().into_any_element(),
             Page::Tags => self.tags_page.clone().into_any_element(),
+            Page::Settings => self.settings.clone().into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),
             Page::Notes(v) => {
                 let width = if v == MdVariant::Framed { 640.0 } else { 720.0 };

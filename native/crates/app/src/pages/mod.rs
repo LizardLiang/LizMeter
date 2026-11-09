@@ -1,6 +1,9 @@
 //! The pages of the main window that run on real services.
 
 pub mod history;
+pub mod settings;
+pub mod settings_sections;
+pub mod settings_ui;
 pub mod stats;
 pub mod tags;
 pub mod stats_data;
@@ -19,4 +22,6 @@ pub enum PageEvent {
     StopwatchSettings(StopwatchSettings),
     /// A todo-linked badge was clicked.
     OpenTodo(i64),
+    /// A data-folder move finished: the app restarts on the new folder.
+    Relaunch,
 }

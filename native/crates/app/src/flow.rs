@@ -78,8 +78,29 @@ impl Root {
         match ev {
             PageEvent::Resume(session) => self.restore_session(session, window, cx),
             PageEvent::SessionsChanged => self.reload_tags(cx),
+            PageEvent::TimerSettings(ts) => {
+                self.countdown.update_settings(*ts);
+                self.shown_cd = self.countdown.remaining_seconds(now_ms());
+                cx.notify();
+            }
+            PageEvent::SoundEnabled(on) => self.sound_enabled = *on,
+            PageEvent::StopwatchSettings(sw) => self.sw_settings = *sw,
+            PageEvent::Relaunch => self.relaunch(cx),
             _ => {}
         }
+    }
+
+    /// Starts the app again on the new data folder once this process has released it.
+    fn relaunch(&mut self, cx: &mut Context<Self>) {
+        if let Ok(exe) = std::env::current_exe() {
+            let args: Vec<String> = std::env::args().skip(1).collect();
+            let _ = std::process::Command::new("cmd")
+                .args(["/C", "ping -n 3 127.0.0.1 >nul & start \"\" \"%LIZMETER_EXE%\" %LIZMETER_ARGS%"])
+                .env("LIZMETER_EXE", exe)
+                .env("LIZMETER_ARGS", args.join(" "))
+                .spawn();
+        }
+        cx.quit();
     }
 
     // --- Ticking ---

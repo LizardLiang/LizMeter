@@ -8,7 +8,14 @@ use lizmeter_ui::text_input::{FieldStyle, TextField};
 
 /// `styles/_mixins.scss` `page-container`: 32px 40px padding, centered, at most `max_w` wide.
 pub fn page_shell(id: &'static str, max_w: f32, body: impl IntoElement) -> impl IntoElement {
-    div().id(id).flex_1().h_full().overflow_y_scroll().child(div().mx_auto().w_full().max_w(px(max_w)).px(px(40.0)).py(px(32.0)).child(body))
+    let mut shell = div().id(id).flex_1().h_full().overflow_y_scroll();
+    let scrolled = CAPTURE_SCROLL.load(std::sync::atomic::Ordering::Relaxed);
+    if scrolled > 0 {
+        let handle = ScrollHandle::new();
+        handle.set_offset(point(px(0.0), px(-(scrolled as f32))));
+        shell = shell.track_scroll(&handle);
+    }
+    shell.child(div().mx_auto().w_full().max_w(px(max_w)).px(px(40.0)).py(px(32.0)).child(body))
 }
 
 /// `page-heading`: 13px / 700 / 0.14em, upper case.

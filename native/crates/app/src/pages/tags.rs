@@ -27,7 +27,7 @@ impl EventEmitter<PageEvent> for TagsPage {}
 
 fn name_field(placeholder: &str, window: &mut Window, cx: &mut App) -> Entity<TextField> {
     let placeholder = placeholder.to_string();
-    cx.new(|cx| TextField::new(true, field_style(13.0), &placeholder, window, cx).with_max_len(MAX_NAME))
+    cx.new(|cx| TextField::new(true, lizmeter_ui::text_input::FieldStyle::new(BTN_FONT, 13.0, 15.0, col(TN_TEXT)), &placeholder, window, cx).with_max_len(MAX_NAME))
 }
 
 impl TagsPage {
@@ -163,7 +163,7 @@ impl Render for TagsPage {
                         .flex()
                         .flex_row()
                         .gap(px(6.0))
-                        .child(glass_field(&self.new_name, new_focus, 10.0, 7.0).flex_1())
+                        .child(glass_field(&self.new_name, new_focus, 10.0, 8.0).flex_1())
                         .child(Self::square_button("tag-create", "+", hex(0x7aa2f7), hex(0x1a1b26), move |_, a| m_create.update(a, |p, cx| p.create(cx)))),
                 )
                 .child(color_swatches("new-sw", &self.new_color, move |c, _, a| {
@@ -194,7 +194,7 @@ impl Render for TagsPage {
                                 .flex()
                                 .flex_row()
                                 .gap(px(6.0))
-                                .child(glass_field(&self.edit_name, edit_focus, 10.0, 7.0).flex_1())
+                                .child(glass_field(&self.edit_name, edit_focus, 10.0, 8.0).flex_1())
                                 .child(Self::square_button("tag-ok", "\u{2713}", hex(0x7aa2f7), hex(0x1a1b26), move |_, a| m_ok.update(a, |p, cx| p.update(cx))))
                                 .child(Self::square_button("tag-cancel", "\u{2715}", hex(0x292e42), hex(0xa9b1d6), move |_, a| {
                                     m_cancel.update(a, |p, cx| {
