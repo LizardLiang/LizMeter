@@ -94,6 +94,9 @@ pub struct Root {
     pub save_error: Option<String>,
     pub sw_save_error: Option<String>,
     pub prompt: Option<(Entity<IssuePrompt>, PromptPurpose)>,
+    /// The "Link issue" popover under the Timer's button, and when an outside click last closed it.
+    pub link_dropdown: Option<(Entity<IssuePrompt>, PromptPurpose)>,
+    pub link_closed_at: Option<std::time::Instant>,
     pub edit: Option<TimeEdit>,
     pub history: Entity<HistoryPage>,
     pub stats: Entity<StatsPage>,
@@ -186,6 +189,8 @@ impl Root {
             save_error: None,
             sw_save_error: None,
             prompt: None,
+            link_dropdown: None,
+            link_closed_at: None,
             edit: None,
             history,
             stats,

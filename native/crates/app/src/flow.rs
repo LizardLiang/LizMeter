@@ -10,7 +10,7 @@ use crate::timer::display_field_style;
 use gpui::*;
 use lizmeter_core::{AssignTagInput, CreateTagInput, IssueRef, SaveSessionInput, Session, TimerType};
 use lizmeter_ui::text_input::{TextField, TextFieldEvent, TextInput};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Wall-clock milliseconds, so a sleeping machine counts as time passed.
 pub fn now_ms() -> u64 {
@@ -446,6 +446,34 @@ impl Root {
         let prompt = cx.new(|cx| IssuePrompt::new(&svc, window, cx));
         cx.subscribe_in(&prompt, window, |this, _, ev: &PromptEvent, window, cx| this.on_prompt_event(ev, window, cx)).detach();
         self.prompt = Some((prompt, purpose));
+        cx.notify();
+    }
+
+    /// The "Link issue" button: open the popover under it, or close it when it is open. A click that
+    /// closed it from outside a moment ago must not open it again.
+    pub fn toggle_link_dropdown(&mut self, purpose: PromptPurpose, window: &mut Window, cx: &mut Context<Self>) {
+        if self.link_dropdown.take().is_some() {
+            cx.notify();
+            return;
+        }
+        if self.link_closed_at.take().is_some_and(|t| t.elapsed() < Duration::from_millis(250)) {
+            return;
+        }
+        let svc = self.svc.clone();
+        let dropdown = cx.new(|cx| IssuePrompt::dropdown(&svc, window, cx));
+        cx.subscribe_in(&dropdown, window, |this, _, ev: &PromptEvent, window, cx| {
+            let Some((_, purpose)) = this.link_dropdown.take() else { return };
+            match (purpose, ev) {
+                (PromptPurpose::LinkStopwatch, PromptEvent::Select(issue)) => this.sw_issue = Some(issue.clone()),
+                (_, PromptEvent::Select(issue)) => this.pending_issue = Some(issue.clone()),
+                (_, PromptEvent::Skip) => this.link_closed_at = Some(Instant::now()),
+            }
+            let focus = this.focused_rich().read(cx).focus_handle().clone();
+            window.focus(&focus);
+            cx.notify();
+        })
+        .detach();
+        self.link_dropdown = Some((dropdown, purpose));
         cx.notify();
     }
 

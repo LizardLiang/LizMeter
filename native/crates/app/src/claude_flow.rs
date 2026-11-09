@@ -326,6 +326,7 @@ impl Root {
                     p.update(cx, |p, cx| p.capture(&state, cx));
                 }
             }
+            "link-dropdown" => self.toggle_link_dropdown(crate::app::PromptPurpose::LinkTimer, window, cx),
             "claude-link" => self.capture_claude_link(!self.pomodoro, cx),
             "claude-open" => {
                 let select = if self.pomodoro { self.cc_select_timer.clone() } else { self.cc_select_sw.clone() };

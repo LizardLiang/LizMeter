@@ -96,9 +96,10 @@ impl Root {
 
     fn link_button(&self, issue: Option<(String, String)>, purpose: PromptPurpose, cx: &mut Context<Self>) -> AnyElement {
         let (open, clear) = (cx.entity(), cx.entity());
-        timer::link_issue_button(
+        let has_issue = issue.is_some();
+        let button = timer::link_issue_button(
             issue,
-            move |window, app| open.update(app, |t, cx| t.open_prompt(purpose, window, cx)),
+            move |window, app| open.update(app, |t, cx| t.toggle_link_dropdown(purpose, window, cx)),
             move |_, app| {
                 clear.update(app, |t, cx| {
                     if purpose == PromptPurpose::LinkStopwatch {
@@ -109,7 +110,13 @@ impl Root {
                     cx.notify();
                 })
             },
-        )
+        );
+        let dropdown = self.link_dropdown.as_ref().filter(|(_, p)| *p == purpose && !has_issue).map(|(d, _)| d.clone());
+        div()
+            .relative()
+            .child(button)
+            .children(dropdown.map(|d| deferred(div().absolute().top(relative(1.0)).left_0().mt(px(6.0)).child(d)).with_priority(5)))
+            .into_any_element()
     }
 
     fn pomodoro_card(&mut self, cx: &mut Context<Self>) -> impl IntoElement {

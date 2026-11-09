@@ -77,7 +77,15 @@ pub fn matching_todos<'a>(todos: &'a [Todo], query: &str, chips: &TodoChips) -> 
     scored.into_iter().map(|(_, t)| t).collect()
 }
 
+/// The prompt is the Start dialog; the dropdown is the "Link issue" popover under the Timer's button.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PromptMode {
+    Dialog,
+    Dropdown,
+}
+
 pub struct IssuePrompt {
+    mode: PromptMode,
     todos: Vec<Todo>,
     states: Vec<TodoState>,
     projects: Vec<TodoProject>,
@@ -99,8 +107,18 @@ pub struct IssuePrompt {
 
 impl IssuePrompt {
     pub fn new(svc: &Arc<Services>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_mode(PromptMode::Dialog, svc, window, cx)
+    }
+
+    /// `IssuePickerDropdown`'s popover: the same todo picker, no tracker section.
+    pub fn dropdown(svc: &Arc<Services>, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_mode(PromptMode::Dropdown, svc, window, cx)
+    }
+
+    fn with_mode(mode: PromptMode, svc: &Arc<Services>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         lizmeter_ui::scrollbar::reset("prompt-list");
         lizmeter_ui::scrollbar::reset("prompt-trackers");
+        lizmeter_ui::scrollbar::reset("prompt-chips");
         let search = TextInput::new(field_style(13.0), "Search by title or #id\u{2026}", window, cx);
         cx.subscribe(&search, |this, s, ev: &TextFieldEvent, cx| match ev {
             TextFieldEvent::Changed => {
@@ -121,8 +139,10 @@ impl IssuePrompt {
         let labels = svc.list_todo_labels().unwrap_or_default();
         let focus = search.read(cx).focus_handle().clone();
         window.focus(&focus);
-        let mut this = Self { todos, states, projects, labels, chips: TodoChips::default(), search, query: String::new(), active: 0, error, focus, has_linear: false, has_jira: false, loading: false, linear: vec![], jira: vec![], tracker_error: None };
-        this.load_trackers(svc, cx);
+        let mut this = Self { mode, todos, states, projects, labels, chips: TodoChips::default(), search, query: String::new(), active: 0, error, focus, has_linear: false, has_jira: false, loading: false, linear: vec![], jira: vec![], tracker_error: None };
+        if mode == PromptMode::Dialog {
+            this.load_trackers(svc, cx);
+        }
         this
     }
 
@@ -230,8 +250,8 @@ impl IssuePrompt {
 fn chip(label: &str, on: bool, color: Option<crate::css::C>) -> Div {
     let accent = color.unwrap_or(TN_BLUE);
     let mut c = div()
-        .h(px(18.0))
-        .px(px(9.0))
+        .h(px(17.6))
+        .px(px(8.0))
         .rounded(px(9.0))
         .border(px(1.0))
         .border_color(col(rgba(41, 46, 66, 0.8)))
@@ -269,6 +289,70 @@ fn section(label: &str, first: bool) -> Div {
 }
 
 impl IssuePrompt {
+    /// The popover: 320 px glass card under the button, search, chips, then the list at 220 px at most.
+    fn dropdown_el(&self, matches: &[Todo], chips: Stateful<Div>, cx: &mut Context<Self>) -> impl IntoElement {
+        let scroll = lizmeter_ui::scrollbar::keyed("prompt-list", lizmeter_ui::scrollbar::BarStyle::Global);
+        let mut rows = div().flex().flex_col();
+        if let Some(e) = &self.error {
+            rows = rows.child(crate::controls::state_message(e.clone(), TN_RED, false));
+        } else if matches.is_empty() {
+            let filtered = !self.query.trim().is_empty() || self.chips.any();
+            rows = rows.child(crate::controls::state_message(if filtered { "No matching todos" } else { "No todos yet" }, TN_TEXT_DIM, false).py(px(12.0)).text_size(px(12.0)).flex().justify_center());
+        }
+        for (i, t) in matches.iter().enumerate() {
+            rows = rows.child(self.row(t, i == self.active, cx));
+        }
+        let list = div()
+            .relative()
+            .flex_shrink_0()
+            .max_h(px(220.0))
+            .child(div().id("prompt-list").track_scroll(scroll.handle()).max_h(px(220.0)).overflow_y_scroll().child(scroll.pad(rows)))
+            .child(scroll.bar());
+        let search = div()
+            .relative()
+            .h(px(37.0))
+            .flex_shrink_0()
+            .px(px(12.0))
+            .flex()
+            .items_center()
+            .child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(41, 46, 66, 0.8))))
+            .child(div().w_full().child(self.search.clone()));
+        let spec = Spec::rrect(14.0)
+            .fill(linear(135.0, &[(0.0, wh(0.07)), (0.30, wh(0.01)), (0.52, TRANSPARENT)]))
+            .solid(rgba(13, 15, 28, 0.92))
+            .border(1.0, rgba(41, 46, 66, 0.9))
+            .inset(0.0, 1.0, wh(0.10))
+            .inset(1.0, 0.0, wh(0.05))
+            .inset(0.0, -1.0, bk(0.12));
+        Glass::new(14.0, 28.0, 1.6, spec)
+            .shadows(&[sh(0.0, 16.0, 50.0, bk(0.6)), sh(0.0, 4.0, 12.0, bk(0.3))])
+            .el()
+            .id("issue-dropdown")
+            .w(px(320.0))
+            .flex()
+            .flex_col()
+            .overflow_hidden()
+            .occlude()
+            .track_focus(&self.focus)
+            .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(PromptEvent::Skip)))
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                let n = matching_todos(&this.todos, &this.query, &this.chips).len();
+                match ev.keystroke.key.as_str() {
+                    "down" if n > 0 => this.active = (this.active + 1).min(n - 1),
+                    "up" => this.active = this.active.saturating_sub(1),
+                    "escape" => cx.emit(PromptEvent::Skip),
+                    _ => return,
+                }
+                cx.notify();
+            }))
+            .child(search)
+            .child({
+                let cs = lizmeter_ui::scrollbar::keyed("prompt-chips", lizmeter_ui::scrollbar::BarStyle::Global);
+                div().relative().flex_shrink_0().max_h(px(72.0)).child(div().id("dd-chips").track_scroll(cs.handle()).max_h(px(72.0)).overflow_y_scroll().child(cs.pad(chips))).child(cs.bar())
+            })
+            .child(list)
+    }
+
     /// Capture hook: the tracker section as it looks in one state (`rows`, `loading`, `error`, `none-found`).
     /// The issues are made up here; no provider answers before phase 8.
     pub fn capture(&mut self, state: &str, cx: &mut Context<Self>) {
@@ -384,6 +468,10 @@ impl Render for IssuePrompt {
             .child(div().id("prompt-list").track_scroll(scroll.handle()).size_full().overflow_y_scroll().child(scroll.pad(rows)))
             .child(scroll.bar());
 
+        if self.mode == PromptMode::Dropdown {
+            return self.dropdown_el(&matches, chips, cx).into_any_element();
+        }
+
         let search = div()
             .relative()
             .h(px(37.0))
@@ -473,6 +561,7 @@ impl Render for IssuePrompt {
             .justify_center()
             .on_click(move |_, _, app| skip_overlay.update(app, |_, cx| cx.emit(PromptEvent::Skip)))
             .child(entrance)
+            .into_any_element()
     }
 }
 
