@@ -211,9 +211,8 @@ impl Root {
         match status {
             Status::Idle => {
                 let m = me.clone();
-                let blank = Self::title_is_blank(&self.sw_title_html);
                 let start = button("sw-start", "Start", Some(TN_BLUE), ink, false, Box::new(move |window, app| m.update(app, |t, cx| t.handle_stopwatch_start(cx, window))));
-                controls = controls.child(if blank { start.opacity(0.4).into_any_element() } else { start.into_any_element() });
+                controls = controls.child(start);
                 if self.stopwatch.restored_session_id.is_some() {
                     let m = me.clone();
                     controls = controls.child(button("sw-cancel", "Cancel", None, TN_TEXT_DIM, true, Box::new(move |_, app| m.update(app, |t, cx| t.cancel_stopwatch_restore(cx)))));

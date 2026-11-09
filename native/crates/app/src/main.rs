@@ -62,10 +62,11 @@ struct Args {
     size: (f32, f32),
     steps: Vec<Step>,
     data_dir: Option<PathBuf>,
+    edit_time: bool,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new(), data_dir: None };
+    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new(), data_dir: None, edit_time: false };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -79,6 +80,7 @@ fn parse_args() -> Args {
                 }
             }
             "--focus" => a.focus = true,
+            "--edit-time" => a.edit_time = true,
             "--data-dir" => a.data_dir = it.next().map(PathBuf::from),
             "--html" => a.html = it.next(),
             "--md" => a.md = it.next().map(PathBuf::from),
@@ -202,11 +204,13 @@ fn main() {
                 "notes-modal" => (Page::Notes(MdVariant::Framed), true, false),
                 "modal" => (Page::Timer, false, true),
                 "stopwatch" => (Page::Timer, false, false),
+                "history" => (Page::History, true, false),
                 _ => (Page::Timer, true, false),
             };
             let bounds = Bounds::centered(None, size(px(args.size.0), px(args.size.1)), cx);
             let hover = args.hover_nav;
             let running = args.running;
+            let edit_time = args.edit_time;
             let w = cx
                 .open_window(
                     WindowOptions {
@@ -240,6 +244,9 @@ fn main() {
                             }
                             if running {
                                 r.start(cx);
+                            }
+                            if edit_time {
+                                r.start_time_edit(window, cx);
                             }
                             if modal {
                                 r.open_prompt(app::PromptPurpose::StopwatchStart, window, cx);

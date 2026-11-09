@@ -208,7 +208,7 @@ impl Render for IssuePrompt {
             );
         }
 
-        let mut list = div().id("prompt-list").h(px(220.0)).flex_shrink_0().flex().flex_col().overflow_y_scroll();
+        let mut list = div().id("prompt-list").h(px(196.0)).flex_shrink_0().flex().flex_col().overflow_y_scroll();
         if let Some(e) = &self.error {
             list = list.child(crate::controls::state_message(e.clone(), TN_RED, false));
         } else if matches.is_empty() {

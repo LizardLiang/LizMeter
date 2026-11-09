@@ -400,7 +400,7 @@ pub fn controls(
     let on_reset = std::rc::Rc::new(on_reset);
     match status {
         Status::Idle => {
-            let b = Btn { label: "Start", bg: Some(TN_BLUE), hover_bg: Some(hex(0x89b4f8)), opacity: if st.start_disabled { 0.4 } else { 1.0 }, ..base };
+            let b = Btn { label: "Start", bg: Some(TN_BLUE), hover_bg: Some(hex(0x89b4f8)), ..base };
             let start_disabled = st.start_disabled;
             row = row.child(control_button("start", b, move |w, a| {
                 if !start_disabled {

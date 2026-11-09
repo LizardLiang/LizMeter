@@ -153,10 +153,10 @@ impl HistoryPage {
         self.refresh(window, cx);
     }
 
-    fn card(&mut self, s: &Session, cx: &mut Context<Self>) -> impl IntoElement {
+    fn card(&mut self, s: &Session, hide_date: bool, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let color = parse_color(&format!("#{:06x}", timer_type_color(s.timer_type)));
-        let label = timer_type_label(s.timer_type).to_uppercase();
+        let label = timer_type_label(s.timer_type);
         let mut top = div().flex().flex_row().items_center().gap(px(10.0)).child(
             div()
                 .flex_shrink_0()
@@ -170,10 +170,10 @@ impl HistoryPage {
                 .text_size(px(11.0))
                 .line_height(px(14.0))
                 .font_weight(FontWeight(700.0))
-                .child(spaced(&label, 0.88)),
+                .child(spaced(label, 0.88)),
         );
         top = top.child(div().flex_1().text_size(px(16.0)).font_weight(FontWeight(700.0)).text_color(col(TN_TEXT)).child(format_duration(s.actual_duration_seconds)));
-        top = top.child(div().flex_shrink_0().text_size(px(12.0)).text_color(col(TN_TEXT_DIM)).child(format!("{} \u{b7} {}", format_date(&s.completed_at), format_local_time(&s.completed_at))));
+        top = top.child(div().flex_shrink_0().text_size(px(12.0)).text_color(col(TN_TEXT_DIM)).child(if hide_date { format_local_time(&s.completed_at) } else { format!("{} \u{b7} {}", format_date(&s.completed_at), format_local_time(&s.completed_at)) }));
         if s.issue_provider == Some(IssueProviderKind::Jira) && s.issue_id.is_some() && s.actual_duration_seconds >= 60 {
             top = top.child(match s.worklog_status {
                 WorklogStatus::Logged => div().flex_shrink_0().text_size(px(11.0)).font_weight(FontWeight(600.0)).text_color(col(TN_GREEN)).child("Logged"),
@@ -285,7 +285,7 @@ impl Render for HistoryPage {
         let now = chrono::Local::now();
         let grouped = group_by_issue(&self.sessions, now);
         let days = group_by_day(&grouped.ungrouped, now);
-        let mut body = div().flex().flex_col().child(page_heading("History").mb(px(20.0)));
+        let mut body = div().flex().flex_col().child(page_heading("History").mt(px(8.7)).mb(px(20.0)));
 
         if !self.tags.is_empty() {
             let mut row = div().flex().flex_row().flex_wrap().gap(px(6.0)).mb(px(16.0));
@@ -370,7 +370,7 @@ impl Render for HistoryPage {
                     }));
                     if dopen {
                         for s in &sub.sessions {
-                            sblock = sblock.child(self.card(s, cx));
+                            sblock = sblock.child(self.card(s, false, cx));
                         }
                     }
                     block = block.child(sblock);
@@ -391,7 +391,7 @@ impl Render for HistoryPage {
             }));
             if open {
                 for s in &d.sessions {
-                    block = block.child(self.card(s, cx));
+                    block = block.child(self.card(s, true, cx));
                 }
             }
             list = list.child(block);
