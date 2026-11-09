@@ -11,7 +11,7 @@ use super::todos_logic::*;
 use super::todos_menus::*;
 use super::PageEvent;
 use crate::controls::parse_color;
-use crate::css::{hex, rgba, C};
+use crate::css::{hex, rgba, Spec, C};
 use crate::select::{SelectBox, SelectEvent, SelectOption};
 use crate::ui::*;
 use gpui::prelude::FluentBuilder as _;
@@ -61,20 +61,17 @@ impl Render for DragGhost {
 }
 
 fn ghost_el(title: &str, state: Option<&TodoState>, count: usize) -> Div {
-    let mut g = div()
+    let spec = Spec::rrect(8.0).solid(rgba(26, 29, 51, 0.95)).border(1.0, rgba(122, 162, 247, 0.35));
+    let mut g = Glass::new(8.0, 18.0, 1.5, spec)
+        .shadows(&[sh(0.0, 12.0, 28.0, bk(0.5))])
+        .el()
         .flex()
         .flex_row()
         .items_center()
         .gap(px(8.0))
-        .max_w(px(352.0))
+        .w(px(352.0))
         .px(px(12.0))
         .py(px(7.0))
-        .rounded(px(8.0))
-        .border(px(1.0))
-        .border_color(col(rgba(122, 162, 247, 0.35)))
-        .bg(col(rgba(26, 29, 51, 0.95)))
-        .backdrop_filter(px(18.0), 1.5)
-        .shadow(shadows(&[sh(0.0, 12.0, 28.0, bk(0.5))]))
         .font_family(UI_FONT)
         .children(state.map(|s| state_dot(&s.color, s.is_completed, 11.0, 1.5)))
         .child(div().min_w_0().truncate().text_size(px(12.5)).line_height(px(16.0)).font_weight(FontWeight(500.0)).text_color(col(TN_TEXT)).child(title.to_string()));
@@ -934,10 +931,10 @@ impl TodosPage {
                     if self.begin_drag(id, cx).is_some() {
                         let gi = group.parse::<usize>().ok().filter(|g| *g < self.groups.len());
                         let spot = gi.and_then(|g| self.group_screen_top(g)).unwrap_or(200.0);
-                        let x = self.geo.get().map_or(300.0, |g| g.panel_x + 150.0);
+                        let x = self.geo.get().map_or(300.0, |g| g.panel_x - 133.0 - 64.0);
                         if let Some(d) = self.drag.as_mut() {
                             d.over = gi;
-                            d.held_at = Some(point(px(x), px(spot + 20.0)));
+                            d.held_at = Some(point(px(x), px(spot - 32.0)));
                         }
                         if let Some(sid) = gi.map(|g| self.groups[g].state.id).filter(|s| self.collapsed.contains(s)) {
                             self.toggle_collapsed(sid, cx);
