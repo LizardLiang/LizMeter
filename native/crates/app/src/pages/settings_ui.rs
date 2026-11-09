@@ -227,5 +227,5 @@ pub fn row_save_button(id: impl Into<ElementId>, text: &str, enabled: bool, on_c
 
 /// An outlined button in an `action_row`: 9px 16px, 13px, so it matches the solid button's height.
 pub fn row_ghost_button(id: impl Into<ElementId>, text: &str, color: C, enabled: bool, on_click: impl Fn(&mut Window, &mut App) + 'static) -> Stateful<Div> {
-    ghost_button(id, text, color, enabled, on_click).px(px(16.0)).py(px(9.0)).text_size(px(13.0)).line_height(px(15.0))
+    ghost_button(id, text, color, enabled, on_click).px(px(16.0)).py(px(9.0)).text_size(px(13.0)).line_height(px(16.0))
 }
