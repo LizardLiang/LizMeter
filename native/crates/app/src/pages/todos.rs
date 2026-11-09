@@ -90,8 +90,8 @@ pub struct TodosPage {
     label_select: Entity<SelectBox>,
     bulk_select: Entity<SelectBox>,
     geo: Rc<Cell<Option<Geo>>>,
-    /// Row actions that wait for part 7B, newest last.
-    pub pending: Vec<Pending7b>,
+    /// The latest row action that reaches a part 7B dialog or page.
+    pub pending: Option<Pending7b>,
 }
 
 impl EventEmitter<PageEvent> for TodosPage {}
@@ -153,7 +153,7 @@ impl TodosPage {
             label_select,
             bulk_select,
             geo: Rc::new(Cell::new(None)),
-            pending: vec![],
+            pending: None,
         }
     }
 
@@ -217,6 +217,14 @@ impl TodosPage {
         }
         self.loading = false;
         self.rebuild();
+        let gone = match &self.overlay {
+            Overlay::Action { todo_id, .. } => self.todo(*todo_id).is_none(),
+            Overlay::Quick(menu) => self.todo(menu.read(cx).todo_id).is_none(),
+            _ => false,
+        };
+        if gone {
+            self.overlay = Overlay::None;
+        }
         self.sync_selects(cx);
         cx.notify();
     }
@@ -378,7 +386,7 @@ impl TodosPage {
     }
 
     fn pending(&mut self, what: Pending7b) {
-        self.pending.push(what);
+        self.pending = Some(what);
     }
 
     fn arm_copy(&mut self, state: CopyState, cx: &mut Context<Self>) {
@@ -567,6 +575,28 @@ impl TodosPage {
                 }
             }
             "shortcuts" => self.overlay = Overlay::Shortcuts,
+            "pick" => {
+                // pick:<kind>@<row>=<value>
+                if let Some((head, value)) = arg.split_once('=') {
+                    let (kind, n) = head.split_once('@').unwrap_or((head, "0"));
+                    let kind = match kind {
+                        "state" => QuickKind::State,
+                        "priority" => QuickKind::Priority,
+                        "due" => QuickKind::Due,
+                        "project" => QuickKind::Project,
+                        _ => QuickKind::Label,
+                    };
+                    if let Some(id) = nth(self, n) {
+                        self.apply_quick(kind, id, value, cx);
+                    }
+                }
+            }
+            "highlight" => {
+                if let Ok(id) = arg.parse() {
+                    self.highlight(id, window, cx);
+                }
+            }
+            "projects" => self.project_select.update(cx, |s, cx| s.open_list(window, cx)),
             "filter" => {
                 self.filter = match arg {
                     "active" => TodoFilter::Active,
@@ -718,7 +748,7 @@ impl TodosPage {
                     .border(px(1.0))
                     .border_color(col(rgba(122, 134, 180, 0.55)))
                     .text_size(px(10.0))
-                    .line_height(px(14.0))
+                    .line_height(px(12.7))
                     .text_color(col(hex(0xa3abc9)))
                     .child(icon(icons::ring_path(todo.completed_child_count, todo.child_count), 12.0, 12.0, if all { TN_GREEN } else { TN_BLUE }))
                     .child(format!("{}/{}", todo.completed_child_count, todo.child_count)),
@@ -933,7 +963,7 @@ impl TodosPage {
                 .hover(|s| s.bg(col(rgba(122, 162, 247, 0.22))))
                 .on_click(move |_, _, app| m_new.update(app, |p, _| p.pending(Pending7b::CreateDialog)))
                 .child("New")
-                .child(kbd_cap("c", 10.0, 5.0).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3)))),
+                .child(kbd_cap("c", 10.0, 5.0, 1.4).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3)))),
         );
         div().flex().flex_row().flex_wrap().items_center().justify_between().gap(px(12.0)).mb(px(14.0)).child(tabs).child(right)
     }

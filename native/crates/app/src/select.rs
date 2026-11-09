@@ -81,7 +81,7 @@ impl SelectBox {
         self.options.iter().position(|o| o.value == self.value)
     }
 
-    fn open_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn open_list(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.active = self.selected_index().unwrap_or(0);
         self.open = true;
         window.focus(&self.focus);
@@ -118,7 +118,7 @@ impl SelectBox {
                 .py(px(6.0))
                 .rounded(px(6.0))
                 .text_size(px(12.0))
-                .line_height(px(16.0))
+                .line_height(px(15.2))
                 .text_color(col(TN_TEXT))
                 .cursor_pointer()
                 .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {

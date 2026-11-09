@@ -57,7 +57,7 @@ fn menu_pos(anchor: (f32, f32, f32), width: f32, height: f32, gap: f32, window: 
     point(px(x), px(y))
 }
 
-pub fn kbd_cap(text: &str, size: f32, pad_x: f32) -> Div {
+pub fn kbd_cap(text: &str, size: f32, pad_x: f32, line_factor: f32) -> Div {
     div()
         .flex()
         .items_center()
@@ -68,7 +68,7 @@ pub fn kbd_cap(text: &str, size: f32, pad_x: f32) -> Div {
         .border(px(1.0))
         .bg(col(rgba(12, 13, 24, 0.5)))
         .text_size(px(size))
-        .line_height(px((size * 1.5).round()))
+        .line_height(px(size * line_factor))
         .child(text.to_string())
 }
 
@@ -165,7 +165,7 @@ impl Render for QuickMenu {
                 .py(px(6.0))
                 .rounded(px(7.0))
                 .text_size(px(12.0))
-                .line_height(px(16.0))
+                .line_height(px(15.2))
                 .text_color(col(TN_TEXT))
                 .cursor_pointer()
                 .on_hover(cx.listener(move |this, hovered: &bool, _, cx| {
@@ -298,7 +298,7 @@ pub struct ActionMenuProps<'a> {
 fn hint(keys: &[&str]) -> Div {
     let mut h = div().flex().flex_row().items_center().gap(px(2.0)).ml_auto().pl(px(12.0));
     for k in keys {
-        h = h.child(kbd_cap(k, 9.0, 4.0).min_w(px(15.0)).font_weight(FontWeight(600.0)).text_color(col(hex8b())).border_color(col(rgba(86, 95, 137, 0.5))));
+        h = h.child(kbd_cap(k, 9.0, 4.0, 1.4).min_w(px(15.0)).font_weight(FontWeight(600.0)).text_color(col(hex8b())).border_color(col(rgba(86, 95, 137, 0.5))));
     }
     h
 }
@@ -335,7 +335,7 @@ pub fn action_menu(window: &Window, p: ActionMenuProps, on_choice: Rc<dyn Fn(Act
             .py(px(6.0))
             .rounded(px(6.0))
             .text_size(px(12.0))
-            .line_height(px(14.0))
+            .line_height(px(15.2))
             .text_color(col(color))
             .child(label);
         if !keys.is_empty() {
@@ -460,9 +460,9 @@ pub fn shortcuts_overlay(window: &Window, on_close: Rc<dyn Fn(&mut Window, &mut 
         for sc in list {
             let mut keys = div().flex_shrink_0().w(px(120.0)).flex().flex_row().flex_wrap().gap(px(3.0));
             for k in &sc.keys {
-                keys = keys.child(kbd_cap(k, 10.5, 6.0).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3))));
+                keys = keys.child(kbd_cap(k, 10.5, 6.0, 1.5).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3))));
             }
-            rows = rows.child(div().flex().flex_row().gap(px(10.0)).py(px(4.0)).child(keys).child(div().min_w_0().text_size(px(12.5)).line_height(px(17.0)).text_color(col(TN_TEXT)).child(sc.label)));
+            rows = rows.child(div().flex().flex_row().items_start().gap(px(10.0)).py(px(4.0)).child(keys).child(div().min_w_0().pt(px(1.4)).text_size(px(12.5)).line_height(px(17.0)).text_color(col(TN_TEXT)).child(sc.label)));
         }
         grid = grid.child(div().w(px(col_w)).flex_shrink_0().child(div().mb(px(8.0)).text_size(px(10.0)).line_height(px(13.0)).font_weight(FontWeight(700.0)).text_color(col(hex_a3())).child(spaced(&title.to_uppercase(), 1.2))).child(rows));
     }
@@ -494,9 +494,9 @@ pub fn shortcuts_overlay(window: &Window, on_close: Rc<dyn Fn(&mut Window, &mut 
     let mut footer = div().flex().flex_row().flex_wrap().items_center().mt(px(18.0)).pt(px(12.0)).border_t_1().border_color(col(rgba(41, 46, 66, 0.7))).text_size(px(11.5)).line_height(px(16.0)).text_color(col(hex8b()));
     let words = |d: Div, text: &str| text.split(' ').fold(d, |d, w| d.child(div().mr(px(3.0)).child(w.to_string())));
     footer = words(footer, "Shortcuts other than");
-    footer = footer.child(kbd_cap("C", 10.5, 6.0).mr(px(3.0)).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3))));
+    footer = footer.child(kbd_cap("C", 10.5, 6.0, 1.5).mr(px(3.0)).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3))));
     footer = words(footer, "need a cursor. Press");
-    footer = footer.child(kbd_cap("\u{2193}", 10.5, 6.0).mr(px(3.0)).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3))));
+    footer = footer.child(kbd_cap("\u{2193}", 10.5, 6.0, 1.5).mr(px(3.0)).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3))));
     footer = words(footer, "to place one, or right-click a row to reach the same actions from a menu.");
 
     let dialog = menu_glass(18.0, 0.72, 0.4)
