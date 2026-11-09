@@ -22,14 +22,43 @@ pub fn label_lines(lines: &[&str]) -> Div {
     d
 }
 
-/// A long path under `word-break: break-all`: `width` characters per line.
-pub fn break_all(text: &str, width: usize) -> Div {
+/// `.pathBox` font: Cascadia Mono when the machine has it, else Consolas.
+fn path_font() -> &'static str {
+    static FONT: std::sync::OnceLock<&'static str> = std::sync::OnceLock::new();
+    FONT.get_or_init(|| {
+        let dirs = [std::env::var_os("WINDIR").map(|w| std::path::PathBuf::from(w).join("Fonts")), std::env::var_os("LOCALAPPDATA").map(|l| std::path::PathBuf::from(l).join(r"Microsoft\Windows\Fonts"))];
+        if dirs.iter().flatten().any(|d| d.join("CascadiaMono.ttf").exists()) {
+            "Cascadia Mono"
+        } else {
+            CODE_FONT
+        }
+    })
+}
+
+/// `.pathBox`: a filesystem path in a monospace box, broken at the character that fills the 298px line.
+pub fn path_box(text: &str) -> Div {
+    let per_line = if path_font() == CODE_FONT { 49 } else { 46 };
     let chars: Vec<char> = text.chars().collect();
-    let mut d = hint().flex().flex_col();
-    for chunk in chars.chunks(width) {
-        d = d.child(chunk.iter().collect::<String>());
+    let mut lines = div().flex().flex_col();
+    for chunk in chars.chunks(per_line) {
+        lines = lines.child(chunk.iter().collect::<String>());
     }
-    d
+    ui_text(11.0)
+        .font_family(path_font())
+        .line_height(px(16.5))
+        .text_color(col(hex(0xa9b1d6)))
+        .bg(col(TN_SURFACE))
+        .border(px(1.0))
+        .border_color(col(hex(0x292e42)))
+        .rounded(px(6.0))
+        .px(px(10.0))
+        .py(px(8.0))
+        .child(lines)
+}
+
+/// A `.fieldStack` holding a label and a `.pathBox`.
+pub fn path_stack(title: &str, path: &str) -> Div {
+    div().flex().flex_col().gap(px(8.0)).mb(px(16.0)).child(label(title)).child(path_box(path))
 }
 
 /// `.tokenHint`: 11px, dim.
@@ -184,4 +213,19 @@ pub fn field_row(left: impl IntoElement, right: impl IntoElement) -> Div {
 /// A label with its value stacked under it (`.field` holding a label and a hint).
 pub fn field_stack(title: &str, body: impl IntoElement) -> Div {
     div().flex().flex_col().mb(px(16.0)).child(label(title)).child(div().mt(px(6.0)).child(body))
+}
+
+/// The Data Location action row: centred, 12px above, its solid button flush with the row.
+pub fn action_row() -> Div {
+    div().flex().flex_row().items_center().gap(px(8.0)).mt(px(12.0))
+}
+
+/// `save_button` inside an `action_row`: no top margin.
+pub fn row_save_button(id: impl Into<ElementId>, text: &str, enabled: bool, on_click: impl Fn(&mut Window, &mut App) + 'static) -> Stateful<Div> {
+    save_button(id, text, enabled, on_click).mt(px(0.0))
+}
+
+/// An outlined button in an `action_row`: 9px 16px, 13px, so it matches the solid button's height.
+pub fn row_ghost_button(id: impl Into<ElementId>, text: &str, color: C, enabled: bool, on_click: impl Fn(&mut Window, &mut App) + 'static) -> Stateful<Div> {
+    ghost_button(id, text, color, enabled, on_click).px(px(16.0)).py(px(9.0)).text_size(px(13.0)).line_height(px(15.0))
 }

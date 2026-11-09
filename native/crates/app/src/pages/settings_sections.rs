@@ -231,7 +231,7 @@ impl SettingsPage {
             .child(field_row(label("Current Cache Usage"), hint().mt(px(6.0)).child(format!("{} MB used ({} tracks cached)", mb_text(0.0), 0))))
             .child(div().mt(px(8.0)).flex().flex_row().child(ghost_button("cache-clear", "Clear Cache", TN_BLUE, false, |_, _| {})))
             .child(div().mt(px(16.0)).child(field_row(label("yt-dlp Version"), hint().mt(px(6.0)).child("Not installed"))))
-            .child(field_row(label_lines(&["Binary", "Storage", "Path"]), break_all(&bin, 45).mt(px(6.0))))
+            .child(path_stack("Binary Storage Path", &bin))
     }
 
     fn data_section(&self, cx: &mut Context<Self>) -> Div {
@@ -240,7 +240,7 @@ impl SettingsPage {
         let Some(info) = &self.data else { return s };
         let sync_on = self.sync.as_ref().is_some_and(|x| x.enabled);
         let kind = if info.is_custom { "(custom)" } else { "(default)" };
-        s = s.child(field_row(label_lines(&["Current", "Folder", kind]), break_all(&info.data_dir, 45).mt(px(6.0))));
+        s = s.child(path_stack(&format!("Current Folder {kind}"), &info.data_dir));
         if !info.available {
             s = s.child(error_text("This folder is not reachable right now."));
         }
@@ -261,13 +261,9 @@ impl SettingsPage {
                     .child(error_text("This will disconnect this machine from sync."))
                     .child(hint().child(format!("{dir} does not hold the other machine\u{2019}s sync history, so this machine will stop seeing its changes (and vice versa) until both are pointed at the same folder again. This machine\u{2019}s own database is untouched either way \u{2014} only the attachments folder moves.")))
                     .child(
-                        div()
-                            .flex()
-                            .flex_row()
-                            .gap(px(8.0))
-                            .mt(px(8.0))
-                            .child(save_button("move-disconnect", if moving { "Moving\u{2026}" } else { "Move and Disconnect Sync" }, !moving, move |_, a| m_go.update(a, |p, cx| p.run_move(d.clone(), false, true, false, false, cx))))
-                            .child(ghost_button("move-cancel", "Cancel", TN_BLUE, !moving, move |_, a| {
+                        action_row()
+                            .child(row_save_button("move-disconnect", if moving { "Moving\u{2026}" } else { "Move and Disconnect Sync" }, !moving, move |_, a| m_go.update(a, |p, cx| p.run_move(d.clone(), false, true, false, false, cx))))
+                            .child(row_ghost_button("move-cancel", "Cancel", TN_BLUE, !moving, move |_, a| {
                                 m_cancel.update(a, |p, cx| {
                                     p.pending_disconnect = None;
                                     cx.notify();
@@ -296,15 +292,11 @@ impl SettingsPage {
             };
             s = s.child(
                 div().flex().flex_col().gap(px(8.0)).child(error_text(head)).child(hint().child(body)).child(
-                    div()
-                        .flex()
-                        .flex_row()
-                        .gap(px(8.0))
-                        .mt(px(8.0))
-                        .child(save_button("adopt-go", go, !moving, move |_, a| {
+                    action_row()
+                        .child(row_save_button("adopt-go", go, !moving, move |_, a| {
                             m_go.update(a, |p, cx| p.run_move(d.clone(), reason == AdoptReason::ExistingData, false, reason == AdoptReason::SyncPeer, reason == AdoptReason::UnsyncedDb, cx))
                         }))
-                        .child(ghost_button("adopt-cancel", "Cancel", TN_BLUE, !moving, move |_, a| {
+                        .child(row_ghost_button("adopt-cancel", "Cancel", TN_BLUE, !moving, move |_, a| {
                             m_cancel.update(a, |p, cx| {
                                 p.pending_adopt = None;
                                 cx.notify();
@@ -314,10 +306,10 @@ impl SettingsPage {
             );
         } else {
             let (m_choose, m_open, m_reset) = (me.clone(), me.clone(), me.clone());
-            let mut row = div().flex().flex_row().flex_wrap().gap(px(8.0)).mt(px(8.0)).child(save_button("choose-folder", if moving { "Moving\u{2026}" } else { "Change Folder\u{2026}" }, !moving, move |_, a| m_choose.update(a, |p, cx| p.choose_folder(cx))));
-            row = row.child(ghost_button("open-folder", "Open Folder", TN_BLUE, info.available, move |_, a| m_open.update(a, |p, _| p.svc.data_location_reveal())));
+            let mut row = action_row().flex_wrap().child(row_save_button("choose-folder", if moving { "Moving\u{2026}" } else { "Change Folder\u{2026}" }, !moving, move |_, a| m_choose.update(a, |p, cx| p.choose_folder(cx))));
+            row = row.child(row_ghost_button("open-folder", "Open Folder", TN_BLUE, info.available, move |_, a| m_open.update(a, |p, _| p.svc.data_location_reveal())));
             if info.is_custom {
-                row = row.child(ghost_button("reset-folder", "Reset to Default", TN_RED, !moving, move |_, a| m_reset.update(a, |p, cx| p.reset_folder(cx))));
+                row = row.child(row_ghost_button("reset-folder", "Reset to Default", TN_RED, !moving, move |_, a| m_reset.update(a, |p, cx| p.reset_folder(cx))));
             }
             s = s.child(row);
         }

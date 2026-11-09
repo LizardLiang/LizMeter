@@ -1290,11 +1290,9 @@ export function SettingsPage({
 
       {/* Binary storage path */}
       {binaryInfo !== null && (
-        <div className={styles.field}>
+        <div className={styles.fieldStack}>
           <label className={styles.label}>Binary Storage Path</label>
-          <p className={styles.tokenHint} style={{ margin: "6px 0 0", wordBreak: "break-all" }}>
-            {binaryInfo.storagePath}
-          </p>
+          <p className={styles.pathBox}>{binaryInfo.storagePath}</p>
         </div>
       )}
 
@@ -1304,13 +1302,11 @@ export function SettingsPage({
 
       {dataLocation !== null && (
         <>
-          <div className={styles.field}>
+          <div className={styles.fieldStack}>
             <label className={styles.label}>
               Current Folder {dataLocation.isCustom ? "(custom)" : "(default)"}
             </label>
-            <p className={styles.tokenHint} style={{ margin: "6px 0 0", wordBreak: "break-all" }}>
-              {dataLocation.dataDir}
-            </p>
+            <p className={styles.pathBox}>{dataLocation.dataDir}</p>
             {!dataLocation.available && <div className={styles.errorMsg}>This folder is not reachable right now.</div>}
           </div>
 
@@ -1342,7 +1338,7 @@ export function SettingsPage({
                   (and vice versa) until both are pointed at the same folder again. This machine&rsquo;s own database is
                   untouched either way — only the attachments folder moves.
                 </p>
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <div className={styles.buttonRow}>
                   <button
                     className={styles.saveBtn}
                     onClick={() => void runDataMove(pendingSyncDisconnectDir, false, true)}
@@ -1395,7 +1391,7 @@ export function SettingsPage({
                       in the current folder is left untouched.
                     </p>
                   )}
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <div className={styles.buttonRow}>
                   <button
                     className={styles.saveBtn}
                     onClick={() =>
@@ -1426,7 +1422,7 @@ export function SettingsPage({
               </div>
             )
             : (
-              <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+              <div className={styles.buttonRow} style={{ flexWrap: "wrap" }}>
                 <button
                   className={styles.saveBtn}
                   onClick={() => void handleChooseDataFolder()}

@@ -40,6 +40,38 @@
   margin-bottom: 16px;
 }
 
+/** A filesystem path in a box under its label; breaks anywhere rather than widen the page. */
+.pathBox {
+  font-family: "Cascadia Mono", Consolas, monospace;
+  font-size: 11px;
+  color: #a9b1d6;
+  background: #1f2335;
+  border: 1px solid #292e42;
+  border-radius: 6px;
+  padding: 8px 10px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  margin: 0;
+}
+
+/** The Data Location action row: every button the same height as the solid one. */
+.buttonRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+
+  .saveBtn {
+    margin-top: 0;
+  }
+
+  .testTokenBtn,
+  .removeTokenBtn {
+    padding: 9px 16px;
+    font-size: 13px;
+  }
+}
+
 /** One sync notice: full width, its own surface, text that wraps instead of stacking sideways. */
 .noticeCard {
   display: flex;
