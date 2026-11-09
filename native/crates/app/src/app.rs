@@ -516,6 +516,7 @@ impl Root {
     }
 
     pub fn navigate(&mut self, index: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.link_dropdown = None;
         self.settings.update(cx, |s, _| s.hide());
         self.activity.update(cx, |a, _| a.hide());
         if self.page != Self::page_for(index) {

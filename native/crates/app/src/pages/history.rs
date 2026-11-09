@@ -172,11 +172,12 @@ impl HistoryPage {
     fn open_worklog_for(&mut self, sessions: Vec<Session>, key: &str, relog: bool, window: &mut Window, cx: &mut Context<Self>) {
         let dialog = cx.new(|cx| WorklogDialog::new(sessions, key, relog, window, cx));
         cx.subscribe_in(&dialog, window, |this, _, ev: &WorklogEvent, window, cx| {
+            this.worklog = None;
+            this.refresh(window, cx);
             if let WorklogEvent::Confirm(c) = ev {
                 this.log_work(c);
             }
-            this.worklog = None;
-            this.refresh(window, cx);
+            cx.notify();
         })
         .detach();
         self.worklog = Some(dialog);

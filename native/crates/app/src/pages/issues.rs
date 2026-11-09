@@ -74,6 +74,7 @@ impl IssuesPage {
         self.linear = Load::Idle;
         self.jira = Load::Idle;
         self.expanded = None;
+        self.generation += 1;
         self.load_current(false, cx);
         cx.notify();
     }
@@ -115,6 +116,7 @@ impl IssuesPage {
         self.query.clear();
         self.search.update(cx, |s, cx| s.set_text("", cx));
         self.expanded = None;
+        self.generation += 1;
         self.load_current(false, cx);
         cx.notify();
     }
@@ -123,6 +125,7 @@ impl IssuesPage {
     fn toggle_card(&mut self, card: &Card, cx: &mut Context<Self>) {
         if self.expanded.as_ref().is_some_and(|(id, _)| *id == card.id) {
             self.expanded = None;
+            self.generation += 1;
             cx.notify();
             return;
         }
