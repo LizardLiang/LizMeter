@@ -3,7 +3,8 @@
 //! overflows, the scroller's content loses 4px on the right and the bar fills that strip.
 //!
 //! Use: hold a [`Scroll`], pass `scroll.handle()` to `track_scroll`, wrap the scroller's child with
-//! [`Scroll::pad`], and add [`Scroll::bar`] as a later sibling of the scroller.
+//! [`Scroll::pad`] (a scroller that already has right padding of 4px or more may skip `pad`), and add
+//! [`Scroll::bar`] as a later sibling of the scroller.
 
 use crate::css::hex;
 use crate::ui::col;
