@@ -11,6 +11,7 @@ mod widget;
 
 use app::{Page, Root};
 use gpui::*;
+use lizmeter_ui::md_editor::MdVariant;
 use std::{path::PathBuf, time::Duration};
 use timer::Status;
 
@@ -48,11 +49,13 @@ struct Args {
     composite: Option<u32>,
     focus: bool,
     html: Option<String>,
+    md: Option<PathBuf>,
+    size: (f32, f32),
     steps: Vec<Step>,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, steps: Vec::new() };
+    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new() };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -67,6 +70,23 @@ fn parse_args() -> Args {
             }
             "--focus" => a.focus = true,
             "--html" => a.html = it.next(),
+            "--md" => a.md = it.next().map(PathBuf::from),
+            "--size" => {
+                if let Some((w, h)) = it.next().as_deref().and_then(|v| v.split_once('x')) {
+                    if let (Ok(w), Ok(h)) = (w.parse(), h.parse()) {
+                        a.size = (w, h);
+                    }
+                }
+            }
+            "--caret" => a.steps.extend(it.next().and_then(|v| v.parse().ok()).map(Step::Caret)),
+            "--select" => {
+                let v = it.next().unwrap_or_default();
+                if let Some((s, e)) = v.split_once("..") {
+                    if let (Ok(s), Ok(e)) = (s.parse(), e.parse()) {
+                        a.steps.push(Step::Select(s, e));
+                    }
+                }
+            }
             "--type" => a.steps.extend(it.next().map(Step::Type)),
             "--keys" => a.steps.extend(it.next().map(Step::Keys)),
             "--ime" => a.steps.extend(it.next().map(Step::Ime)),
@@ -127,6 +147,7 @@ fn main() {
             .expect("font");
         lizmeter_ui::text_input::bind_keys(cx);
         lizmeter_ui::rich_input::bind_keys(cx);
+        lizmeter_ui::md_editor::bind_keys(cx);
         let is_widget = args.page == "widget";
         let handle: AnyWindowHandle = if is_widget {
             let display = cx.primary_display().map(|d| d.bounds()).unwrap_or(Bounds::new(point(px(0.0), px(0.0)), size(px(1920.0), px(1080.0))));
@@ -152,6 +173,8 @@ fn main() {
                 .unwrap();
             w.into()
         } else {
+            let page_name = args.page.clone();
+            let args_md = args.md.clone();
             let (page, pomodoro, modal) = match args.page.as_str() {
                 "gallery" => (Page::Gallery, true, false),
                 "textsample" => (Page::TextSample, true, false),
@@ -160,11 +183,14 @@ fn main() {
                     let i = gallery::ANIM_NAMES.iter().position(|n| *n == &name[5..]).expect("unknown animation");
                     (Page::Anim(i), true, false)
                 }
+                "notes" => (Page::Notes(MdVariant::Framed), true, false),
+                "notes-bare" => (Page::Notes(MdVariant::Bare), true, false),
+                "notes-modal" => (Page::Notes(MdVariant::Framed), true, false),
                 "modal" => (Page::Timer, false, true),
                 "stopwatch" => (Page::Timer, false, false),
                 _ => (Page::Timer, true, false),
             };
-            let bounds = Bounds::centered(None, size(px(1200.0), px(800.0)), cx);
+            let bounds = Bounds::centered(None, size(px(args.size.0), px(args.size.1)), cx);
             let hover = args.hover_nav;
             let running = args.running;
             let w = cx
@@ -179,6 +205,21 @@ fn main() {
                     |window, cx| {
                         cx.new(|cx| {
                             let mut r = Root::new(page, pomodoro, modal, hover, window, cx);
+                            if let Some(path) = &args_md {
+                                let text = std::fs::read_to_string(path).expect("read --md file");
+                                let base = path.parent().map(|p| p.to_path_buf());
+                                r.notes_image_base = base.clone();
+                                r.notes.update(cx, |n, cx| {
+                                    n.set_text(&text, cx);
+                                    n.set_selection(0, 0, cx);
+                                    if let Some(b) = base {
+                                        n.set_image_base(b);
+                                    }
+                                });
+                            }
+                            if page_name == "notes-modal" {
+                                r.open_notes_modal(window, cx);
+                            }
                             if running || modal {
                                 r.rich.update(cx, |ri, cx| ri.set_html("<p>Review native spike</p>", cx));
                             }
@@ -207,7 +248,12 @@ fn main() {
                                 if let Some(h) = &html {
                                     ent.read(cx).rich.clone().update(cx, |r, cx| r.set_html(h, cx));
                                 }
-                                let f = ent.read(cx).focused_rich().read(cx).focus_handle().clone();
+                                let notes_page = matches!(ent.read(cx).page, Page::Notes(_));
+                                let f = if notes_page {
+                                    ent.read(cx).focused_notes().read(cx).focus_handle().clone()
+                                } else {
+                                    ent.read(cx).focused_rich().read(cx).focus_handle().clone()
+                                };
                                 window.focus(&f);
                                 run_steps(&ent, &steps, window, cx);
                             });
@@ -244,13 +290,52 @@ enum Step {
     Ime(String),
     Expand,
     Dump,
+    /// Put the notes caret at the start of this 1-based line.
+    Caret(usize),
+    Select(usize, usize),
 }
 
 fn run_steps(root: &Entity<Root>, steps: &[Step], window: &mut Window, cx: &mut App) {
     use gpui::EntityInputHandler;
     for s in steps {
+        if matches!(root.read(cx).page, Page::Notes(_)) {
+            let notes = root.read(cx).focused_notes().clone();
+            match s {
+                Step::Type(text) => {
+                    for ch in text.chars() {
+                        notes.update(cx, |r, cx| r.replace_text_in_range(None, &ch.to_string(), window, cx));
+                    }
+                }
+                Step::Keys(list) => {
+                    for k in list.split_whitespace() {
+                        if let Ok(ks) = Keystroke::parse(k) {
+                            window.dispatch_keystroke(ks, cx);
+                        }
+                    }
+                }
+                Step::Ime(pre) => {
+                    let n = pre.encode_utf16().count();
+                    notes.update(cx, |r, cx| r.replace_and_mark_text_in_range(None, pre, Some(n..n), window, cx));
+                    let b = notes.update(cx, |r, cx| {
+                        let range = r.marked_text_range(window, cx).unwrap_or(0..0);
+                        r.bounds_for_range(range.start..range.start, Bounds::default(), window, cx)
+                    });
+                    eprintln!("ime composition caret bounds (relative to the editor): {b:?}");
+                }
+                Step::Expand => root.update(cx, |r, cx| r.open_notes_modal(window, cx)),
+                Step::Dump => eprintln!("text: {:?}", notes.read(cx).text()),
+                Step::Caret(line) => notes.update(cx, |n, cx| {
+                    let text = n.text();
+                    let off = text.split('\n').take(line.saturating_sub(1)).map(|l| l.len() + 1).sum::<usize>().min(text.len());
+                    n.set_selection(off, off, cx);
+                }),
+                Step::Select(a, b) => notes.update(cx, |n, cx| n.set_selection(*a, *b, cx)),
+            }
+            continue;
+        }
         let target = root.read(cx).focused_rich().clone();
         match s {
+            Step::Caret(_) | Step::Select(..) => {}
             Step::Type(text) => {
                 for ch in text.chars() {
                     target.update(cx, |r, cx| r.replace_text_in_range(None, &ch.to_string(), window, cx));

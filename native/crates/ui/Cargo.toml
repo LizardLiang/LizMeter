@@ -5,7 +5,8 @@ edition.workspace = true
 
 [dependencies]
 gpui.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
+pulldown-cmark = { version = "0.13.6", default-features = false }
 unicode-segmentation = "1"
 
 [dev-dependencies]

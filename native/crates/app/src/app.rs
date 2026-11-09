@@ -6,6 +6,7 @@ use crate::timer::{self, Status, TimerType};
 use crate::ui::*;
 use crate::{gallery, modal};
 use gpui::*;
+use lizmeter_ui::md_editor::{MarkdownEditor, MdEvent, MdMode, MdVariant};
 use lizmeter_ui::rich_input::{RichEvent, RichInput, RichMode};
 use std::collections::HashSet;
 use std::time::{Duration, Instant};
@@ -17,6 +18,8 @@ pub enum Page {
     Anim(usize),
     TextSample,
     EmojiSample,
+    /// Markdown notes editor: framed, bare or the expanded modal.
+    Notes(MdVariant),
     Other(usize),
 }
 
@@ -33,12 +36,25 @@ pub struct Root {
     pub modal_open: bool,
     pub rich: Entity<RichInput>,
     rich_modal: Option<Entity<RichInput>>,
+    pub notes: Entity<MarkdownEditor>,
+    notes_modal: Option<Entity<MarkdownEditor>>,
+    pub notes_image_base: Option<std::path::PathBuf>,
 }
 
 impl Root {
     pub fn new(page: Page, pomodoro: bool, modal_open: bool, hover_nav: Option<usize>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let rich = cx.new(|cx| RichInput::new("", "Describe what you\u{2019}ll be working on\u{2026}", RichMode::Inline, window, cx));
         cx.subscribe_in(&rich, window, Self::on_rich_event).detach();
+        let variant = match page {
+            Page::Notes(v) => v,
+            _ => MdVariant::Framed,
+        };
+        let notes = cx.new(|cx| {
+            let mut e = MarkdownEditor::new("", "Add notes\u{2026}", variant, MdMode::Inline, window, cx);
+            e.set_expandable(true, cx);
+            e
+        });
+        cx.subscribe_in(&notes, window, Self::on_notes_event).detach();
         let ttype = TimerType::Work;
         Self {
             page,
@@ -53,6 +69,9 @@ impl Root {
             modal_open,
             rich,
             rich_modal: None,
+            notes,
+            notes_modal: None,
+            notes_image_base: None,
         }
     }
 
@@ -66,6 +85,47 @@ impl Root {
             RichEvent::ModalCancel => self.close_rich_modal(window, cx),
             RichEvent::Changed(_) => {}
         }
+    }
+
+    fn on_notes_event(&mut self, _: &Entity<MarkdownEditor>, ev: &MdEvent, window: &mut Window, cx: &mut Context<Self>) {
+        match ev {
+            MdEvent::Expand => self.open_notes_modal(window, cx),
+            MdEvent::ModalDone(text) => {
+                self.notes.update(cx, |n, cx| n.set_text(text, cx));
+                self.close_notes_modal(window, cx);
+            }
+            MdEvent::ModalCancel => self.close_notes_modal(window, cx),
+            _ => {}
+        }
+    }
+
+    pub fn open_notes_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.notes.read(cx).text().to_string();
+        let base = self.notes_image_base.clone();
+        let modal = cx.new(|cx| {
+            let mut e = MarkdownEditor::new(&text, "Add notes\u{2026}", MdVariant::Fill, MdMode::Modal, window, cx);
+            if let Some(base) = base {
+                e.set_image_base(base);
+            }
+            e
+        });
+        cx.subscribe_in(&modal, window, Self::on_notes_event).detach();
+        let focus = modal.read(cx).focus_handle().clone();
+        window.focus(&focus);
+        self.notes_modal = Some(modal);
+        cx.notify();
+    }
+
+    fn close_notes_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.notes_modal = None;
+        let focus = self.notes.read(cx).focus_handle().clone();
+        window.focus(&focus);
+        cx.notify();
+    }
+
+    /// The notes editor that has focus (the modal copy while it is open).
+    pub fn focused_notes(&self) -> &Entity<MarkdownEditor> {
+        self.notes_modal.as_ref().unwrap_or(&self.notes)
     }
 
     pub fn open_rich_modal(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -317,6 +377,7 @@ impl Root {
         let active_idx = match self.page {
             Page::Timer => Some(0),
             Page::Other(i) => Some(i),
+            Page::Notes(_) => Some(2),
             Page::Gallery | Page::Anim(_) | Page::TextSample | Page::EmojiSample => None,
         };
         let running_dot = match self.status {
@@ -414,6 +475,17 @@ impl Render for Root {
         let page = match self.page {
             Page::Timer => div().flex_1().h_full().flex().justify_center().overflow_hidden().child(self.timer_page(cx)).into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),
+            Page::Notes(v) => {
+                let width = if v == MdVariant::Framed { 640.0 } else { 720.0 };
+                div()
+                    .flex_1()
+                    .h_full()
+                    .flex()
+                    .justify_center()
+                    .overflow_hidden()
+                    .child(div().id("notes-page").w(px(width)).h_full().pt(px(32.0)).px(px(24.0)).overflow_y_scroll().child(self.notes.clone()))
+                    .into_any_element()
+            }
             Page::Anim(_) | Page::TextSample | Page::EmojiSample => unreachable!(),
             Page::Other(i) => div()
                 .flex_1()
@@ -437,13 +509,14 @@ impl Render for Root {
                     .top(px(32.0))
                     .left_0()
                     .w_full()
-                    .h(px(768.0))
+                    .bottom(px(0.0))
                     .flex()
                     .flex_row()
                     .child(layer(chrome::root_background()))
                     .child(sidebar)
                     .child(page),
             )
+            .children(self.notes_modal.clone().map(|m| deferred(div().absolute().top(px(32.0)).left_0().right_0().bottom_0().child(m)).with_priority(5)))
             .children(self.rich_modal.clone().map(|m| deferred(div().absolute().top(px(32.0)).left_0().right_0().bottom_0().child(m)).with_priority(5)))
             .child(deferred(chrome::titlebar(None)).with_priority(9))
             .into_any_element()
