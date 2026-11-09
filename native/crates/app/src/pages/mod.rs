@@ -10,6 +10,7 @@ pub mod stats;
 pub mod tags;
 pub mod todos;
 pub mod worklog;
+pub mod worklog_dialog;
 pub mod todos_icons;
 pub mod todos_logic;
 pub mod todo_attachments;

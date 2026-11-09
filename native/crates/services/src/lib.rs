@@ -11,6 +11,7 @@ pub mod channels;
 pub mod claude_tracker;
 mod dispatch;
 mod error;
+mod issues;
 pub mod os;
 mod startup;
 

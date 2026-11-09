@@ -309,6 +309,10 @@ impl Root {
                 let op = op.trim_start_matches("todos-").to_string();
                 self.todos.update(cx, |t, cx| t.capture(&op, window, cx));
             }
+            op if op.starts_with("history-") => {
+                let op = op.trim_start_matches("history-").to_string();
+                self.history.update(cx, |h, cx| h.capture(&op, window, cx));
+            }
             "claude-link" => self.capture_claude_link(!self.pomodoro, cx),
             "claude-open" => {
                 let select = if self.pomodoro { self.cc_select_timer.clone() } else { self.cc_select_sw.clone() };

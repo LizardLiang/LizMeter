@@ -1,5 +1,8 @@
 //! History page (`HistoryPage.tsx`, `SessionHistory*`, `IssueGroupHeader`, `DateSubGroupHeader`).
 
+use super::todo_widgets::window_layer;
+use super::worklog;
+use super::worklog_dialog::{WorklogConfirm, WorklogDialog, WorklogEvent};
 use super::PageEvent;
 use crate::controls::*;
 use crate::css::rgba;
@@ -8,7 +11,7 @@ use crate::rich_view::{is_html, rich_view};
 use crate::tag_picker::{TagPicker, TagPickerEvent};
 use crate::ui::*;
 use gpui::*;
-use lizmeter_core::{AssignTagInput, CreateTagInput, IssueProviderKind, ListSessionsInput, ListTodosInput, Session, Tag, WorklogStatus};
+use lizmeter_core::{AssignTagInput, CreateTagInput, IssueProviderKind, ListSessionsInput, ListTodosInput, Session, Tag, WorklogLogInput, WorklogStatus};
 use lizmeter_services::Services;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -33,6 +36,7 @@ pub struct HistoryPage {
     seeded_empty: bool,
     pickers: HashMap<String, Entity<TagPicker>>,
     pub timer_active: bool,
+    worklog: Option<Entity<WorklogDialog>>,
 }
 
 impl EventEmitter<PageEvent> for HistoryPage {}
@@ -70,6 +74,7 @@ impl HistoryPage {
             seeded_empty: true,
             pickers: HashMap::new(),
             timer_active: false,
+            worklog: None,
         }
     }
 
@@ -156,6 +161,123 @@ impl HistoryPage {
         cx.emit(PageEvent::SessionsChanged);
     }
 
+    /// The pill of a Jira-linked session: open the confirm dialog for it.
+    fn open_worklog(&mut self, session_id: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(s) = self.sessions.iter().find(|s| s.id == session_id).cloned() else { return };
+        let Some(key) = s.issue_id.clone() else { return };
+        let relog = s.worklog_status == WorklogStatus::Logged;
+        self.open_worklog_for(vec![s], &key, relog, window, cx);
+    }
+
+    fn open_worklog_for(&mut self, sessions: Vec<Session>, key: &str, relog: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let dialog = cx.new(|cx| WorklogDialog::new(sessions, key, relog, window, cx));
+        cx.subscribe_in(&dialog, window, |this, _, ev: &WorklogEvent, window, cx| {
+            if let WorklogEvent::Confirm(c) = ev {
+                this.log_work(c);
+            }
+            this.worklog = None;
+            this.refresh(window, cx);
+        })
+        .detach();
+        self.worklog = Some(dialog);
+        cx.notify();
+    }
+
+    /// Confirm: ask the Jira worklog channel. The provider backends arrive with phase 8; until then the
+    /// channel answers with its error, which shows where Electron shows its toast.
+    fn log_work(&mut self, c: &WorklogConfirm) {
+        let Some(first) = c.selected_ids.first() else { return };
+        let issue_key = self.sessions.iter().find(|s| &s.id == first).and_then(|s| s.issue_id.clone()).unwrap_or_default();
+        let input = WorklogLogInput {
+            session_id: first.clone(),
+            issue_key,
+            selected_session_ids: Some(c.selected_ids.clone()),
+            start_time_override: Some(c.start_time.clone()),
+            end_time_override: Some(c.end_time.clone()),
+            description_override: Some(c.description.clone()),
+        };
+        self.error = match self.svc.worklog_log(&input) {
+            Ok(_) => None,
+            Err(e) => Some(e.to_string()),
+        };
+    }
+
+    fn worklog_button(&self, s: &Session, label: &'static str, color: u32, small: bool, cx: &mut Context<Self>) -> Stateful<Div> {
+        let (me, id) = (cx.entity(), s.id.clone());
+        let c = parse_color(&format!("#{color:06x}"));
+        let b = div()
+            .id(SharedString::from(format!("wl-{label}-{}", s.id)))
+            .flex_shrink_0()
+            .rounded(px(4.0))
+            .border(px(1.0))
+            .font_weight(FontWeight(if small { 500.0 } else { 600.0 }))
+            .cursor_pointer()
+            .child(label);
+        let b = if small {
+            b.px(px(8.0)).py(px(2.0)).text_size(px(10.0)).border_color(col(rgba(122, 129, 148, 0.33))).text_color(col(TN_TEXT_DIM)).hover(|h| h.text_color(col(TN_BLUE)).border_color(col(rgba(122, 162, 247, 0.27))).bg(col(rgba(122, 162, 247, 0.07))))
+        } else {
+            b.px(px(10.0)).py(px(3.0)).text_size(px(11.0)).border_color(col(c_alpha(c, 0.27))).text_color(col(c)).hover(move |h| h.bg(col(c_alpha(c, 0.067))))
+        };
+        b.on_click(move |_, window, app| me.update(app, |p, cx| p.open_worklog(&id, window, cx)))
+    }
+
+    /// Capture hook: `worklog:<session id>` opens the dialog, `worklog-bulk:<issue key>` opens it over every
+    /// Jira session of that issue, `worklog-confirm` presses its Confirm button.
+    pub fn capture(&mut self, op: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let (name, arg) = op.split_once(':').unwrap_or((op, ""));
+        match name {
+            "worklog" => self.open_worklog(arg, window, cx),
+            "worklog-bulk" => {
+                let all: Vec<Session> = self.sessions.iter().filter(|s| s.issue_id.as_deref() == Some(arg)).cloned().collect();
+                let relog = all.iter().all(|s| s.worklog_status == WorklogStatus::Logged);
+                let dialog = cx.new(|cx| WorklogDialog::new(all, arg, relog, window, cx));
+                self.worklog = Some(dialog);
+            }
+            "worklog-confirm" => {
+                if let Some(d) = self.worklog.clone() {
+                    d.update(cx, |d, cx| d.confirm(cx));
+                }
+            }
+            _ => {}
+        }
+        cx.notify();
+    }
+
+    /// `DateSubGroupHeader`'s green "Log (n)" / "Re-log (n)" button for the Jira sessions of one date.
+    fn log_date_button(&self, key: &str, sessions: &[Session], cx: &mut Context<Self>) -> Option<Stateful<Div>> {
+        let candidates: Vec<Session> = sessions.iter().filter(|s| s.issue_provider == Some(IssueProviderKind::Jira) && s.issue_id.is_some()).cloned().collect();
+        let summary = worklog::summarize(&candidates);
+        let uploadable: Vec<&Session> = candidates.iter().filter(|s| summary.uploadable_ids.contains(&s.id)).collect();
+        if uploadable.is_empty() || summary.total_duration_seconds < 60 {
+            return None;
+        }
+        let all_logged = uploadable.iter().all(|s| s.worklog_status == WorklogStatus::Logged);
+        let label = format!("{} ({})", if all_logged { "Re-log" } else { "Log" }, uploadable.len());
+        let issue_key = uploadable[0].issue_id.clone().unwrap_or_default();
+        let me = cx.entity();
+        let green = TN_GREEN;
+        Some(
+            div()
+                .id(SharedString::from(format!("log-date-{key}")))
+                .flex_shrink_0()
+                .px(px(8.0))
+                .py(px(2.0))
+                .rounded(px(4.0))
+                .border(px(1.0))
+                .border_color(col(c_alpha(green, 0.27)))
+                .text_color(col(green))
+                .text_size(px(10.0))
+                .font_weight(FontWeight(600.0))
+                .cursor_pointer()
+                .hover(move |h| h.bg(col(c_alpha(green, 0.067))))
+                .child(label)
+                .on_click(move |_, window, app| {
+                    let (cands, key, relog) = (candidates.clone(), issue_key.clone(), all_logged);
+                    me.update(app, |p, cx| p.open_worklog_for(cands, &key, relog, window, cx))
+                }),
+        )
+    }
+
     fn set_filter(&mut self, tag: Option<i64>, window: &mut Window, cx: &mut Context<Self>) {
         self.tag_filter = tag;
         self.limit = PAGE_SIZE;
@@ -185,9 +307,15 @@ impl HistoryPage {
         top = top.child(div().flex_shrink_0().text_size(px(12.0)).text_color(col(TN_TEXT_DIM)).child(if hide_date { format_local_time(&s.completed_at) } else { format!("{} \u{b7} {}", format_date(&s.completed_at), format_local_time(&s.completed_at)) }));
         if s.issue_provider == Some(IssueProviderKind::Jira) && s.issue_id.is_some() && s.actual_duration_seconds >= 60 {
             top = top.child(match s.worklog_status {
-                WorklogStatus::Logged => div().flex_shrink_0().text_size(px(11.0)).font_weight(FontWeight(600.0)).text_color(col(TN_GREEN)).child("Logged"),
-                WorklogStatus::NotLogged => worklog_pill("Log Work", 0x7aa2f7),
-                WorklogStatus::Failed => worklog_pill("Retry", 0xff9e64),
+                WorklogStatus::Logged => div()
+                    .flex()
+                    .flex_row()
+                    .items_center()
+                    .gap(px(10.0))
+                    .child(div().flex_shrink_0().text_size(px(11.0)).font_weight(FontWeight(600.0)).text_color(col(TN_GREEN)).child("Logged"))
+                    .child(self.worklog_button(s, "Re-log", 0x7aa2f7, true, cx)),
+                WorklogStatus::NotLogged => div().child(self.worklog_button(s, "Log Work", 0x7aa2f7, false, cx)),
+                WorklogStatus::Failed => div().child(self.worklog_button(s, "Retry", 0xff9e64, false, cx)),
             });
         }
         let (resume_s, resume_me) = (s.clone(), me.clone());
@@ -284,13 +412,8 @@ fn group_header(id: String, expanded: bool, pad: (f32, f32), left: Div, right: D
         .child(right)
 }
 
-fn worklog_pill(label: &str, color: u32) -> Div {
-    let c = parse_color(&format!("#{color:06x}"));
-    div().flex_shrink_0().px(px(10.0)).py(px(3.0)).rounded(px(4.0)).border(px(1.0)).border_color(col(c_alpha(c, 0.27))).text_color(col(c)).text_size(px(11.0)).font_weight(FontWeight(600.0)).child(label.to_string())
-}
-
 impl Render for HistoryPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let now = chrono::Local::now();
         let grouped = group_by_issue(&self.sessions, now);
@@ -367,11 +490,12 @@ impl Render for HistoryPage {
                     let dopen = self.expanded_date.contains(&dk);
                     let (m, k) = (me.clone(), dk.clone());
                     let left = div().flex_1().text_size(px(11.0)).font_weight(FontWeight(700.0)).text_color(col(TN_TEXT_DIM)).child(spaced(&sub.date_label.to_uppercase(), 0.44));
-                    let right = div()
+                    let meta = div()
                         .flex_shrink_0()
                         .text_size(px(11.0))
                         .text_color(col(TN_TEXT_DIM))
                         .child(format!("{} \u{b7} {} session{}", format_duration(sub.total_seconds), sub.sessions.len(), plural(sub.sessions.len())));
+                    let right = div().flex().flex_row().items_center().gap(px(6.0)).child(meta).children(self.log_date_button(&dk, &sub.sessions, cx));
                     let mut sblock = div().pl(px(14.0)).flex().flex_col().gap(px(8.0)).child(group_header(format!("dg-{dk}"), dopen, (4.0, 2.0), left, right, move |_, a| {
                         m.update(a, |p, cx| {
                             toggle(&mut p.expanded_date, &k);
@@ -428,6 +552,10 @@ impl Render for HistoryPage {
                 .text_size(px(12.0)),
             );
         }
-        page_shell("history-page", 720.0, body)
+        let mut root = div().relative().flex().flex_1().h_full().child(page_shell("history-page", 720.0, body));
+        if let Some(d) = &self.worklog {
+            root = root.child(window_layer(window, d.clone()));
+        }
+        root
     }
 }
