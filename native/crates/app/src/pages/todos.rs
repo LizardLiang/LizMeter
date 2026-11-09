@@ -1,6 +1,11 @@
 //! Todos page (`TodosPage.tsx`): the grouped list, the filters, the bulk bar and the keyboard cursor.
 //! The list is windowed: only the rows near the viewport are built, whatever the length.
 
+use super::todo_detail::{DetailEvent, TodoDetailPage};
+use super::todo_edit::{EditEvent, TodoEditDialog};
+use super::todo_manage::{ManageDialog, ManageEvent};
+use super::todo_picker::{PickerEvent, PickerMode, TodoPicker};
+use super::todo_widgets::window_layer;
 use super::todos_icons as icons;
 use super::todos_logic::*;
 use super::todos_menus::*;
@@ -39,15 +44,20 @@ struct Geo {
     vp_h: f32,
 }
 
-/// Dialogs and pages that belong to part 7B of the port. A row action that reaches one of these has
-/// nothing to open yet.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Pending7b {
-    DetailPage(i64),
-    CreateDialog,
-    ManageDialog,
-    ParentPicker(i64),
-    ChildPicker(i64),
+/// The modal dialog over the list, if one is open.
+enum Dialog {
+    None,
+    Create(Entity<TodoEditDialog>),
+    Manage(Entity<ManageDialog>),
+    Picker(Entity<TodoPicker>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Link {
+    /// File an existing todo under this one.
+    Child,
+    /// Nest this todo under a todo to pick.
+    Parent,
 }
 
 enum Overlay {
@@ -90,8 +100,9 @@ pub struct TodosPage {
     label_select: Entity<SelectBox>,
     bulk_select: Entity<SelectBox>,
     geo: Rc<Cell<Option<Geo>>>,
-    /// The latest row action that reaches a part 7B dialog or page.
-    pub pending: Option<Pending7b>,
+    dialog: Dialog,
+    /// The detail page of one todo, shown in place of the list.
+    detail: Option<Entity<TodoDetailPage>>,
     /// A row to centre once the list has been measured.
     scroll_target: Option<i64>,
 }
@@ -155,13 +166,16 @@ impl TodosPage {
             label_select,
             bulk_select,
             geo: Rc::new(Cell::new(None)),
-            pending: None,
+            dialog: Dialog::None,
+            detail: None,
             scroll_target: None,
         }
     }
 
     /// The page is shown: load, and take the keyboard.
     pub fn show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.close_detail(cx);
+        self.dialog = Dialog::None;
         self.reload(cx);
         window.focus(&self.focus);
     }
@@ -311,7 +325,7 @@ impl TodosPage {
     // ---- Keyboard ----
 
     fn dialog_open(&self, cx: &App) -> bool {
-        !matches!(self.overlay, Overlay::None) || self.project_select.read(cx).is_open() || self.label_select.read(cx).is_open() || self.bulk_select.read(cx).is_open()
+        !matches!(self.overlay, Overlay::None) || !matches!(self.dialog, Dialog::None) || self.project_select.read(cx).is_open() || self.label_select.read(cx).is_open() || self.bulk_select.read(cx).is_open()
     }
 
     fn visible(&self) -> Vec<i64> {
@@ -390,8 +404,90 @@ impl TodosPage {
         }
     }
 
-    fn pending(&mut self, what: Pending7b) {
-        self.pending = Some(what);
+    // ---- Dialogs and the detail page ----
+
+    fn close_dialog(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.dialog = Dialog::None;
+        window.focus(&self.focus);
+        cx.notify();
+    }
+
+    /// The create dialog: in `state_id`'s group, and under `parent` when given.
+    fn open_create(&mut self, state_id: Option<i64>, parent: Option<(i64, String)>, window: &mut Window, cx: &mut Context<Self>) {
+        let svc = self.svc.clone();
+        let dialog = cx.new(|cx| TodoEditDialog::new(svc, state_id, parent, window, cx));
+        cx.subscribe_in(&dialog, window, |this, _, ev: &EditEvent, window, cx| match ev {
+            EditEvent::Created(_) => this.reload(cx),
+            EditEvent::Close => this.close_dialog(window, cx),
+        })
+        .detach();
+        self.dialog = Dialog::Create(dialog);
+        cx.notify();
+    }
+
+    fn open_create_under(&mut self, todo_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let parent = self.todo(todo_id).map(|t| (t.id, t.title.clone()));
+        self.open_create(None, parent, window, cx);
+    }
+
+    fn open_manage(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let svc = self.svc.clone();
+        let dialog = cx.new(|cx| ManageDialog::new(svc, window, cx));
+        cx.subscribe_in(&dialog, window, |this, _, _: &ManageEvent, window, cx| {
+            this.close_dialog(window, cx);
+            this.reload(cx);
+        })
+        .detach();
+        self.dialog = Dialog::Manage(dialog);
+        cx.notify();
+    }
+
+    /// The parent or child picker for a row.
+    fn open_link(&mut self, kind: Link, todo_id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(todo) = self.todo(todo_id).cloned() else { return };
+        let (heading, mode) = match kind {
+            Link::Child => (format!("File an existing todo under #{} {}", todo.id, todo.title), PickerMode::Child { todo: todo.id }),
+            Link::Parent => (format!("Nest #{} {} under", todo.id, todo.title), PickerMode::Parent { todo: Some(todo.id), current_parent: todo.parent_id }),
+        };
+        let svc = self.svc.clone();
+        let picker = cx.new(|cx| TodoPicker::new(&svc, heading, mode, window, cx));
+        cx.subscribe_in(&picker, window, move |this, _, ev: &PickerEvent, window, cx| {
+            if let PickerEvent::Pick(picked) = ev {
+                let patch = match kind {
+                    Link::Child => UpdateTodoInput { id: picked.id, parent_id: Some(Some(todo_id)), ..Default::default() },
+                    Link::Parent => UpdateTodoInput { id: todo_id, parent_id: Some(Some(picked.id)), ..Default::default() },
+                };
+                this.update(patch, cx);
+            }
+            this.close_dialog(window, cx);
+        })
+        .detach();
+        self.dialog = Dialog::Picker(picker);
+        cx.notify();
+    }
+
+    fn open_detail(&mut self, id: i64, window: &mut Window, cx: &mut Context<Self>) {
+        self.overlay = Overlay::None;
+        self.dialog = Dialog::None;
+        let (svc, visible) = (self.svc.clone(), self.visible());
+        let page = cx.new(|cx| TodoDetailPage::new(svc, id, visible, window, cx));
+        cx.subscribe_in(&page, window, |this, _, ev: &DetailEvent, window, cx| match ev {
+            DetailEvent::Back(id) => {
+                this.detail = None;
+                this.highlight(*id, window, cx);
+            }
+            DetailEvent::Navigate(id) => this.open_detail(*id, window, cx),
+        })
+        .detach();
+        self.detail = Some(page);
+        cx.notify();
+    }
+
+    /// Leaves the detail page, saving what is still being typed.
+    fn close_detail(&mut self, cx: &mut Context<Self>) {
+        if let Some(d) = self.detail.take() {
+            d.update(cx, |d, cx| d.flush(cx));
+        }
     }
 
     fn arm_copy(&mut self, state: CopyState, cx: &mut Context<Self>) {
@@ -450,8 +546,8 @@ impl TodosPage {
         let focused = self.focused.and_then(|id| self.todo(id).cloned());
 
         if cmd && m.shift && k.key == "o" {
-            if focused.is_some() {
-                self.pending(Pending7b::CreateDialog);
+            if let Some(t) = &focused {
+                self.open_create_under(t.id, window, cx);
             }
             return;
         }
@@ -481,7 +577,7 @@ impl TodosPage {
             _ => {}
         }
         match k.key_char.as_deref() {
-            Some("c") => return self.pending(Pending7b::CreateDialog),
+            Some("c") => return self.open_create(None, None, window, cx),
             Some("?") => {
                 self.overlay = Overlay::Shortcuts;
                 return cx.notify();
@@ -495,10 +591,10 @@ impl TodosPage {
             (_, Some("d")) => self.open_quick(QuickKind::Due, todo.id, window, cx),
             (_, Some("P")) => self.open_quick(QuickKind::Project, todo.id, window, cx),
             (_, Some("t")) => self.open_quick(QuickKind::Label, todo.id, window, cx),
-            (_, Some("l")) => self.pending(Pending7b::ChildPicker(todo.id)),
-            (_, Some("L")) => self.pending(Pending7b::ParentPicker(todo.id)),
+            (_, Some("l")) => self.open_link(Link::Child, todo.id, window, cx),
+            (_, Some("L")) => self.open_link(Link::Parent, todo.id, window, cx),
             (_, Some("C")) if !ev.is_held => self.copy_prompt(&todo, false, cx),
-            ("enter", _) => self.pending(Pending7b::DetailPage(todo.id)),
+            ("enter", _) => self.open_detail(todo.id, window, cx),
             _ => {}
         }
     }
@@ -507,13 +603,13 @@ impl TodosPage {
         let Some(todo) = self.todo(todo_id).cloned() else { return self.close_overlay(window, cx) };
         match choice {
             ActionChoice::Close => self.close_overlay(window, cx),
-            ActionChoice::Edit => self.pending(Pending7b::DetailPage(todo_id)),
+            ActionChoice::Edit => self.open_detail(todo_id, window, cx),
             ActionChoice::CopyId => self.copy_id(todo_id, true, cx),
             ActionChoice::CopyPrompt => self.copy_prompt(&todo, true, cx),
             ActionChoice::Quick(kind) => self.open_quick(kind, todo_id, window, cx),
-            ActionChoice::AddSubIssue => self.pending(Pending7b::CreateDialog),
-            ActionChoice::LinkChild => self.pending(Pending7b::ChildPicker(todo_id)),
-            ActionChoice::SetParent => self.pending(Pending7b::ParentPicker(todo_id)),
+            ActionChoice::AddSubIssue => self.open_create_under(todo_id, window, cx),
+            ActionChoice::LinkChild => self.open_link(Link::Child, todo_id, window, cx),
+            ActionChoice::SetParent => self.open_link(Link::Parent, todo_id, window, cx),
             ActionChoice::ClearParent => self.update(UpdateTodoInput { id: todo_id, parent_id: Some(None), ..Default::default() }, cx),
             ActionChoice::SetState(s) => self.update(UpdateTodoInput { id: todo_id, state_id: Some(s), ..Default::default() }, cx),
             ActionChoice::Delete => {
@@ -580,6 +676,30 @@ impl TodosPage {
                 }
             }
             "shortcuts" => self.overlay = Overlay::Shortcuts,
+            "detail" => {
+                if let Some(id) = arg.parse().ok().or_else(|| nth(self, arg)) {
+                    self.open_detail(id, window, cx);
+                }
+            }
+            "detail-op" => {
+                if let Some(d) = self.detail.clone() {
+                    let op = arg.to_string();
+                    d.update(cx, |d, cx| d.capture(&op, window, cx));
+                }
+            }
+            "create" => self.open_create(arg.parse().ok(), None, window, cx),
+            "create-under" => {
+                if let Some(id) = nth(self, arg) {
+                    self.open_create_under(id, window, cx);
+                }
+            }
+            "manage" => self.open_manage(window, cx),
+            "link" => {
+                let (kind, n) = arg.split_once('@').unwrap_or((arg, "0"));
+                if let Some(id) = nth(self, n) {
+                    self.open_link(if kind == "child" { Link::Child } else { Link::Parent }, id, window, cx);
+                }
+            }
             "pick" => {
                 // pick:<kind>@<row>=<value>
                 if let Some((head, value)) = arg.split_once('=') {
@@ -727,7 +847,7 @@ impl TodosPage {
             .items_center()
             .gap(px(8.0))
             .cursor_pointer()
-            .on_click(move |_, _, app| m_open.update(app, |p, _| p.pending(Pending7b::DetailPage(id))))
+            .on_click(move |_, window, app| m_open.update(app, |p, cx| p.open_detail(id, window, cx)))
             .child(icon(icons::priority_path(todo.priority), 13.0, 13.0, priority_color(todo.priority)))
             .child(div().flex_shrink_0().min_w(px(52.0)).text_size(px(11.0)).line_height(px(14.0)).text_color(col(dim())).child(format!("#{id}")))
             .child(state_dot(&todo.state.color, todo.state.is_completed, 11.0, 1.5));
@@ -888,7 +1008,7 @@ impl TodosPage {
                     .text_color(col(dim()))
                     .cursor_pointer()
                     .hover(|s| s.bg(col(rgba(122, 162, 247, 0.12))).text_color(col(TN_TEXT)))
-                    .on_click(move |_, _, app| m_add.update(app, |p, _| p.pending(Pending7b::CreateDialog)))
+                    .on_click(move |_, window, app| m_add.update(app, |p, cx| p.open_create(Some(sid), None, window, cx)))
                     .child("+"),
             )
     }
@@ -937,7 +1057,7 @@ impl TodosPage {
                     cx.notify();
                 })
             }))
-            .child(ghost("todo-manage", "Manage".into()).on_click(move |_, _, app| m_manage.update(app, |p, _| p.pending(Pending7b::ManageDialog))));
+            .child(ghost("todo-manage", "Manage".into()).on_click(move |_, window, app| m_manage.update(app, |p, cx| p.open_manage(window, cx))));
         if done > 0 {
             right = right.child(ghost("todo-clear", format!("Clear {done} done")).on_click(move |_, _, app| {
                 m_clear.update(app, |p, cx| {
@@ -966,7 +1086,7 @@ impl TodosPage {
                 .font_weight(FontWeight(600.0))
                 .cursor_pointer()
                 .hover(|s| s.bg(col(rgba(122, 162, 247, 0.22))))
-                .on_click(move |_, _, app| m_new.update(app, |p, _| p.pending(Pending7b::CreateDialog)))
+                .on_click(move |_, window, app| m_new.update(app, |p, cx| p.open_create(None, None, window, cx)))
                 .child("New")
                 .child(kbd_cap("c", 10.0, 5.0, 1.4).text_color(col(TN_TEXT_DIM)).border_color(col(rgba(122, 162, 247, 0.3)))),
         );
@@ -1049,6 +1169,15 @@ fn priority_color(priority: i64) -> C {
 
 impl Render for TodosPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        match &self.detail {
+            Some(d) => d.clone().into_any_element(),
+            None => self.list_view(window, cx).into_any_element(),
+        }
+    }
+}
+
+impl TodosPage {
+    fn list_view(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
         let vp = window.viewport_size();
         let scroll = self.scroll();
@@ -1207,6 +1336,12 @@ impl Render for TodosPage {
                     root = root.child(action_menu(window, props, Rc::new(move |choice, w, a| m.update(a, |p, cx| p.on_action(id, choice, w, cx)))));
                 }
             }
+        }
+        match &self.dialog {
+            Dialog::None => {}
+            Dialog::Create(d) => root = root.child(window_layer(window, 6, d.clone())),
+            Dialog::Manage(d) => root = root.child(window_layer(window, 6, d.clone())),
+            Dialog::Picker(d) => root = root.child(window_layer(window, 6, d.clone())),
         }
         root
     }
