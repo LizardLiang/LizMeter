@@ -169,10 +169,26 @@ export function applyOplogEntries(database: DbHandle, entries: readonly OplogEnt
     // result depends on row order: a snapshot's entries share one HLC, and nothing ever re-reads a
     // snapshot, so the unresolved reference was lost for good. Repeats until a round resolves
     // nothing new, so a chain of any depth settles whatever order its entries arrived in.
+    //
+    // A deferred link or unlink is dropped when a later entry in this batch touches the same pair:
+    // links carry no per-field clock, so replaying the older one now would undo the newer one.
+    const latestLinkOp = new Map<string, string>();
+    for (const entry of sorted) {
+      if (entry.op === "link" || entry.op === "unlink") {
+        latestLinkOp.set(`${entry.table}|${entry.fields.fromUuid}|${entry.fields.toUuid}`, entry.opId);
+      }
+    }
     let waiting = deferred;
     while (waiting.length > 0) {
       const stillWaiting: OplogEntry[] = [];
       for (const entry of waiting) {
+        if (
+          (entry.op === "link" || entry.op === "unlink")
+          && latestLinkOp.get(`${entry.table}|${entry.fields.fromUuid}|${entry.fields.toUuid}`) !== entry.opId
+        ) {
+          markApplied(database, entry.opId, entry.hlc);
+          continue;
+        }
         const outcome = applyEntry(database, entry);
         if (outcome.noticeRaised) notices += 1;
         if (outcome.fullyApplied) markApplied(database, entry.opId, entry.hlc);

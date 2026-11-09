@@ -387,4 +387,47 @@ describe("two offline machines converge on one todo number each, without coordin
     );
     expect(marked).toBeDefined();
   });
+
+  it("a deferred link is not replayed over a later unlink of the same pair in the same batch", () => {
+    const label = harness.as(harness.deviceA, () => createTodoLabel({ name: "unlinked" }));
+    harness.sync(harness.deviceB);
+    const labelUuid = harness.as(
+      harness.deviceA,
+      () => (harness.deviceA.db.prepare("SELECT uuid FROM todo_labels WHERE id = ?").get(label.id) as { uuid: string }).uuid,
+    );
+    const todoUuid = "33333333-3333-3333-3333-333333333333";
+    const filePath = harness.as(harness.deviceA, () => getOplogFilePath(harness.sharedDir, harness.deviceA.deviceId));
+    const line = (opId: string, physicalMs: number, extra: Record<string, unknown>) =>
+      JSON.stringify({ v: 1, opId, hlc: { physicalMs, counter: 0, deviceNumber: 1 }, ...extra });
+    fs.appendFileSync(
+      filePath,
+      [
+        line("lk-link", 1000, { table: "todo_label_links", op: "link", fields: { fromUuid: todoUuid, toUuid: labelUuid } }),
+        line("lk-todo", 2000, {
+          table: "todos",
+          op: "upsert",
+          rowUuid: todoUuid,
+          fields: { title: { value: "link then unlink", hlc: { physicalMs: 2000, counter: 0, deviceNumber: 1 } } },
+        }),
+        line("lk-unlink", 3000, {
+          table: "todo_label_links",
+          op: "unlink",
+          fields: { fromUuid: todoUuid, toUuid: labelUuid },
+        }),
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    harness.sync(harness.deviceB);
+
+    const linked = harness.as(
+      harness.deviceB,
+      () =>
+        harness.deviceB.db
+          .prepare("SELECT 1 FROM todo_label_links k INNER JOIN todos t ON t.id = k.todo_id WHERE t.uuid = ?")
+          .get(todoUuid) !== undefined,
+    );
+    expect(linked).toBe(false);
+  });
 });

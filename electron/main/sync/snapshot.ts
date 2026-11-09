@@ -42,10 +42,8 @@ type DbHandle = Database.Database;
 
 // Order matters: every snapshot entry shares one identical HLC (see buildSnapshotEntries), so
 // applyOplogEntries's stable HLC sort falls back to this array's insertion order among them.
-// todo_states/todo_projects must be applied before todos, since todos' state_uuid/project_uuid
-// fields can only resolve to a local row that already exists -- unlike live sync, where two
-// entries almost never share the exact same HLC, a snapshot's uniform HLC makes this ordering
-// load-bearing rather than incidental.
+// applyOplogEntries retries any entry whose reference was unresolved once the whole batch is in,
+// so this order is a first-try optimization, not a correctness requirement.
 const SNAPSHOT_ROW_TABLES: readonly SyncedRowTable[] = [
   "todo_states",
   "todo_projects",
