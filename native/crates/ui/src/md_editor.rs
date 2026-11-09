@@ -241,11 +241,19 @@ impl MarkdownEditor {
     /// Resolves relative image destinations against `base`.
     pub fn set_image_base(&mut self, base: PathBuf) {
         self.image_base = Some(base);
+        self.reset_images();
     }
 
     /// Maps an image destination (for example `app-media://...`) to a file to draw.
     pub fn set_image_resolver(&mut self, resolver: Rc<dyn Fn(&str) -> Option<PathBuf>>) {
         self.resolver = Some(resolver);
+        self.reset_images();
+    }
+
+    /// Forgets decoded images (and failed loads) so the next layout reads them again.
+    pub fn reset_images(&mut self) {
+        self.images.clear();
+        self.rev += 1;
     }
 
     pub fn focus_handle(&self) -> &FocusHandle {
@@ -546,6 +554,9 @@ impl MarkdownEditor {
     }
 
     fn undo(&mut self, _: &ti::Undo, _: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled {
+            return;
+        }
         let old = (!self.uploads.is_empty()).then(|| self.buf.content().to_string());
         if self.buf.undo() {
             if let Some(old) = old {
@@ -556,6 +567,9 @@ impl MarkdownEditor {
     }
 
     fn redo(&mut self, _: &ti::Redo, _: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled {
+            return;
+        }
         let old = (!self.uploads.is_empty()).then(|| self.buf.content().to_string());
         if self.buf.redo() {
             if let Some(old) = old {
@@ -781,8 +795,10 @@ impl EntityInputHandler for MarkdownEditor {
         self.buf.marked_range().map(|r| self.buf.range_to_utf16(&r))
     }
 
-    fn unmark_text(&mut self, _: &mut Window, _: &mut Context<Self>) {
+    fn unmark_text(&mut self, _: &mut Window, cx: &mut Context<Self>) {
         self.buf.unmark();
+        self.rev += 1;
+        cx.notify();
     }
 
     fn replace_text_in_range(&mut self, range: Option<Range<usize>>, text: &str, _: &mut Window, cx: &mut Context<Self>) {
@@ -816,7 +832,8 @@ impl EntityInputHandler for MarkdownEditor {
         let (a, lh) = layout.caret_geometry(r.start);
         let (b, _) = layout.caret_geometry(r.end);
         let x1 = if b.y == a.y { b.x } else { a.x };
-        Some(Bounds::new(element_bounds.origin + a, size((x1 - a.x).max(px(1.0)), lh)))
+        let pad = px(Metrics::of(self.variant).pad_y);
+        Some(Bounds::new(element_bounds.origin + a + point(px(0.0), pad), size((x1 - a.x).max(px(1.0)), lh)))
     }
 
     fn character_index_for_point(&mut self, p: Point<Pixels>, _: &mut Window, _: &mut Context<Self>) -> Option<usize> {
@@ -1276,6 +1293,9 @@ fn build_layout(m: &DocModel, width: Pixels, marked: Option<Range<usize>>, windo
             }
             // hidden syntax
             if prv.iter().any(|p| p.kind == PreviewKind::Hide && p.from <= a && b <= p.to) {
+                if prv.iter().any(|p| p.mark_class.as_deref() == Some("cm-md-quote")) {
+                    quote = true;
+                }
                 segs.push(Seg { src: a..b, disp: disp.len()..disp.len(), kind: SegKind::Hidden });
                 continue;
             }
@@ -1914,7 +1934,7 @@ impl MarkdownEditor {
             .items_center()
             .justify_center()
             .child(dialog);
-        let host = div().id("md-modal").absolute().top(px(0.0)).left(px(0.0)).size_full().child(overlay);
+        let host = div().id("md-modal").absolute().top(px(0.0)).left(px(0.0)).size_full().child(overlay).children(self.hint_el());
         self.with_actions(host, cx)
     }
 }

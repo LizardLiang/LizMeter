@@ -67,14 +67,25 @@ fn parse_markup(line: &str) -> Markup {
         p = lead_end;
     }
     let mut task = false;
-    if marker.is_some() && line[p..].len() >= 4 {
-        let t = &line[p..p + 3];
+    if let (true, Some(t)) = (marker.is_some(), line.get(p..p + 3)) {
         if matches!(t, "[ ]" | "[x]" | "[X]") && matches!(b.get(p + 3), Some(b' ' | b'\t')) {
             task = true;
             p += 4;
         }
     }
     Markup { lead: line[..lead_end].to_string(), marker, task, text_from: p }
+}
+
+/// True when the caret sits inside an open fenced code block (an odd number of fence lines precede it).
+fn in_fence(text: &str, caret: usize) -> bool {
+    let (ls, _) = line_bounds(text, caret);
+    let fences = text[..ls].lines().filter(|l| {
+        let t = l.trim_start();
+        t.starts_with("```") || t.starts_with("~~~")
+    });
+    let before = fences.count();
+    let cur = text[ls..].lines().next().unwrap_or("").trim_start();
+    before % 2 == 1 || cur.starts_with("```") || cur.starts_with("~~~")
 }
 
 fn next_marker(marker: &str) -> String {
@@ -94,6 +105,9 @@ fn line_bounds(text: &str, at: usize) -> (usize, usize) {
 /// Enter with an empty selection: continues a list item or quote on the next line, or, on an item
 /// with no text, removes the marker. `None` means a plain newline.
 pub fn continue_markup(text: &str, caret: usize) -> Option<Edit> {
+    if in_fence(text, caret) {
+        return None;
+    }
     let (ls, le) = line_bounds(text, caret);
     let line = &text[ls..le];
     let m = parse_markup(line);
@@ -128,6 +142,9 @@ pub fn continue_markup(text: &str, caret: usize) -> Option<Edit> {
 /// Backspace right after list markup (`- `, `1. `, `- [ ] `): removes the markup, keeping the
 /// indentation. `None` means an ordinary backspace.
 pub fn delete_markup_backward(text: &str, caret: usize) -> Option<Edit> {
+    if in_fence(text, caret) {
+        return None;
+    }
     let (ls, le) = line_bounds(text, caret);
     let line = &text[ls..le];
     let m = parse_markup(line);
@@ -251,6 +268,17 @@ mod tests {
         assert_eq!(apply(t, &continue_markup(t, t.len()).unwrap()), "> hi\n> ");
         let t = "> hi\n> ";
         assert_eq!(apply(t, &continue_markup(t, t.len()).unwrap()), "> hi\n");
+    }
+
+    #[test]
+    fn non_ascii_list_text_does_not_panic_and_fences_are_left_alone() {
+        assert!(delete_markup_backward("- \u{e9}\u{e9}", 0).is_none());
+        let t = "- \u{4f60}\u{597d}";
+        assert_eq!(apply(t, &continue_markup(t, t.len()).unwrap()), "- \u{4f60}\u{597d}\n- ");
+        let t = "```\n- x";
+        assert!(continue_markup(t, t.len()).is_none());
+        let t = "```\n- x\n```\n- y";
+        assert!(continue_markup(t, t.len()).is_some());
     }
 
     #[test]
