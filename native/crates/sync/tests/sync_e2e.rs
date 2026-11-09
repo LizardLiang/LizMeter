@@ -667,3 +667,29 @@ fn a_pass_that_fails_midway_rolls_back_every_entry_and_marks_nothing_applied() {
     assert_eq!(count(&h.a.db, "SELECT COUNT(*) FROM sync_applied_ops"), 0);
     assert!(h.a.db.conn().is_autocommit());
 }
+
+// --- Drag-reorder positions (todo list drop, state and project lists) ---
+
+/// `generateOrderedKeys(3)` from `electron/main/sync/lexorank.ts`, evaluated with bun.
+const TS_ORDERED_KEYS_3: [&str; 3] = ["i", "r", "v"];
+
+#[test]
+fn a_reorder_stores_the_lexorank_keys_the_ts_code_generates_in_list_order() {
+    let h = Harness::new();
+    let mk = |n: &str| h.a.db.create_todo_project(&CreateTodoProjectInput { name: n.into(), color: None }).unwrap();
+    let (p1, p2, p3) = (mk("Alpha"), mk("Beta"), mk("Gamma"));
+    assert_eq!(h.a.db.list_todo_projects().unwrap().len(), 3);
+
+    h.a.db.reorder_todo_projects(&[p3.id, p1.id, p2.id]).unwrap();
+
+    let key_of = |id: i64| -> String {
+        h.a.db.conn().query_row("SELECT sync_order FROM todo_projects WHERE id = ?", [id], |r| r.get(0)).unwrap()
+    };
+    assert_eq!([key_of(p3.id), key_of(p1.id), key_of(p2.id)], TS_ORDERED_KEYS_3.map(String::from));
+    let names: Vec<String> = h.a.db.list_todo_projects().unwrap().into_iter().map(|p| p.name).collect();
+    assert_eq!(names, ["Gamma", "Alpha", "Beta"]);
+
+    h.sync(&h.b);
+    let on_b: Vec<String> = h.b.db.list_todo_projects().unwrap().into_iter().map(|p| p.name).collect();
+    assert_eq!(on_b, ["Gamma", "Alpha", "Beta"]);
+}
