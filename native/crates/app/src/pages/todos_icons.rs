@@ -23,6 +23,10 @@ const ARROW_UP: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 
 
 const ARROW_DOWN: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>"##;
 
+const ISSUES_EMPTY: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.5"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="3"/></svg>"##;
+
+const REFRESH: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>"##;
+
 /// The priority glyph: three ascending bars filled up to the level, urgent as a solid block.
 fn priority(level: i64) -> String {
     let filled = |l: i64| if level > 0 && level <= l { "1" } else { "0.28" };
@@ -72,6 +76,8 @@ pub fn load(path: &str) -> Option<Cow<'static, [u8]>> {
         "arrow-up" => Some(Cow::Borrowed(ARROW_UP.as_bytes())),
         "arrow-down" => Some(Cow::Borrowed(ARROW_DOWN.as_bytes())),
         "src-codex" => Some(Cow::Borrowed(CODEX.as_bytes())),
+        "issues-empty" => Some(Cow::Borrowed(ISSUES_EMPTY.as_bytes())),
+        "refresh" => Some(Cow::Borrowed(REFRESH.as_bytes())),
         _ => {
             if let Some(level) = name.strip_prefix("priority-") {
                 return owned(priority(level.parse().ok()?));
@@ -110,7 +116,7 @@ mod tests {
 
     #[test]
     fn every_generated_path_serves_an_svg() {
-        for p in ["gen/project.svg", "gen/check.svg", "gen/tri.svg", "gen/src-user.svg", "gen/src-ai.svg", "gen/src-claude.svg", "gen/src-codex.svg", "gen/calendar.svg", "gen/arrow-up.svg", "gen/arrow-down.svg", "gen/priority-0.svg", "gen/priority-1.svg", "gen/priority-4.svg", "gen/ring-0-3.svg", "gen/ring-2-3.svg"] {
+        for p in ["gen/project.svg", "gen/check.svg", "gen/tri.svg", "gen/src-user.svg", "gen/src-ai.svg", "gen/src-claude.svg", "gen/src-codex.svg", "gen/calendar.svg", "gen/arrow-up.svg", "gen/arrow-down.svg", "gen/issues-empty.svg", "gen/refresh.svg", "gen/priority-0.svg", "gen/priority-1.svg", "gen/priority-4.svg", "gen/ring-0-3.svg", "gen/ring-2-3.svg"] {
             let svg = load(p).unwrap_or_else(|| panic!("{p} not served"));
             assert!(std::str::from_utf8(&svg).unwrap().starts_with("<svg"));
         }

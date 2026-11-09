@@ -92,6 +92,7 @@ impl Root {
                 let id = *id;
                 self.todos.update(cx, |t, cx| t.highlight(id, window, cx));
             }
+            PageEvent::OpenSettings => self.navigate(9, window, cx),
             PageEvent::Relaunch => self.relaunch(cx),
         }
     }

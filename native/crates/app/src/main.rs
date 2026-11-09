@@ -221,6 +221,7 @@ fn main() {
                 "settings" => (Page::Settings, true, false),
                 "claude" => (Page::Claude, true, false),
                 "todos" => (Page::Todos, true, false),
+                "issues" => (Page::Issues, true, false),
                 name if name.starts_with("activity") => (Page::Activity, true, false),
                 name if name.starts_with("stats") => (Page::Stats, true, false),
                 _ => (Page::Timer, true, false),

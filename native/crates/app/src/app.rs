@@ -8,6 +8,7 @@ use crate::modal::IssuePrompt;
 use crate::pages::activity::ActivityPage;
 use crate::pages::claude::ClaudePage;
 use crate::pages::history::HistoryPage;
+use crate::pages::issues::IssuesPage;
 use crate::pages::settings::SettingsPage;
 use crate::pages::stats::StatsPage;
 use crate::pages::tags::TagsPage;
@@ -32,6 +33,7 @@ pub enum Page {
     Stats,
     Tags,
     Todos,
+    Issues,
     Settings,
     Claude,
     Activity,
@@ -96,6 +98,7 @@ pub struct Root {
     pub history: Entity<HistoryPage>,
     pub stats: Entity<StatsPage>,
     pub tags_page: Entity<TagsPage>,
+    pub issues: Entity<IssuesPage>,
     pub settings: Entity<SettingsPage>,
     pub cc: ClaudeState,
     pub cc_select_timer: Entity<ClaudeSessionSelect>,
@@ -136,6 +139,8 @@ impl Root {
         cx.subscribe_in(&history, window, Self::on_page_event::<HistoryPage>).detach();
 
         let stats = cx.new(|_| StatsPage::new(svc.clone()));
+        let issues = cx.new(|cx| IssuesPage::new(svc.clone(), window, cx));
+        cx.subscribe_in(&issues, window, Self::on_page_event::<IssuesPage>).detach();
         let tags_page = cx.new(|cx| TagsPage::new(svc.clone(), window, cx));
         cx.subscribe_in(&tags_page, window, Self::on_page_event::<TagsPage>).detach();
         let settings_page = cx.new(|cx| SettingsPage::new(svc.clone(), window, cx));
@@ -185,6 +190,7 @@ impl Root {
             history,
             stats,
             tags_page,
+            issues,
             settings: settings_page,
             cc: ClaudeState::new(idle),
             cc_select_timer,
@@ -215,6 +221,9 @@ impl Root {
         }
         if page == Page::Todos {
             root.show_todos(window, cx);
+        }
+        if page == Page::Issues {
+            root.show_issues(cx);
         }
         root
     }
@@ -351,6 +360,12 @@ impl Root {
         cx.notify();
     }
 
+    pub fn show_issues(&mut self, cx: &mut Context<Self>) {
+        self.issues.update(cx, |p, cx| p.show(cx));
+        self.page = Page::Issues;
+        cx.notify();
+    }
+
     pub fn show_tags(&mut self, cx: &mut Context<Self>) {
         self.tags_page.update(cx, |t, cx| t.refresh(cx));
         self.page = Page::Tags;
@@ -399,6 +414,7 @@ impl Root {
             Page::Timer => Some(0),
             Page::History => Some(1),
             Page::Todos => Some(2),
+            Page::Issues => Some(3),
             Page::Claude => Some(4),
             Page::Activity => Some(5),
             Page::Stats => Some(7),
@@ -484,6 +500,7 @@ impl Root {
             0 => Page::Timer,
             1 => Page::History,
             2 => Page::Todos,
+            3 => Page::Issues,
             4 => Page::Claude,
             5 => Page::Activity,
             7 => Page::Stats,
@@ -506,6 +523,7 @@ impl Root {
             }
             1 => self.show_history(window, cx),
             2 => self.show_todos(window, cx),
+            3 => self.show_issues(cx),
             4 => self.show_claude(cx),
             5 => self.show_activity(cx),
             7 => self.show_stats(cx),
@@ -557,6 +575,7 @@ impl Render for Root {
             Page::Tags => self.tags_page.clone().into_any_element(),
             Page::Settings => self.settings.clone().into_any_element(),
             Page::Todos => self.todos.clone().into_any_element(),
+            Page::Issues => self.issues.clone().into_any_element(),
             Page::Claude => self.claude_page.clone().into_any_element(),
             Page::Activity => self.activity.clone().into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),

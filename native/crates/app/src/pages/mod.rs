@@ -3,6 +3,8 @@
 pub mod activity;
 pub mod claude;
 pub mod history;
+pub mod issues;
+pub mod issues_logic;
 pub mod settings;
 pub mod settings_sections;
 pub mod settings_ui;
@@ -38,6 +40,8 @@ pub enum PageEvent {
     StopwatchSettings(StopwatchSettings),
     /// A todo-linked badge was clicked.
     OpenTodo(i64),
+    /// The Issues page's "Configure in Settings" button.
+    OpenSettings,
     /// A data-folder move finished: the app restarts on the new folder.
     Relaunch,
 }
