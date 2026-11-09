@@ -4,7 +4,7 @@ use crate::controls::field_style;
 use crate::css::{Spec, TRANSPARENT, linear, rgba};
 use crate::ui::*;
 use gpui::*;
-use lizmeter_core::{IssueRef, ListTodosInput, Todo, TodoState};
+use lizmeter_core::{IssueRef, ListTodosInput, Todo, TodoLabel, TodoProject, TodoState};
 use lizmeter_services::Services;
 use lizmeter_ui::text_input::{TextField, TextFieldEvent, TextInput};
 use std::sync::Arc;
@@ -35,13 +35,31 @@ pub fn fuzzy_score(needle: &str, hay: &str) -> Option<i64> {
     Some(score)
 }
 
-/// The todos that match the search text and state chip, best match first.
-pub fn matching_todos<'a>(todos: &'a [Todo], query: &str, state: Option<i64>) -> Vec<&'a Todo> {
+/// The state, project and label chips that narrow the todo list (`TodoIssuePicker.tsx`).
+#[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+pub struct TodoChips {
+    pub state: Option<i64>,
+    pub project: Option<i64>,
+    pub label: Option<i64>,
+}
+
+impl TodoChips {
+    pub fn any(&self) -> bool {
+        self.state.is_some() || self.project.is_some() || self.label.is_some()
+    }
+
+    fn admits(&self, t: &Todo) -> bool {
+        self.state.is_none_or(|s| t.state.id == s) && self.project.is_none_or(|p| t.project.as_ref().is_some_and(|tp| tp.id == p)) && self.label.is_none_or(|l| t.labels.iter().any(|tl| tl.id == l))
+    }
+}
+
+/// The todos that match the search text and chips, best match first.
+pub fn matching_todos<'a>(todos: &'a [Todo], query: &str, chips: &TodoChips) -> Vec<&'a Todo> {
     let q = query.trim();
     let by_id = q.trim_start_matches('#');
     let id_query = !by_id.is_empty() && by_id.chars().all(|c| c.is_ascii_digit());
     let mut scored: Vec<(i64, &Todo)> = vec![];
-    for t in todos.iter().filter(|t| state.is_none_or(|s| t.state.id == s)) {
+    for t in todos.iter().filter(|t| chips.admits(t)) {
         if q.is_empty() {
             scored.push((0, t));
             continue;
@@ -62,7 +80,9 @@ pub fn matching_todos<'a>(todos: &'a [Todo], query: &str, state: Option<i64>) ->
 pub struct IssuePrompt {
     todos: Vec<Todo>,
     states: Vec<TodoState>,
-    state_filter: Option<i64>,
+    projects: Vec<TodoProject>,
+    labels: Vec<TodoLabel>,
+    chips: TodoChips,
     search: Entity<TextField>,
     query: String,
     active: usize,
@@ -89,13 +109,15 @@ impl IssuePrompt {
             Err(e) => (vec![], Some(e.to_string())),
         };
         let states = svc.list_todo_states().unwrap_or_default();
+        let projects = svc.list_todo_projects().unwrap_or_default();
+        let labels = svc.list_todo_labels().unwrap_or_default();
         let focus = search.read(cx).focus_handle().clone();
         window.focus(&focus);
-        Self { todos, states, state_filter: None, search, query: String::new(), active: 0, error, focus }
+        Self { todos, states, projects, labels, chips: TodoChips::default(), search, query: String::new(), active: 0, error, focus }
     }
 
     fn pick_active(&mut self, cx: &mut Context<Self>) {
-        let todo = matching_todos(&self.todos, &self.query, self.state_filter).get(self.active).map(|t| (*t).clone());
+        let todo = matching_todos(&self.todos, &self.query, &self.chips).get(self.active).map(|t| (*t).clone());
         if let Some(t) = todo {
             cx.emit(PromptEvent::Select(IssueRef::Todo { id: t.id, title: t.title }));
         }
@@ -175,7 +197,7 @@ fn section(label: &str, first: bool) -> Div {
 impl Render for IssuePrompt {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let me = cx.entity();
-        let matches: Vec<Todo> = matching_todos(&self.todos, &self.query, self.state_filter).into_iter().cloned().collect();
+        let matches: Vec<Todo> = matching_todos(&self.todos, &self.query, &self.chips).into_iter().cloned().collect();
         let skip_me = me.clone();
         let skip = div()
             .id("prompt-skip")
@@ -195,18 +217,27 @@ impl Render for IssuePrompt {
             .child("Skip");
 
         let mut chips = div().id("prompt-chips").px(px(8.0)).py(px(6.0)).flex().flex_row().flex_wrap().gap(px(4.0));
-        for s in &self.states {
-            let (m, id, on) = (me.clone(), s.id, self.state_filter == Some(s.id));
-            let color = crate::controls::parse_color(&s.color);
-            chips = chips.child(
-                chip(&s.label, on, Some(color)).id(SharedString::from(format!("state-{id}"))).on_click(move |_, _, app| {
-                    m.update(app, |p, cx| {
-                        p.state_filter = if on { None } else { Some(id) };
-                        p.active = 0;
-                        cx.notify();
-                    })
-                }),
-            );
+        let groups: Vec<(&'static str, i64, String, String, bool)> = self
+            .states
+            .iter()
+            .map(|s| ("state", s.id, s.label.clone(), s.color.clone(), self.chips.state == Some(s.id)))
+            .chain(self.projects.iter().map(|p| ("project", p.id, p.name.clone(), p.color.clone(), self.chips.project == Some(p.id))))
+            .chain(self.labels.iter().map(|l| ("label", l.id, l.name.clone(), l.color.clone(), self.chips.label == Some(l.id))))
+            .collect();
+        for (kind, id, label, color, on) in groups {
+            let m = me.clone();
+            chips = chips.child(chip(&label, on, Some(crate::controls::parse_color(&color))).id(SharedString::from(format!("{kind}-{id}"))).on_click(move |_, _, app| {
+                m.update(app, |p, cx| {
+                    let slot = match kind {
+                        "state" => &mut p.chips.state,
+                        "project" => &mut p.chips.project,
+                        _ => &mut p.chips.label,
+                    };
+                    *slot = if on { None } else { Some(id) };
+                    p.active = 0;
+                    cx.notify();
+                })
+            }));
         }
 
         let scroll = lizmeter_ui::scrollbar::keyed("prompt-list", lizmeter_ui::scrollbar::BarStyle::Global);
@@ -214,7 +245,7 @@ impl Render for IssuePrompt {
         if let Some(e) = &self.error {
             rows = rows.child(crate::controls::state_message(e.clone(), TN_RED, false));
         } else if matches.is_empty() {
-            let filtered = !self.query.trim().is_empty() || self.state_filter.is_some();
+            let filtered = !self.query.trim().is_empty() || self.chips.any();
             rows = rows.child(crate::controls::state_message(if filtered { "No matching todos" } else { "No todos yet" }, TN_TEXT_DIM, false));
         }
         for (i, t) in matches.iter().enumerate() {
@@ -292,7 +323,7 @@ impl Render for IssuePrompt {
             .track_focus(&self.focus)
             .on_click(|_, _, _| {})
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                let n = matching_todos(&this.todos, &this.query, this.state_filter).len();
+                let n = matching_todos(&this.todos, &this.query, &this.chips).len();
                 match ev.keystroke.key.as_str() {
                     "down" if n > 0 => this.active = (this.active + 1).min(n - 1),
                     "up" => this.active = this.active.saturating_sub(1),
@@ -327,7 +358,24 @@ impl Render for IssuePrompt {
 
 #[cfg(test)]
 mod tests {
-    use super::fuzzy_score;
+    use super::{fuzzy_score, matching_todos, TodoChips};
+    use crate::pages::todo_tree::fixture::todo;
+    use lizmeter_core::{TodoLabel, TodoProject};
+
+    #[test]
+    fn the_chips_narrow_the_list_by_project_and_label_as_well_as_state() {
+        let mut a = todo(1, None);
+        a.project = Some(TodoProject { id: 7, name: "P".into(), color: "#7aa2f7".into(), position: 0, created_at: String::new() });
+        let mut b = todo(2, None);
+        b.labels = vec![TodoLabel { id: 9, name: "L".into(), color: "#7aa2f7".into(), created_at: String::new() }];
+        let all = vec![a, b];
+        let ids = |c: TodoChips| matching_todos(&all, "", &c).iter().map(|t| t.id).collect::<Vec<_>>();
+        assert_eq!(ids(TodoChips::default()), vec![1, 2]);
+        assert_eq!(ids(TodoChips { project: Some(7), ..Default::default() }), vec![1]);
+        assert_eq!(ids(TodoChips { label: Some(9), ..Default::default() }), vec![2]);
+        assert_eq!(ids(TodoChips { state: Some(1), project: Some(7), label: None }), vec![1]);
+        assert!(ids(TodoChips { state: Some(99), ..Default::default() }).is_empty());
+    }
 
     #[test]
     fn fuzzy_needs_the_letters_in_order_and_prefers_tight_hits() {
