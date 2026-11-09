@@ -11,6 +11,8 @@ pub mod tags;
 pub mod todos;
 pub mod todos_icons;
 pub mod todos_logic;
+pub mod todo_tree;
+pub mod todo_widgets;
 pub mod todos_menus;
 pub mod stats_data;
 
