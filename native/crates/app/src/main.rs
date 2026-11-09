@@ -10,6 +10,7 @@ mod controls;
 mod engine;
 mod flow;
 mod fmt;
+mod locale;
 mod pages;
 mod rich_view;
 mod tag_picker;

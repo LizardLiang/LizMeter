@@ -17,4 +17,4 @@ gpui.workspace = true
 png.workspace = true
 image.workspace = true
 raw-window-handle.workspace = true
-windows.workspace = true
+windows = { workspace = true, features = ["Win32_Globalization"] }

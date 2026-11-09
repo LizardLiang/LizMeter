@@ -1,8 +1,8 @@
 //! Display formatting and session grouping (`utils/format.ts`, `utils/groupSessions.ts`,
-//! `hooks/useGroupExpand.ts`). Dates are shown in the machine's local time zone, in the en-US shape
-//! `toLocaleDateString(undefined, ...)` gives.
+//! `hooks/useGroupExpand.ts`). Dates are shown in the machine's local time zone and the Windows user locale
+//! (`locale.rs`), like `toLocaleDateString(undefined, ...)`.
 
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, TimeZone, Timelike};
 use lizmeter_core::{IssueProviderKind, Session, TimerType};
 
 pub fn format_time(seconds: i64) -> String {
@@ -62,14 +62,14 @@ pub fn date_key(iso: &str) -> String {
     local(iso).map(|d| d.format("%Y-%m-%d").to_string()).unwrap_or_default()
 }
 
-/// "Mar 5, 2026".
+/// "Mar 5, 2026" in the user's locale ("2026年3月5日").
 pub fn format_date(iso: &str) -> String {
-    local(iso).map(|d| d.format("%b %-d, %Y").to_string()).unwrap_or_default()
+    local(iso).map(|d| crate::locale::month_day(d.year(), d.month(), d.day(), true)).unwrap_or_default()
 }
 
-/// "09:05 AM".
+/// "09:05 AM" in the user's locale ("上午09:05").
 pub fn format_local_time(iso: &str) -> String {
-    local(iso).map(|d| d.format("%I:%M %p").to_string()).unwrap_or_default()
+    local(iso).map(|d| crate::locale::hour_minute(d.hour(), d.minute())).unwrap_or_default()
 }
 
 /// "Today", "Yesterday", "Mar 5" (this year) or "Mar 5, 2025".
@@ -83,8 +83,7 @@ pub fn date_label(date_key: &str, now: DateTime<Local>) -> String {
         return "Yesterday".into();
     }
     match NaiveDate::parse_from_str(date_key, "%Y-%m-%d") {
-        Ok(d) if d.year() == now.year() => d.format("%b %-d").to_string(),
-        Ok(d) => d.format("%b %-d, %Y").to_string(),
+        Ok(d) => crate::locale::month_day(d.year(), d.month(), d.day(), d.year() != now.year()),
         Err(_) => date_key.to_string(),
     }
 }
@@ -329,8 +328,8 @@ mod tests {
     fn labels_dates_relative_to_today() {
         assert_eq!(date_label("2026-03-10", now()), "Today");
         assert_eq!(date_label("2026-03-09", now()), "Yesterday");
-        assert_eq!(date_label("2026-02-22", now()), "Feb 22");
-        assert_eq!(date_label("2025-12-01", now()), "Dec 1, 2025");
+        assert_eq!(date_label("2026-02-22", now()), crate::locale::month_day(2026, 2, 22, false));
+        assert_eq!(date_label("2025-12-01", now()), crate::locale::month_day(2025, 12, 1, true));
     }
 
     #[test]
