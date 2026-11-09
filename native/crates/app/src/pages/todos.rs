@@ -1174,7 +1174,8 @@ impl Render for TodosPage {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::parse_collapsed;
+    use std::collections::HashSet;
 
     #[test]
     fn collapsed_groups_round_trip_through_the_setting() {

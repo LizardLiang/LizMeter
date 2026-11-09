@@ -529,7 +529,7 @@ pub fn shortcuts_overlay(window: &Window, on_close: Rc<dyn Fn(&mut Window, &mut 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use super::shortcut_columns;
 
     #[test]
     fn the_cheat_sheet_flows_into_columns_by_width() {
