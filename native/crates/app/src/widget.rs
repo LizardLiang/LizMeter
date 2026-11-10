@@ -240,10 +240,9 @@ pub struct Widget {
     dot_status: TimerStatus,
     dot_at: Instant,
     services: Option<Arc<Services>>,
-    /// Where the window was asked to open, and how far `Window::bounds` sits from it once the window
-    /// has its frame (known after the first draw). Saved positions are in the asked-for coordinates.
+    /// Where the window was asked to open; saved positions use the same coordinates (the outer
+    /// window rectangle), not `Window::bounds`, which sits inside the window frame.
     requested: (i32, i32),
-    frame_offset: Option<(i32, i32)>,
     last_pos: Option<(i32, i32)>,
     save_gen: u64,
 }
@@ -278,7 +277,6 @@ impl Widget {
             dot_at: Instant::now() - Duration::from_secs(5),
             services: init.services,
             requested: (init.origin.0.round() as i32, init.origin.1.round() as i32),
-            frame_offset: None,
             last_pos: None,
             save_gen: 0,
         };
@@ -365,9 +363,7 @@ impl Widget {
 
     /// Remembers where the user dropped the widget (`moved` in `widget-window.ts`), once the drag settles.
     fn on_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(offset) = self.frame_offset else { return };
-        let actual = position_of(window);
-        let pos = (actual.0 - offset.0, actual.1 - offset.1);
+        let pos = position_of(window);
         if self.last_pos.unwrap_or(self.requested) == pos {
             return;
         }
@@ -389,7 +385,20 @@ impl Widget {
     }
 }
 
+/// The window's top-left corner in logical pixels, as `SetWindowPos` and the opening position use it.
 fn position_of(window: &Window) -> (i32, i32) {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::RECT;
+        use windows::Win32::UI::WindowsAndMessaging::GetWindowRect;
+        if let Some(hwnd) = hwnd_of(window) {
+            let mut r = RECT::default();
+            if unsafe { GetWindowRect(hwnd, &mut r) }.is_ok() {
+                let s = window.scale_factor();
+                return ((r.left as f32 / s).round() as i32, (r.top as f32 / s).round() as i32);
+            }
+        }
+    }
     let b = window.bounds();
     (f32::from(b.origin.x).round() as i32, f32::from(b.origin.y).round() as i32)
 }
@@ -497,10 +506,6 @@ fn head_that_fits(widths: &[f32], room: f32) -> usize {
 
 impl Render for Widget {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        if self.frame_offset.is_none() {
-            let actual = position_of(window);
-            self.frame_offset = Some((actual.0 - self.requested.0, actual.1 - self.requested.1));
-        }
         let snap = self.snap.clone();
         let status = self.status();
         let activity = snap.as_ref().and_then(|s| s.claude_activity);
