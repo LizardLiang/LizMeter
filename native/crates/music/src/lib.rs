@@ -5,7 +5,9 @@ pub mod cache;
 pub mod error;
 pub mod extractor;
 pub mod integrity;
+pub mod output;
 pub mod process;
+pub mod transport;
 
 pub use error::{MusicError, Result};
 use lizmeter_db::Database;
