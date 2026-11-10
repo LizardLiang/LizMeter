@@ -358,7 +358,7 @@ impl MusicService {
         }
         if let Some(t) = self.transport_if_any() {
             match r.playback {
-                MusicPlaybackState::Playing => t.resume(),
+                MusicPlaybackState::Playing | MusicPlaybackState::Buffering => t.resume(),
                 MusicPlaybackState::Stopped => t.stop(),
                 _ => {}
             }
@@ -462,8 +462,10 @@ impl MusicService {
                 Ok(true)
             }
             Err(e) => {
+                let current = self.is_current(req);
                 self.fail_request(req, &e, restore_on_failure.then_some(snap));
-                Err(e)
+                // A request that a newer one replaced is not a failure of this chain.
+                if current { Err(e) } else { Ok(false) }
             }
         }
     }
@@ -585,14 +587,16 @@ impl MusicService {
         })?;
 
         let abort = stream.abort_handle();
-        let tee = TeeReader::new(stream, &cache_path, {
-            let (me, id, path) = (self.me.clone(), track_id.clone(), cache_path.clone());
+        // One temp file per stream: an older stream for the same track must not delete this one's.
+        let tmp = cache_path.with_extension(format!("m4a.{}.tmp", &lizmeter_db::util::new_uuid()[..8]));
+        let tee = TeeReader::new(stream, &tmp, {
+            let (me, id, path, tmp) = (self.me.clone(), track_id.clone(), cache_path.clone(), tmp.clone());
             Box::new(move |ok, write_failed| {
                 std::thread::spawn(move || {
                     if let Some(svc) = me.upgrade() {
-                        svc.finish_stream(&id, &path, ok && !write_failed);
+                        svc.finish_stream(&id, &path, &tmp, ok && !write_failed);
                     } else {
-                        let _ = fs::remove_file(tmp_path(&path));
+                        let _ = fs::remove_file(&tmp);
                     }
                 });
             })
@@ -616,8 +620,8 @@ impl MusicService {
 
     /// The stream of `track_id` ended (`ok`) or was cut off. Saves the cache file after an
     /// integrity probe, then lets the UI seek.
-    fn finish_stream(&self, track_id: &str, final_path: &Path, ok: bool) {
-        let tmp = tmp_path(final_path);
+    fn finish_stream(&self, track_id: &str, final_path: &Path, tmp: &Path, ok: bool) {
+        let tmp = tmp.to_path_buf();
         if !ok {
             let _ = fs::remove_file(&tmp);
             return;
@@ -724,10 +728,12 @@ impl MusicService {
 
         if let Some(e) = import_err.filter(|_| !aborted && collected.is_empty()) {
             finish(self);
+            lock(&self.st).import_progress = None;
             return err(MusicErrorCode::ExtractionFailed, format!("Playlist import failed: {}", e.message));
         }
         if collected.is_empty() {
             finish(self);
+            lock(&self.st).import_progress = None;
             return err(MusicErrorCode::ExtractionFailed, "No tracks found in playlist");
         }
 
@@ -815,7 +821,7 @@ impl MusicService {
         self.stop();
     }
 
-    /// `music:stop`: stop the audio and any extraction still streaming.
+    /// Stops the audio and any extraction still streaming.
     pub(crate) fn stop_audio(&self) {
         if let Some(t) = self.transport_if_any() {
             t.stop();
@@ -869,7 +875,8 @@ impl MusicService {
         self.emit(MusicEvent::Changed);
     }
 
-    /// Removes a deleted library track from the queue. If it was playing, the next item plays.
+    /// Removes a deleted library track from the queue. If it was playing, playback advances from
+    /// index -1 as the TS context does: the first remaining item (first in shuffle order) plays.
     pub fn remove_track_from_queue(&self, track_id: &str) {
         let outcome = lock(&self.st).queue.remove_track(track_id);
         if !outcome.removed {
@@ -894,6 +901,27 @@ impl MusicService {
 
     pub fn reorder_queue(&self, from: usize, to: usize) {
         lock(&self.st).queue.reorder(from, to);
+        self.emit(MusicEvent::Changed);
+    }
+
+    /// Re-reads which queued tracks are cached, after the cache changed behind the queue.
+    pub(crate) fn sync_cached_flags(&self) {
+        let ids: Vec<String> = lock(&self.st).queue.items.iter().map(|i| i.track.id.clone()).collect();
+        let cached: Vec<(String, bool)> = ids
+            .into_iter()
+            .filter_map(|id| with_db(&self.db, |db| Ok(db.get_track_by_id(&id)?)).ok().flatten().map(|r| (id, r.cached_file_path.is_some())))
+            .collect();
+        {
+            let mut st = lock(&self.st);
+            for (id, c) in &cached {
+                for i in st.queue.items.iter_mut().filter(|i| &i.track.id == id) {
+                    i.track.is_cached = *c;
+                }
+                if let Some(t) = st.current_track.as_mut().filter(|t| &t.id == id) {
+                    t.is_cached = *c;
+                }
+            }
+        }
         self.emit(MusicEvent::Changed);
     }
 
@@ -1035,12 +1063,6 @@ pub(crate) fn upsert_of(id: &str, meta: &TrackMetadata, added_at: Option<String>
     }
 }
 
-fn tmp_path(final_path: &Path) -> PathBuf {
-    let mut s = final_path.as_os_str().to_os_string();
-    s.push(".tmp");
-    PathBuf::from(s)
-}
-
 /// Copies an [`AudioStream`] to a `.tmp` cache file while the player reads it. On the end of the
 /// stream, on a read error, or when dropped early it calls `on_finish(ok, write_failed)` once.
 struct TeeReader {
@@ -1051,8 +1073,8 @@ struct TeeReader {
 }
 
 impl TeeReader {
-    fn new(inner: AudioStream, final_path: &Path, on_finish: Box<dyn FnOnce(bool, bool) + Send>) -> Self {
-        let file = fs::File::create(tmp_path(final_path)).map_err(|e| eprintln!("[music] cannot create the cache file: {e}")).ok();
+    fn new(inner: AudioStream, tmp: &Path, on_finish: Box<dyn FnOnce(bool, bool) + Send>) -> Self {
+        let file = fs::File::create(tmp).map_err(|e| eprintln!("[music] cannot create the cache file: {e}")).ok();
         TeeReader { write_failed: file.is_none(), file, inner, on_finish: Some(on_finish) }
     }
 

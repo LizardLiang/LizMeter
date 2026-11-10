@@ -1,7 +1,8 @@
 //! `cache-manager.ts`: the LRU cache of audio files in `<userData>/music-cache`.
 //!
 //! The database holds the size of every cached track; eviction removes the least recently played
-//! first and never touches the track that is playing or a track that belongs to a playlist.
+//! first and never touches the track that is playing. Playlist tracks are not protected (the
+//! database query only excludes the ids it is given), as in the TS code.
 
 use crate::error::Result;
 use crate::DbHandle;

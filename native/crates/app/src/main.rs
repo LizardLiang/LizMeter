@@ -8,6 +8,7 @@ mod chrome;
 
 mod gallery;
 mod modal;
+mod music_cli;
 mod controls;
 mod engine;
 mod flow;
@@ -161,6 +162,13 @@ fn main() {
     let mut args = parse_args();
     let shot = args.screenshot.is_some();
     let services = if args.page == "widget" { None } else { Some(open_services(args.data_dir.take())) };
+    // Headless music hooks (`--do music-play:<file>`, `music-download`, `music-status`) run with no window.
+    if let Some(svc) = &services {
+        if let Some(code) = music_cli::run(svc, &args.ops) {
+            svc.shutdown();
+            std::process::exit(code);
+        }
+    }
     if shot {
         ui::FREEZE.store(true, std::sync::atomic::Ordering::Relaxed);
     }

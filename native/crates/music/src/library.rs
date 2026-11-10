@@ -122,8 +122,8 @@ impl MusicService {
         Ok(())
     }
 
-    /// Frees the cache file of the playing track: the queue keeps its place, so removing the item
-    /// afterwards advances to the next one.
+    /// Frees the cache file of the playing track. The queue is untouched here; removing the item
+    /// afterwards advances from the start of the queue.
     fn halt_audio_for_file_delete(&self) {
         self.cancel_requests();
         self.stop_audio();
@@ -136,14 +136,18 @@ impl MusicService {
     }
 
     pub fn cache_clear(&self) -> Result<()> {
-        self.cache.clear_all()
+        self.cache.clear_all()?;
+        self.sync_cached_flags();
+        Ok(())
     }
 
     /// Sets the limit and evicts at once if the cache is now over it.
     pub fn cache_set_limit(&self, max_bytes: i64) -> Result<()> {
         self.cache.set_max_bytes(max_bytes)?;
         let playing = lock(&self.st).loaded_id.clone();
-        self.cache.evict_if_needed(playing.as_deref())
+        self.cache.evict_if_needed(playing.as_deref())?;
+        self.sync_cached_flags();
+        Ok(())
     }
 
     // --- Playlists ---
@@ -238,7 +242,9 @@ impl MusicService {
     }
 
     pub fn integrity_repair(&self, track_ids: &[String]) -> Result<i64> {
-        self.integrity.repair(track_ids)
+        let n = self.integrity.repair(track_ids)?;
+        self.sync_cached_flags();
+        Ok(n)
     }
 
     // --- Reset ---
@@ -248,6 +254,7 @@ impl MusicService {
     pub fn reset(&self, delete_binaries: bool) -> Result<()> {
         self.clear_player();
         self.cache.clear_all()?;
+        self.sync_cached_flags();
         if delete_binaries {
             let dir = self.bins.bin_dir();
             if dir.exists() {

@@ -3,13 +3,13 @@
 
 use crate::binaries::BinaryManager;
 use crate::error::{MusicError, Result};
-use crate::process::{ProcessManager, SpawnOptions};
+use crate::process::{ProcHandle, ProcessManager, SpawnOptions};
 use lizmeter_core::MusicErrorCode;
 use serde_json::Value;
 use std::io::{BufRead, BufReader, Read};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Tracks taken from one playlist before the import stops.
@@ -122,8 +122,9 @@ pub struct AudioStream {
     pos: usize,
     finished: bool,
     cancel: Arc<AtomicBool>,
-    pm: Arc<ProcessManager>,
-    key: String,
+    /// The yt-dlp process this stream reads now. Stopping kills this one, never a newer process
+    /// that reuses the key.
+    proc: Arc<Mutex<Option<Arc<ProcHandle>>>>,
 }
 
 impl Read for AudioStream {
@@ -157,17 +158,21 @@ impl Read for AudioStream {
 impl Drop for AudioStream {
     fn drop(&mut self) {
         self.cancel.store(true, Ordering::SeqCst);
-        self.pm.kill_process(&self.key);
+        if let Some(h) = self.proc.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            h.kill();
+        }
     }
 }
 
 impl AudioStream {
     /// A function that stops the extraction from any thread, even while a read is blocked.
     pub fn abort_handle(&self) -> Box<dyn Fn() + Send + Sync> {
-        let (cancel, pm, key) = (self.cancel.clone(), self.pm.clone(), self.key.clone());
+        let (cancel, proc) = (self.cancel.clone(), self.proc.clone());
         Box::new(move || {
             cancel.store(true, Ordering::SeqCst);
-            pm.kill_process(&key);
+            if let Some(h) = proc.lock().unwrap_or_else(|e| e.into_inner()).take() {
+                h.kill();
+            }
         })
     }
 
@@ -230,29 +235,32 @@ impl Extractor {
         let first = self.pm.spawn(&key, &self.stream_args("bestaudio[ext=m4a]/bestaudio", "m4a", url), &SpawnOptions::default())?;
         let (tx, rx) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let stream = AudioStream { rx, pending: Vec::new(), pos: 0, finished: false, cancel: cancel.clone(), pm: self.pm.clone(), key: key.clone() };
+        let proc: Arc<Mutex<Option<Arc<ProcHandle>>>> = Arc::new(Mutex::new(Some(first.handle.clone())));
+        let stream = AudioStream { rx, pending: Vec::new(), pos: 0, finished: false, cancel: cancel.clone(), proc: proc.clone() };
 
-        let pm = self.pm.clone();
+        let (pm, proc) = (self.pm.clone(), proc);
         let opus_args = self.stream_args("bestaudio", "opus", url);
         std::thread::spawn(move || {
             let (mut sent, mut stderr_msg) = (0usize, String::new());
             let mut current = Some(first);
             let mut is_fallback = false;
             loop {
-                let Some(proc) = current.take() else { return };
-                let stderr = read_all(proc.stderr);
-                let ok = pump(proc.stdout, &tx, &cancel, &mut sent);
+                let Some(proc_spawned) = current.take() else { return };
+                *proc.lock().unwrap_or_else(|e| e.into_inner()) = Some(proc_spawned.handle.clone());
+                let proc_spawned = proc_spawned;
+                let stderr = read_all(proc_spawned.stderr);
+                let ok = pump(proc_spawned.stdout, &tx, &cancel, &mut sent);
                 if !ok {
                     // The reader went away: stop yt-dlp and finish.
-                    proc.handle.kill();
+                    proc_spawned.handle.kill();
                     return;
                 }
-                let code = proc.handle.wait();
+                let code = proc_spawned.handle.wait();
                 let msg = stderr.join().unwrap_or_default().trim().to_string();
                 if code == Some(0) {
                     return;
                 }
-                if cancel.load(Ordering::SeqCst) || proc.handle.was_killed() {
+                if cancel.load(Ordering::SeqCst) || proc_spawned.handle.was_killed() {
                     let _ = tx.send(Chunk::Failed(MusicError::new(MusicErrorCode::ExtractionFailed, "Audio stream was stopped")));
                     return;
                 }

@@ -364,6 +364,8 @@ impl Services {
                     None => Value::Null,
                 })
             }
+            // The context's `stop`: playback ends and the queue is emptied. `music:play` is `null`
+            // when a newer play request replaced it.
             "music:stop" => out(self.music.stop()),
             "music:meta" => out(self.music.meta(&arg::<UrlArg>(args, 0, "input")?.url)?),
             "music:library:list" => out(self.music.library_list(&arg_or_default::<MusicLibraryListInput>(args, 0)?)?),

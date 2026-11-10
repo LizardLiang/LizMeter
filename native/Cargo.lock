@@ -3301,10 +3301,12 @@ dependencies = [
  "image",
  "lizmeter-core",
  "lizmeter-db",
+ "lizmeter-music",
  "lizmeter-services",
  "lizmeter-ui",
  "png 0.18.1",
  "raw-window-handle",
+ "serde_json",
  "windows 0.61.3",
 ]
 
