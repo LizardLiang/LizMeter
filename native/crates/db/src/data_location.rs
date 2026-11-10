@@ -245,6 +245,14 @@ impl DataLocation {
         }
     }
 
+    /// Records `dir` as the custom data folder without copying anything. The soak setup uses it to
+    /// point a copied profile at its own test sync folder.
+    pub fn set_custom_data_dir(&self, dir: &Path) -> Result<()> {
+        self.write_pointer(Some(&resolve_path(dir)))?;
+        self.invalidate_data_dir_cache();
+        Ok(())
+    }
+
     /// Forgets the custom folder and goes back to the default. Leaves every file where it is.
     pub fn clear_custom_data_dir(&self) -> Result<()> {
         self.write_pointer(None)?;

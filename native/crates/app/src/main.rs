@@ -1,4 +1,5 @@
 //! LizMeter native visual spike: Rust + gpui (DirectX 11) with a patched backdrop-blur renderer.
+#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
 mod app;
 mod avatar;
@@ -19,6 +20,7 @@ mod locale;
 mod pages;
 mod rich_view;
 mod select;
+mod soak_cli;
 mod tag_picker;
 mod timer;
 pub use lizmeter_ui::{css, ui};
@@ -72,10 +74,11 @@ struct Args {
     edit_time: bool,
     /// Capture hooks run once after the window opens: `bounce`, `claude-link`, `claude-open`.
     ops: Vec<String>,
+    soak: soak_cli::SoakArgs,
 }
 
 fn parse_args() -> Args {
-    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new(), data_dir: None, edit_time: false, ops: Vec::new() };
+    let mut a = Args { screenshot: None, page: "timer".into(), hover_nav: None, running: false, composite: None, focus: false, html: None, md: None, size: (1200.0, 800.0), steps: Vec::new(), data_dir: None, edit_time: false, ops: Vec::new(), soak: Default::default() };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         match arg.as_str() {
@@ -96,6 +99,11 @@ fn parse_args() -> Args {
             }
             "--edit-time" => a.edit_time = true,
             "--do" => a.ops.extend(it.next().map(|v| v.split(',').map(str::to_string).collect::<Vec<_>>()).unwrap_or_default()),
+            "--soak" => a.soak.run = true,
+            "--soak-setup" => a.soak.setup = true,
+            "--soak-check" => a.soak.check = true,
+            "--check-dir" => a.soak.check_dir = it.next().map(PathBuf::from),
+            "--soak-sync" => a.soak.sync = it.next().map(PathBuf::from),
             "--data-dir" => a.data_dir = it.next().map(PathBuf::from),
             "--html" => a.html = it.next(),
             "--md" => a.md = it.next().map(PathBuf::from),
@@ -146,7 +154,20 @@ fn save_png(path: &PathBuf, mut f: gpui::capture::CapturedFrame, composite: Opti
 }
 
 fn main() {
+    soak_cli::attach_parent_console();
     let mut args = parse_args();
+    if let Some(code) = soak_cli::run_headless(&args.soak) {
+        std::process::exit(code);
+    }
+    if args.soak.run {
+        match soak_cli::prepare_run() {
+            Ok(dir) => args.data_dir = Some(dir),
+            Err(message) => {
+                show_fatal(&message);
+                std::process::exit(1);
+            }
+        }
+    }
     let shot = args.screenshot.is_some();
     let services = if args.page == "widget" { None } else { Some(open_services(args.data_dir.take())) };
     // Headless music hooks (`--do music-play:<file>`, `music-download`, `music-status`) run with no window.

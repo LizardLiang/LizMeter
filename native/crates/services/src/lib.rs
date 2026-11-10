@@ -14,6 +14,7 @@ mod dispatch;
 mod error;
 mod issues;
 pub mod pipe;
+pub mod soak;
 pub mod providers;
 pub mod tokens;
 pub mod os;

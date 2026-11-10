@@ -19,7 +19,7 @@ gpui.workspace = true
 png.workspace = true
 image = { workspace = true, features = ["png", "gif", "webp"] }
 raw-window-handle.workspace = true
-windows = { workspace = true, features = ["Win32_Globalization"] }
+windows = { workspace = true, features = ["Win32_Globalization", "Win32_System_Console"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"
