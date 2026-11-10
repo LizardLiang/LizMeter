@@ -129,7 +129,8 @@ impl Services {
             }
         };
 
-        let db_for_music = db.clone();
+        let retired = Arc::new(AtomicBool::new(false));
+        let db_for_music = lizmeter_music::DbHandle::guarded(db.clone(), retired.clone());
         let services = Arc::new(Services {
             db,
             location,
@@ -137,7 +138,7 @@ impl Services {
             writer,
             host,
             tracker: Mutex::new(ClaudeTracker::new(projects_root)),
-            retired: AtomicBool::new(false),
+            retired,
             guards: Mutex::new(Vec::new()),
             hub: crate::issues::Hub::new(&user_data_hub),
             music: lizmeter_music::MusicService::with_sources(

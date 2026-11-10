@@ -124,7 +124,7 @@ fn damaged_audio_data_behind_an_intact_header_is_caught_by_the_decode_probe() {
 }
 
 fn checker(ff: &Path) -> (IntegrityChecker, DbHandle, tempfile::TempDir) {
-    let db: DbHandle = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+    let db: DbHandle = Arc::new(Mutex::new(Database::open_in_memory().unwrap())).into();
     let user_data = ff.parent().unwrap().parent().unwrap();
     let bins = Arc::new(BinaryManager::new(user_data));
     (IntegrityChecker::new(db.clone(), bins), db, tempfile::tempdir().unwrap())
@@ -186,7 +186,7 @@ fn an_empty_library_has_nothing_to_check() {
 
 #[test]
 fn without_ffmpeg_a_scan_says_so_and_a_single_check_gives_no_verdict() {
-    let db: DbHandle = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+    let db: DbHandle = Arc::new(Mutex::new(Database::open_in_memory().unwrap())).into();
     let root = tempfile::tempdir().unwrap();
     let checker = IntegrityChecker::new(db, Arc::new(BinaryManager::new(root.path())));
     let r = checker.check_all(&mut |_, _, _| {}).unwrap();

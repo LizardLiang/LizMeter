@@ -13,7 +13,7 @@ struct Rig {
 
 fn rig() -> Rig {
     let root = tempfile::tempdir().unwrap();
-    let db: DbHandle = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+    let db: DbHandle = Arc::new(Mutex::new(Database::open_in_memory().unwrap())).into();
     let cache = CacheManager::new(root.path(), db.clone());
     Rig { root, db, cache }
 }

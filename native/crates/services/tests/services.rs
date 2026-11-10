@@ -331,6 +331,25 @@ fn a_moved_data_folder_retires_the_database_handle_and_keeps_the_data() {
 }
 
 #[test]
+fn music_writes_stop_with_the_other_services_once_the_data_folder_moved() {
+    let r = rig();
+    let c = Caller::new(&r.svc);
+    let before = r.svc.music().playlist_create("before", &[]).expect("music writes work before the move");
+    let target = r.root.join("music-moved");
+    let moved = c.call("data-location:move", vec![json!({"targetDir": target.to_string_lossy()})]);
+    assert_eq!(moved["ok"], true);
+    for result in [
+        r.svc.music().playlist_create("after", &[]).map(|_| ()),
+        r.svc.music().playlist_rename(before.id, "renamed").map(|_| ()),
+        r.svc.music().library_clear().map(|_| ()),
+    ] {
+        let msg = result.expect_err("a music write after the move must fail").to_string();
+        assert!(msg.contains("restarting"), "{msg}");
+    }
+    assert!(r.svc.music().playlist_list().is_err(), "reads fail too, as for every other service");
+}
+
+#[test]
 fn moving_to_the_current_folder_is_refused_and_leaves_the_app_working() {
     let r = rig();
     let c = Caller::new(&r.svc);

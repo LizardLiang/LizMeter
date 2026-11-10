@@ -60,7 +60,7 @@ pub struct Services {
     pub(crate) tracker: Mutex<ClaudeTracker>,
     /// Set while the database handle is out of service: during a data-folder move, and after a
     /// successful one until the relaunch. A failed reopen leaves it set.
-    pub(crate) retired: AtomicBool,
+    pub(crate) retired: Arc<AtomicBool>,
     /// Single-writer guards, held until this value drops.
     pub(crate) guards: Mutex<Vec<os::guard::SingleWriterGuard>>,
     /// Issue-tracker tokens, endpoints and result caches.

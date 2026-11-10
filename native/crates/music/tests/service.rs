@@ -43,7 +43,7 @@ fn rig_with(cfg: &[(&str, &str)], tone: Option<f64>, with_ffmpeg: bool) -> Optio
     if with_ffmpeg {
         link_ffmpeg(&bin, ff.as_ref().unwrap());
     }
-    let db: DbHandle = Arc::new(Mutex::new(Database::open_in_memory().unwrap()));
+    let db: DbHandle = Arc::new(Mutex::new(Database::open_in_memory().unwrap())).into();
     let svc = MusicService::new(root.path(), db.clone(), OutputKind::Null(44_100));
     let (tx, events) = channel();
     let tx = Mutex::new(tx);
