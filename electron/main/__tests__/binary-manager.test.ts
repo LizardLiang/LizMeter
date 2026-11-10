@@ -211,7 +211,10 @@ ${sha256(ffmpegArchive)}  ffmpeg-win64.zip
       installRoutes(manifestRoutes(`${sha256(ffmpegArchive)}  different-archive.zip
 `));
 
-      await expect(downloadBinaries(vi.fn())).rejects.toMatchObject({ code: "CHECKSUM_UNAVAILABLE" });
+      await expect(downloadBinaries(vi.fn())).rejects.toMatchObject({
+        code: "CHECKSUM_UNAVAILABLE",
+        message: expect.stringContaining("no valid checksum entry for ffmpeg-win64.zip"),
+      });
     });
 
     it("fails closed when neither checksum file exists", async () => {
