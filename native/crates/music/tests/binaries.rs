@@ -101,6 +101,42 @@ fn rejects_an_ffmpeg_checksum_for_a_different_archive_instead_of_trusting_its_fi
 }
 
 #[test]
+fn ffmpeg_falls_back_to_the_release_checksums_manifest_when_there_is_no_per_archive_file() {
+    // The real FFmpeg-Builds release has `checksums.sha256` and no `<archive>.sha256`.
+    let r = rig();
+    let yt = std::fs::read(fake_ytdlp_exe()).unwrap();
+    let archive = zip_with_ffmpeg(&yt);
+    r.mock.route("/dl/yt-dlp.exe", vec![Reply::ok(yt.clone())]);
+    r.mock.route("/dl/SHA2-256SUMS", vec![Reply::ok(format!("{}  yt-dlp.exe
+", sha(&yt)))]);
+    r.mock.route("/dl/ffmpeg-win64.zip", vec![Reply::ok(archive.clone())]);
+    r.mock.route("/dl/ffmpeg-win64.zip.sha256", vec![Reply::status(404)]);
+    r.mock.route("/dl/checksums.sha256", vec![Reply::ok(format!("{}  other.zip
+{}  ffmpeg-win64.zip
+", "1".repeat(64), sha(&archive)))]);
+    download(&r).unwrap();
+    assert!(r.mgr.ffmpeg_path().exists());
+    // A wrong digest in the manifest is still a mismatch, not an install.
+    let bad = rig();
+    bad.mock.route("/dl/yt-dlp.exe", vec![Reply::ok(yt.clone())]);
+    bad.mock.route("/dl/SHA2-256SUMS", vec![Reply::ok(format!("{}  yt-dlp.exe
+", sha(&yt)))]);
+    bad.mock.route("/dl/ffmpeg-win64.zip", vec![Reply::ok(archive)]);
+    bad.mock.route("/dl/checksums.sha256", vec![Reply::ok(format!("{}  ffmpeg-win64.zip
+", "2".repeat(64)))]);
+    assert_eq!(download(&bad).unwrap_err().code, MusicErrorCode::HashMismatch);
+    assert!(!bad.mgr.ffmpeg_path().exists());
+}
+
+#[test]
+fn the_real_release_manifest_has_an_entry_for_the_archive_the_asset_filter_picks() {
+    let manifest = include_str!("fixtures/ffmpeg-builds-checksums.sha256");
+    let hash = parse_checksum_file(manifest, "ffmpeg-master-latest-win64-gpl.zip").expect("entry");
+    assert_eq!(hash, "d291edb944522f517e344e1825364f22a94467b22ec54f34a0d33cb0fd331f3e");
+    assert_eq!(parse_checksum_file(manifest, "ffmpeg-master-latest-win64-gpl-shared.zip").unwrap().len(), 64);
+}
+
+#[test]
 fn rejects_redirects_to_hosts_outside_the_github_release_delivery_boundary() {
     let r = rig();
     r.mock.route("/yt-api", vec![Reply::redirect("https://evil.example/releases/latest")]);

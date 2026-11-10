@@ -64,6 +64,7 @@ pub struct ProcHandle {
     child: Mutex<Child>,
     status: Mutex<Option<ExitStatus>>,
     timed_out: AtomicBool,
+    killed: AtomicBool,
 }
 
 impl ProcHandle {
@@ -92,6 +93,12 @@ impl ProcHandle {
         self.timed_out.load(Ordering::SeqCst)
     }
 
+    /// Whether [`ProcHandle::kill`] stopped a live process (a stop, a replacement or a shutdown),
+    /// as opposed to the process ending by itself.
+    pub fn was_killed(&self) -> bool {
+        self.killed.load(Ordering::SeqCst)
+    }
+
     pub fn has_exited(&self) -> bool {
         self.poll().is_some()
     }
@@ -101,6 +108,7 @@ impl ProcHandle {
         if self.poll().is_some() {
             return;
         }
+        self.killed.store(true, Ordering::SeqCst);
         kill_tree(self.pid);
         let _ = lock(&self.child).kill();
         let deadline = Instant::now() + Duration::from_secs(3);
@@ -158,6 +166,7 @@ impl ProcessManager {
             child: Mutex::new(child),
             status: Mutex::new(None),
             timed_out: AtomicBool::new(false),
+            killed: AtomicBool::new(false),
         });
         lock(&self.active).insert(key.to_string(), handle.clone());
 

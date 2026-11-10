@@ -370,16 +370,41 @@ impl BinaryManager {
         Ok(())
     }
 
+    /// FFmpeg-Builds publishes one `checksums.sha256` per release, not a file per archive. The
+    /// per-archive `<archive>.sha256` the Electron build asks for returns 404 on the real release,
+    /// so the manifest is the fallback. Still fail closed: no entry anywhere is
+    /// `CHECKSUM_UNAVAILABLE`, a wrong digest is `HASH_MISMATCH`.
     pub fn verify_ffmpeg_checksum(&self, http: &Client, archive_url: &str, archive: &Path) -> Result<()> {
-        let checksum_url = format!("{archive_url}.sha256");
-        let content = self.fetch_text(http, &checksum_url).map_err(|e| checksum_unavailable("ffmpeg archive", &e))?;
         // The archive is saved under a generic temp name, so match the manifest against the
         // asset's file name from the trusted URL.
         let url = reqwest::Url::parse(archive_url).map_err(|e| checksum_unavailable("ffmpeg archive", &e.to_string()))?;
         let last = url.path().rsplit('/').next().unwrap_or("");
         let name = percent_decode(last);
-        let Some(expected) = parse_checksum_file(&content, &name) else {
-            return Err(err(MusicErrorCode::ChecksumUnavailable, format!("SHA256 verification unavailable for ffmpeg archive: no valid checksum entry for {name}")));
+        let manifest_url = match archive_url.rfind('/') {
+            Some(i) => format!("{}/checksums.sha256", &archive_url[..i]),
+            None => archive_url.to_string(),
+        };
+
+        let mut first_error: Option<String> = None;
+        let mut expected: Option<String> = None;
+        for checksum_url in [format!("{archive_url}.sha256"), manifest_url] {
+            match self.fetch_text(http, &checksum_url) {
+                Ok(content) => {
+                    if let Some(h) = parse_checksum_file(&content, &name) {
+                        expected = Some(h);
+                        break;
+                    }
+                }
+                Err(e) => {
+                    first_error.get_or_insert(e);
+                }
+            }
+        }
+        let Some(expected) = expected else {
+            return Err(match first_error {
+                Some(e) => checksum_unavailable("ffmpeg archive", &e),
+                None => err(MusicErrorCode::ChecksumUnavailable, format!("SHA256 verification unavailable for ffmpeg archive: no valid checksum entry for {name}")),
+            });
         };
         let actual = compute_sha256(archive).map_err(|e| checksum_unavailable("ffmpeg archive", &e.to_string()))?;
         if !actual.eq_ignore_ascii_case(&expected) {

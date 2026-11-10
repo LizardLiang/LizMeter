@@ -109,15 +109,20 @@ pub fn ffmpeg() -> Option<PathBuf> {
     std::env::var_os("LIZMETER_TEST_FFMPEG").map(PathBuf::from).filter(|p| p.exists())
 }
 
-/// Writes a sine tone with ffmpeg. `ext` picks the container (`m4a`, `wav`).
-pub fn make_tone(ffmpeg: &Path, out: &Path, seconds: f64, hz: u32) {
+/// Writes a sine tone with ffmpeg; `extra` are output options (for example `-movflags +faststart`).
+pub fn make_tone_with(ffmpeg: &Path, out: &Path, seconds: f64, hz: u32, extra: &[&str]) {
     let status = std::process::Command::new(ffmpeg)
         .args(["-y", "-v", "error", "-f", "lavfi", "-i"])
         .arg(format!("sine=frequency={hz}:duration={seconds}"))
+        .args(extra)
         .arg(out)
         .status()
         .expect("run ffmpeg");
     assert!(status.success(), "ffmpeg could not make {}", out.display());
+}
+
+pub fn make_tone(ffmpeg: &Path, out: &Path, seconds: f64, hz: u32) {
+    make_tone_with(ffmpeg, out, seconds, hz, &[]);
 }
 
 /// Compiles `stubs/fake_ytdlp.rs` once and returns the exe.
