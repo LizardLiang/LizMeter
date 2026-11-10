@@ -273,7 +273,7 @@ collapsed.
 
 - **Issue linking is todos only.** The native "Link issue" button and the stopwatch Start prompt list the app's todos with a search box and state chips. The Linear/Jira/GitHub tabs and the project and label chips of `TodoIssuePicker` come with phases 7 and 8. A fuzzy match here is a plain subsequence score, not `fuzzyMatch.ts`.
 - **Claude Code linking** (was not wired on the Timer page): done in phase 6c, see below.
-- **History "Log Work" / "Retry" pills have no handler** until phase 8 (Jira worklog).
+- **History "Log Work" / "Retry" pills** open the confirm dialog and, since phase 8, log through Jira (see the phase 8 notes).
 - **Stopwatch settings are not persisted** (as in Electron): 8 h maximum, prompt for issue on. Settings (phase 6b) writes them to `Root.sw_settings`; they reset on restart like Electron's.
 - **Date labels were en-US.** Fixed in phase 6b: `locale.rs` reads the Windows user locale.
 
@@ -327,3 +327,16 @@ collapsed.
 - **Link issue popover shows the Todo tab only.** `IssuePickerDropdown`'s provider tabs, search box and external lists wait for phase 8 (the cards and filters exist in `issues_logic.rs`). Row titles show no ellipsis in the popover (gpui `truncate()` in a flex width, same as before).
 - **Worklog dialog date-time fields are typed text** (`YYYY-MM-DD HH:MM`), not Chromium's segmented `datetime-local` with calendar icon. The confirm result goes to `Services::worklog_log`, which fails until phase 8; History shows the error text where Electron shows its toast (no toast component yet).
 - **Capture screenshots**: PrintWindow returned black frames for a while in this session (display idle). `--screenshot` (gpui's own capture) worked and is what the phase 7c shots use.
+
+## Native port, phase 8 (2026-11-10)
+
+- **Token storage is DPAPI files, not Credential Manager.** `<userData>/native-tokens/<provider>.dpapi` (CryptProtectData with app entropy). Chosen because the files stay in the profile folder (never in the movable data folder), a scratch or soak folder carries its own tokens, tests run without touching the machine credential store, and there is no 2.5 KB blob cap. `migration.json` beside them records `migrated`, `failed` (a reason with no token text) or `done` (the user saved or removed the token natively, so the Electron file is never read again).
+- **Electron token files are left in place.** The native app reads `.github-token`, `.linear-token`, `.jira-token` and `Local State` once and never writes or deletes them, so a rollback to Electron finds its tokens. Tokens saved natively afterwards do not reach Electron.
+- **Migration is verified against real Electron output** (`tests/electron_migration.rs`, `#[ignore]`: needs a profile written by Electron for this Windows user; the sealed key cannot be committed). Run with `LIZMETER_TEST_ELECTRON_PROFILE`. The unit tests build the same `v10` format with a throwaway key.
+- **Provider base URLs** can be overridden only in debug builds (`LIZMETER_GITHUB_API_URL`, `LIZMETER_LINEAR_API_URL`, `LIZMETER_JIRA_BASE_URL`); a release build ignores them. `Services::set_provider_endpoints` is the test seam.
+- **Error texts are cleaner than Electron's.** Electron shows `Error invoking remote method '...': IssueProviderError: <text>` in Settings; native shows `<text>`. The History toast mapping (`failure_message`) is the same as Electron's.
+- **GitHub requests copy Octokit's**, found by running Electron against the mock: `GET /user/issues` for the assigned list, `token <pat>` auth. One page only (per_page 100), as in Electron.
+- **The 7C MOCKED-UI notes are now live**: Issues page (three tabs), issue prompt tracker rows, Link issue popover tabs and search, Settings token rows (saved, test OK, test failed, needs re-entry) and the History worklog toast (success and error) run against a local mock. Compared with Electron (its main-process `fetch` redirected to the mock with a `--require` patch): the Issues card put the repo chip above the title and the tab row was 3 px tall; both fixed. Remaining differences: the card number/state row is 1-2 px higher, the `✓` in the Connected line is the thin glyph (Electron falls back to a bold one) with a space before `· Core`, Settings inputs sit 2 px lower.
+- **Not compared with Electron**: the Link issue popover tabs (the Electron popover did not open under CDP in this run) and the worklog success toast (Electron had no Jira credentials left by then). Native captures are in the scratchpad.
+- **No live provider call was made.** A read-only smoke against real GitHub, Linear and Jira, and a real worklog, wait for the user's approval.
+- **Reqwest blocking runs on gpui background threads**, 30 s timeout per call, no cancel. Leaving a page while a call runs lets it finish and drops the result.
