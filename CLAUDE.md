@@ -2,6 +2,50 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Native app (current)
+
+LizMeter is moving from Electron to a native Rust app drawn with DirectX 11 (gpui, vendored with a backdrop-blur patch). The native app lives in `native/` and is the app to extend. The Electron app described under "Legacy: Electron app" stays in the repo until both machines run native.
+
+Commands, run from `native/` (MSVC toolchain, see `rust-toolchain.toml`):
+
+```
+cargo build --release                 # build native/target/release/lizmeter.exe
+cargo test --workspace                # all native tests
+cargo test -p lizmeter-db             # one crate
+cargo run --release -p lizmeter-app   # start the app
+cargo packager --release -c Packager.toml   # per-user NSIS installer (needs: cargo install cargo-packager --locked)
+```
+
+Soak and cutover (details: `.claude/.Arena/runbooks/native-cutover.md`):
+
+```
+lizmeter.exe --soak-setup [--soak-sync <dir>]   # copy %APPDATA%\lizmeter to %APPDATA%\lizmeter-soak, sync to a test folder
+lizmeter.exe --soak                             # run on the soak copy; refuses a OneDrive sync folder
+lizmeter.exe --soak-check                       # clean-run report, exit code 3 when not clean
+```
+
+Crates in `native/crates/`:
+
+- `core`: shared types (the Rust twin of `src/shared/types.ts`)
+- `db`: SQLite (rusqlite), same schema and idempotent migrations as Electron, data-folder location
+- `sync`: multi-writer oplog sync engine, held row-equal to the TS engine by `native/tools/sync-equivalence/`
+- `services`: the Rust twin of the Electron main process: IPC-equivalent services, named pipe server, issue providers, tokens (DPAPI), OS integrations, single-writer guard, soak mode
+- `music`: yt-dlp / ffmpeg playback, in-process decoder for cached tracks
+- `ui`: gpui widgets: text input with IME, markdown live-preview editor, rich-text input
+- `app`: windows, pages and the `lizmeter` binary
+
+Rules:
+
+- Same data as Electron: no schema change unless it also lands in `electron/main/database.ts` until cutover.
+- Native tests that touch data use a temp folder (`tempfile`). Never point a test at `%APPDATA%\lizmeter`.
+- A live native window for testing sets `LIZMETER_PIPE_PATH` to its own pipe and `--data-dir` to a scratch folder: the default pipe and `%APPDATA%\lizmeter` belong to the installed app.
+- Visual changes: compare against the Electron page; `native/docs/effects-coverage.md` maps every blur and animation.
+- One app writes a data folder at a time (`native/crates/services/src/os/guard.rs`).
+
+## Legacy: Electron app
+
+Everything below describes the Electron build. It is the shipped app until the cutover and is not extended with new features.
+
 ## Commands
 
 Always use **bun**, never npm/npx.
