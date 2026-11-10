@@ -4,7 +4,8 @@ use crate::controls::field_style;
 use crate::css::{Spec, TRANSPARENT, linear, rgba};
 use crate::ui::*;
 use gpui::*;
-use lizmeter_core::{IssueRef, JiraIssue, LinearIssue, ListTodosInput, Todo, TodoLabel, TodoProject, TodoState};
+use crate::pages::issues_logic::{available_tabs, Tab};
+use lizmeter_core::{Issue, IssueProviderStatus, IssueRef, IssuesListInput, JiraIssue, LinearIssue, ListTodosInput, Todo, TodoLabel, TodoProject, TodoState};
 use lizmeter_services::Services;
 use lizmeter_ui::text_input::{TextField, TextFieldEvent, TextInput};
 use std::sync::Arc;
@@ -103,6 +104,55 @@ pub struct IssuePrompt {
     linear: Vec<LinearIssue>,
     jira: Vec<JiraIssue>,
     tracker_error: Option<String>,
+    /// The popover's provider tabs: which trackers answer, the tab chosen, the issues each sent
+    /// (`None` while loading; a failed fetch is an empty list, as in `useIssues`), and the
+    /// popover's own search over them.
+    status: Option<IssueProviderStatus>,
+    dd_active: DdTab,
+    gh_list: Option<Vec<Issue>>,
+    lin_list: Option<Vec<LinearIssue>>,
+    jira_list: Option<Vec<JiraIssue>>,
+    issue_search: Option<Entity<TextField>>,
+    issue_query: String,
+    ext_focus: Option<usize>,
+}
+
+/// A tab of the popover: a tracker, or the todo list that is always there.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DdTab {
+    Github,
+    Linear,
+    Jira,
+    Todo,
+}
+
+impl DdTab {
+    fn label(self) -> &'static str {
+        match self {
+            DdTab::Github => "GitHub",
+            DdTab::Linear => "Linear",
+            DdTab::Jira => "Jira",
+            DdTab::Todo => "Todo",
+        }
+    }
+}
+
+impl From<Tab> for DdTab {
+    fn from(t: Tab) -> Self {
+        match t {
+            Tab::Github => DdTab::Github,
+            Tab::Linear => DdTab::Linear,
+            Tab::Jira => DdTab::Jira,
+        }
+    }
+}
+
+/// One row of a tracker tab: number or key, title, and the repo or state on the right.
+struct ExtRow {
+    num: String,
+    title: String,
+    tail: String,
+    issue: IssueRef,
 }
 
 impl IssuePrompt {
@@ -139,9 +189,11 @@ impl IssuePrompt {
         let labels = svc.list_todo_labels().unwrap_or_default();
         let focus = search.read(cx).focus_handle().clone();
         window.focus(&focus);
-        let mut this = Self { mode, todos, states, projects, labels, chips: TodoChips::default(), search, query: String::new(), active: 0, error, focus, has_linear: false, has_jira: false, loading: false, linear: vec![], jira: vec![], tracker_error: None };
+        let mut this = Self { mode, todos, states, projects, labels, chips: TodoChips::default(), search, query: String::new(), active: 0, error, focus, has_linear: false, has_jira: false, loading: false, linear: vec![], jira: vec![], tracker_error: None, status: None, dd_active: DdTab::Github, gh_list: None, lin_list: None, jira_list: None, issue_search: None, issue_query: String::new(), ext_focus: None };
         if mode == PromptMode::Dialog {
             this.load_trackers(svc, cx);
+        } else {
+            this.load_externals(svc, window, cx);
         }
         this
     }
@@ -185,6 +237,193 @@ impl IssuePrompt {
             });
         })
         .detach();
+    }
+
+    /// The popover opens: ask which trackers are set up and fetch each one's issues off the UI thread.
+    fn load_externals(&mut self, svc: &Arc<Services>, window: &mut Window, cx: &mut Context<Self>) {
+        let search = TextInput::new(field_style(13.0), "Search issues\u{2026}", window, cx);
+        cx.subscribe(&search, |this, s, ev: &TextFieldEvent, cx| match ev {
+            TextFieldEvent::Changed => {
+                this.issue_query = s.read(cx).text().to_string();
+                this.ext_focus = None;
+                cx.notify();
+            }
+            TextFieldEvent::Submit => this.pick_ext(cx),
+            TextFieldEvent::Cancel => cx.emit(PromptEvent::Skip),
+        })
+        .detach();
+        self.issue_search = Some(search);
+        let status = svc.issue_provider_status().ok();
+        let tabs = status.as_ref().map(available_tabs).unwrap_or_default();
+        self.status = status;
+        if self.effective_tab() != DdTab::Todo {
+            self.focus_search(window, cx);
+        }
+        for tab in tabs {
+            let svc = svc.clone();
+            cx.spawn(async move |this, cx| {
+                let result = cx
+                    .background_executor()
+                    .spawn(async move {
+                        match tab {
+                            Tab::Github => svc.github_issues(&IssuesListInput::default()).map(|v| (Some(v), None, None)),
+                            Tab::Linear => svc.linear_issues(false).map(|v| (None, Some(v), None)),
+                            Tab::Jira => svc.jira_issues(false).map(|v| (None, None, Some(v))),
+                        }
+                    })
+                    .await;
+                let (g, l, j) = result.unwrap_or((Some(vec![]), Some(vec![]), Some(vec![])));
+                let _ = this.update(cx, |p, cx| {
+                    match tab {
+                        Tab::Github => p.gh_list = Some(g.unwrap_or_default()),
+                        Tab::Linear => p.lin_list = Some(l.unwrap_or_default()),
+                        Tab::Jira => p.jira_list = Some(j.unwrap_or_default()),
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+    }
+
+    /// The tabs of the popover: the configured trackers, then Todo.
+    fn dd_tabs(&self) -> Vec<DdTab> {
+        let mut tabs: Vec<DdTab> = self.status.as_ref().map(available_tabs).unwrap_or_default().into_iter().map(DdTab::from).collect();
+        tabs.push(DdTab::Todo);
+        tabs
+    }
+
+    /// The tab shown: the chosen one when it exists, else the first tracker.
+    fn effective_tab(&self) -> DdTab {
+        let tabs = self.dd_tabs();
+        if tabs.len() == 1 {
+            tabs[0]
+        } else if tabs.contains(&self.dd_active) {
+            self.dd_active
+        } else {
+            tabs[0]
+        }
+    }
+
+    fn focus_search(&self, window: &mut Window, cx: &App) {
+        let field = if self.effective_tab() == DdTab::Todo { Some(&self.search) } else { self.issue_search.as_ref() };
+        if let Some(f) = field {
+            let handle = f.read(cx).focus_handle().clone();
+            window.focus(&handle);
+        }
+    }
+
+    /// The rows of a tracker tab after the popover's search (title, or number / key).
+    fn ext_rows(&self, tab: DdTab) -> Vec<ExtRow> {
+        let q = self.issue_query.trim().to_lowercase();
+        let keep = |title: &str, num: &str| q.is_empty() || title.to_lowercase().contains(&q) || num.to_lowercase().contains(&q);
+        match tab {
+            DdTab::Github => self
+                .gh_list
+                .iter()
+                .flatten()
+                .filter(|i| keep(&i.title, &i.number.to_string()))
+                .map(|i| ExtRow { num: format!("#{}", i.number), title: i.title.clone(), tail: i.repo.clone(), issue: IssueRef::Github { number: i.number, title: i.title.clone(), url: i.url.clone() } })
+                .collect(),
+            DdTab::Linear => self
+                .lin_list
+                .iter()
+                .flatten()
+                .filter(|i| keep(&i.title, &i.identifier))
+                .map(|i| ExtRow { num: i.identifier.clone(), title: i.title.clone(), tail: i.state.name.clone(), issue: IssueRef::Linear { identifier: i.identifier.clone(), title: i.title.clone(), url: i.url.clone() } })
+                .collect(),
+            DdTab::Jira => self
+                .jira_list
+                .iter()
+                .flatten()
+                .filter(|i| keep(&i.title, &i.key))
+                .map(|i| ExtRow { num: i.key.clone(), title: i.title.clone(), tail: i.status.clone(), issue: IssueRef::Jira { key: i.key.clone(), title: i.title.clone(), url: i.url.clone() } })
+                .collect(),
+            DdTab::Todo => vec![],
+        }
+    }
+
+    fn pick_ext(&mut self, cx: &mut Context<Self>) {
+        let rows = self.ext_rows(self.effective_tab());
+        if let Some(r) = self.ext_focus.and_then(|i| rows.into_iter().nth(i)) {
+            cx.emit(PromptEvent::Select(r.issue));
+        }
+    }
+
+    fn ext_loading(&self, tab: DdTab) -> bool {
+        match tab {
+            DdTab::Github => self.gh_list.is_none(),
+            DdTab::Linear => self.lin_list.is_none(),
+            DdTab::Jira => self.jira_list.is_none(),
+            DdTab::Todo => false,
+        }
+    }
+
+    /// `ProviderTabs` inside the popover: 4 px 8 px 0 padding, a rule under the row.
+    fn dd_tab_row(&self, tabs: &[DdTab], active: DdTab, cx: &mut Context<Self>) -> Div {
+        let mut row = div().flex().flex_row();
+        for tab in tabs {
+            let (me, tab, on) = (cx.entity(), *tab, *tab == active);
+            row = row.child(
+                div()
+                    .id(SharedString::from(format!("dd-tab-{}", tab.label())))
+                    .px(px(16.0))
+                    .py(px(7.0))
+                    .border_b_2()
+                    .border_color(col(if on { TN_BLUE } else { TRANSPARENT }))
+                    .font_family(BTN_FONT)
+                    .text_size(px(12.0))
+                    .line_height(px(15.0))
+                    .font_weight(FontWeight(600.0))
+                    .text_color(col(if on { TN_BLUE } else { TN_TEXT_DIM }))
+                    .cursor_pointer()
+                    .on_click(move |_, window, app| {
+                        me.update(app, |p, cx| {
+                            p.dd_active = tab;
+                            p.ext_focus = None;
+                            p.focus_search(window, cx);
+                            cx.notify();
+                        })
+                    })
+                    .child(spaced(tab.label(), 0.36)),
+            );
+        }
+        div().relative().px(px(8.0)).pt(px(4.0)).child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(41, 46, 66, 0.8)))).child(row)
+    }
+
+    /// A row of a tracker tab (`.item`): number in blue, title, repo or state on the right.
+    fn ext_row(&self, i: usize, r: ExtRow, cx: &mut Context<Self>) -> Stateful<Div> {
+        let (me, hover) = (cx.entity(), cx.entity());
+        let issue = r.issue.clone();
+        let mut row = div()
+            .id(SharedString::from(format!("ext-{i}")))
+            .w_full()
+            .px(px(12.0))
+            .py(px(8.0))
+            .flex()
+            .flex_row()
+            .items_baseline()
+            .gap(px(6.0))
+            .font_family("Arial")
+            .cursor_pointer()
+            .on_hover(move |on, _, app| {
+                if *on {
+                    hover.update(app, |p, cx| {
+                        if p.ext_focus != Some(i) {
+                            p.ext_focus = Some(i);
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+            .on_click(move |_, _, app| me.update(app, |_, cx| cx.emit(PromptEvent::Select(issue.clone()))))
+            .child(div().flex_shrink_0().text_size(px(11.0)).font_weight(FontWeight(600.0)).text_color(col(TN_BLUE)).child(r.num))
+            .child(div().flex_1().min_w_0().truncate().text_size(px(12.0)).text_color(col(TN_TEXT)).child(r.title))
+            .child(div().flex_shrink_0().text_size(px(11.0)).text_color(col(TN_TEXT_DIM)).child(r.tail));
+        if self.ext_focus == Some(i) {
+            row = row.bg(col(rgba(41, 46, 66, 0.65)));
+        }
+        row
     }
 
     /// A row of the tracker section: key in cyan, then the title (`.issueRow`).
@@ -291,16 +530,40 @@ fn section(label: &str, first: bool) -> Div {
 impl IssuePrompt {
     /// The popover: 320 px glass card under the button, search, chips, then the list at 220 px at most.
     fn dropdown_el(&self, matches: &[Todo], chips: Stateful<Div>, cx: &mut Context<Self>) -> impl IntoElement {
+        let tab = self.effective_tab();
+        let tabs = self.dd_tabs();
         let scroll = lizmeter_ui::scrollbar::keyed("prompt-list", lizmeter_ui::scrollbar::BarStyle::Global);
         let mut rows = div().flex().flex_col();
-        if let Some(e) = &self.error {
+        if tab != DdTab::Todo {
+            let hint = |text: &'static str| ui_text(12.0).p(px(12.0)).text_color(col(TN_TEXT_DIM)).flex().justify_center().child(text);
+            if self.ext_loading(tab) {
+                rows = rows.child(hint("Loading\u{2026}"));
+            } else {
+                let found = self.ext_rows(tab);
+                if found.is_empty() {
+                    let none = if !self.issue_query.trim().is_empty() {
+                        "No matching issues"
+                    } else if tab == DdTab::Jira {
+                        "No issues found"
+                    } else {
+                        "No open issues"
+                    };
+                    rows = rows.child(hint(none));
+                }
+                for (i, r) in found.into_iter().enumerate() {
+                    rows = rows.child(self.ext_row(i, r, cx));
+                }
+            }
+        } else if let Some(e) = &self.error {
             rows = rows.child(crate::controls::state_message(e.clone(), TN_RED, false));
         } else if matches.is_empty() {
             let filtered = !self.query.trim().is_empty() || self.chips.any();
             rows = rows.child(crate::controls::state_message(if filtered { "No matching todos" } else { "No todos yet" }, TN_TEXT_DIM, false).py(px(12.0)).text_size(px(12.0)).flex().justify_center());
         }
-        for (i, t) in matches.iter().enumerate() {
-            rows = rows.child(self.row(t, i == self.active, cx));
+        if tab == DdTab::Todo {
+            for (i, t) in matches.iter().enumerate() {
+                rows = rows.child(self.row(t, i == self.active, cx));
+            }
         }
         let list = div()
             .relative()
@@ -308,15 +571,17 @@ impl IssuePrompt {
             .max_h(px(220.0))
             .child(div().id("prompt-list").track_scroll(scroll.handle()).max_h(px(220.0)).overflow_y_scroll().child(scroll.pad(rows)))
             .child(scroll.bar());
-        let search = div()
-            .relative()
-            .h(px(37.0))
-            .flex_shrink_0()
-            .px(px(12.0))
-            .flex()
-            .items_center()
-            .child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(41, 46, 66, 0.8))))
-            .child(div().w_full().child(self.search.clone()));
+        let search_of = |field: Entity<TextField>| {
+            div()
+                .relative()
+                .h(px(37.0))
+                .flex_shrink_0()
+                .px(px(12.0))
+                .flex()
+                .items_center()
+                .child(layer(Spec::rrect(0.0).border_sides(0.0, 0.0, 1.0, 0.0, rgba(41, 46, 66, 0.8))))
+                .child(div().w_full().child(field))
+        };
         let spec = Spec::rrect(14.0)
             .fill(linear(135.0, &[(0.0, wh(0.07)), (0.30, wh(0.01)), (0.52, TRANSPARENT)]))
             .solid(rgba(13, 15, 28, 0.92))
@@ -336,6 +601,17 @@ impl IssuePrompt {
             .track_focus(&self.focus)
             .on_mouse_down_out(cx.listener(|_, _, _, cx| cx.emit(PromptEvent::Skip)))
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+                if this.effective_tab() != DdTab::Todo {
+                    let n = this.ext_rows(this.effective_tab()).len();
+                    match ev.keystroke.key.as_str() {
+                        "down" if n > 0 => this.ext_focus = Some(this.ext_focus.map_or(0, |i| (i + 1).min(n - 1))),
+                        "up" if n > 0 => this.ext_focus = Some(this.ext_focus.map_or(0, |i| i.saturating_sub(1))),
+                        "escape" => cx.emit(PromptEvent::Skip),
+                        _ => return,
+                    }
+                    cx.notify();
+                    return;
+                }
                 let n = matching_todos(&this.todos, &this.query, &this.chips).len();
                 match ev.keystroke.key.as_str() {
                     "down" if n > 0 => this.active = (this.active + 1).min(n - 1),
@@ -345,11 +621,13 @@ impl IssuePrompt {
                 }
                 cx.notify();
             }))
-            .child(search)
-            .child({
+            .children((tab != DdTab::Todo).then(|| self.issue_search.clone().map(search_of)).flatten())
+            .children((tabs.len() > 1).then(|| self.dd_tab_row(&tabs, tab, cx)))
+            .children((tab == DdTab::Todo).then(|| search_of(self.search.clone())))
+            .children((tab == DdTab::Todo).then(|| {
                 let cs = lizmeter_ui::scrollbar::keyed("prompt-chips", lizmeter_ui::scrollbar::BarStyle::Global);
                 div().relative().flex_shrink_0().max_h(px(72.0)).child(div().id("dd-chips").track_scroll(cs.handle()).max_h(px(72.0)).overflow_y_scroll().child(cs.pad(chips))).child(cs.bar())
-            })
+            }))
             .child(list)
     }
 

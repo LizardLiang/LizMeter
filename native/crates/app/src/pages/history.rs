@@ -37,6 +37,15 @@ pub struct HistoryPage {
     pickers: HashMap<String, Entity<TagPicker>>,
     pub timer_active: bool,
     worklog: Option<Entity<WorklogDialog>>,
+    toasts: Vec<Toast>,
+    next_toast: u64,
+}
+
+/// A message in the bottom-right corner that goes after four seconds or on a click.
+struct Toast {
+    id: u64,
+    success: bool,
+    message: String,
 }
 
 impl EventEmitter<PageEvent> for HistoryPage {}
@@ -75,6 +84,8 @@ impl HistoryPage {
             pickers: HashMap::new(),
             timer_active: false,
             worklog: None,
+            toasts: vec![],
+            next_toast: 0,
         }
     }
 
@@ -175,7 +186,7 @@ impl HistoryPage {
             this.worklog = None;
             this.refresh(window, cx);
             if let WorklogEvent::Confirm(c) = ev {
-                this.log_work(c);
+                this.log_work(c, window, cx);
             }
             cx.notify();
         })
@@ -184,23 +195,77 @@ impl HistoryPage {
         cx.notify();
     }
 
-    /// Confirm: ask the Jira worklog channel. The provider backends arrive with phase 8; until then the
-    /// channel answers with its error, which shows where Electron shows its toast.
-    fn log_work(&mut self, c: &WorklogConfirm) {
-        let Some(first) = c.selected_ids.first() else { return };
-        let issue_key = self.sessions.iter().find(|s| &s.id == first).and_then(|s| s.issue_id.clone()).unwrap_or_default();
+    /// Shows a toast and removes it after four seconds.
+    fn toast(&mut self, success: bool, message: String, cx: &mut Context<Self>) {
+        self.next_toast += 1;
+        let id = self.next_toast;
+        self.toasts.push(Toast { id, success, message });
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(std::time::Duration::from_secs(4)).await;
+            let _ = this.update(cx, |p, cx| {
+                p.toasts.retain(|t| t.id != id);
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
+    /// Confirm (`handleWorklogDialogConfirm`): one Jira call off the UI thread. Several ticked
+    /// sessions go as one worklog anchored on the first work session; the others are then marked
+    /// logged with its id.
+    fn log_work(&mut self, c: &WorklogConfirm, window: &mut Window, cx: &mut Context<Self>) {
+        let selected: Vec<Session> = c.selected_ids.iter().filter_map(|id| self.sessions.iter().find(|s| &s.id == id).cloned()).collect();
+        let Some(first) = selected.first() else { return };
+        let bulk = c.selected_ids.len() > 1;
+        let summary = worklog::summarize(&selected);
+        let uploadable: Vec<&Session> = selected.iter().filter(|s| summary.uploadable_ids.contains(&s.id)).collect();
+        let (anchor, key, extra, success) = if bulk {
+            let Some(anchor) = uploadable.first() else {
+                self.toast(false, "Select at least one work or stopwatch session.".into(), cx);
+                return;
+            };
+            let key = anchor.issue_id.clone().unwrap_or_default();
+            let extra: Vec<String> = uploadable.iter().skip(1).map(|s| s.id.clone()).collect();
+            let message = format!("Logged {}m to {key} ({} work sessions combined)", (summary.total_duration_seconds as f64 / 60.0).round() as i64, uploadable.len());
+            (anchor.id.clone(), key, extra, message)
+        } else {
+            let key = first.issue_id.clone().unwrap_or_default();
+            let message = format!("Logged {}m to {key}", (first.actual_duration_seconds as f64 / 60.0).round() as i64);
+            (first.id.clone(), key, vec![], message)
+        };
         let input = WorklogLogInput {
-            session_id: first.clone(),
-            issue_key,
-            selected_session_ids: Some(c.selected_ids.clone()),
+            session_id: anchor,
+            issue_key: key.clone(),
+            selected_session_ids: bulk.then(|| c.selected_ids.clone()),
             start_time_override: Some(c.start_time.clone()),
             end_time_override: Some(c.end_time.clone()),
             description_override: Some(c.description.clone()),
         };
-        self.error = match self.svc.worklog_log(&input) {
-            Ok(_) => None,
-            Err(e) => Some(e.to_string()),
-        };
+        let svc = self.svc.clone();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = cx
+                .background_executor()
+                .spawn(async move {
+                    let logged = svc.worklog_log(&input)?;
+                    if !extra.is_empty() {
+                        svc.mark_worklog_logged(&extra, &logged.worklog_id)?;
+                    }
+                    Ok::<_, lizmeter_services::ServiceError>(())
+                })
+                .await;
+            let _ = this.update_in(cx, |p, window, cx| {
+                match result {
+                    Ok(()) => {
+                        p.toast(true, success, cx);
+                        p.refresh(window, cx);
+                    }
+                    Err(e) if bulk => p.toast(false, e.to_string(), cx),
+                    Err(e) => p.toast(false, worklog::failure_message(&e.to_string(), &key), cx),
+                }
+                cx.notify();
+            });
+        })
+        .detach();
     }
 
     fn worklog_button(&self, s: &Session, label: &'static str, color: u32, small: bool, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -556,6 +621,35 @@ impl Render for HistoryPage {
         let mut root = div().relative().flex().flex_1().h_full().child(page_shell("history-page", 720.0, body));
         if let Some(d) = &self.worklog {
             root = root.child(window_layer(window, d.clone()));
+        }
+        if !self.toasts.is_empty() {
+            let mut stack = div().absolute().bottom(px(24.0)).right(px(24.0)).flex().flex_col().gap(px(8.0));
+            for t in &self.toasts {
+                let (id, color) = (t.id, if t.success { TN_GREEN } else { TN_RED });
+                let m = me.clone();
+                stack = stack.child(
+                    ui_text(14.0)
+                        .id(SharedString::from(format!("toast-{id}")))
+                        .max_w(px(320.0))
+                        .px(px(16.0))
+                        .py(px(10.0))
+                        .rounded(px(6.0))
+                        .border(px(1.0))
+                        .border_color(col(c_alpha(color, 0.267)))
+                        .bg(col(c_alpha(color, 0.067)))
+                        .font_weight(FontWeight(500.0))
+                        .text_color(col(color))
+                        .cursor_pointer()
+                        .on_click(move |_, _, app| {
+                            m.update(app, |p, cx| {
+                                p.toasts.retain(|t| t.id != id);
+                                cx.notify();
+                            })
+                        })
+                        .child(t.message.clone()),
+                );
+            }
+            root = root.child(stack);
         }
         root
     }

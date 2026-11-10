@@ -3,7 +3,30 @@
 
 use chrono::{Local, NaiveDateTime, TimeZone, Utc};
 use lizmeter_core::Session;
-pub use lizmeter_services::worklog_merge::{is_uploadable, iso_from_ms, merged_blocks, parse_ms, session_times, summarize, Block, Summary};
+pub use lizmeter_services::worklog_merge::{iso_from_ms, parse_ms, summarize, Summary};
+#[cfg(test)]
+use lizmeter_services::worklog_merge::merged_blocks;
+
+/// The toast a failed single-session log shows (`handleLogWork`): the provider error mapped to a
+/// plain sentence, in the order the checks run.
+pub fn failure_message(error: &str, issue_key: &str) -> String {
+    let has = |needles: &[&str]| needles.iter().any(|n| error.contains(n));
+    if has(&["authentication", "credentials"]) {
+        "Jira authentication failed. Check your credentials.".into()
+    } else if has(&["not found", "NOT_FOUND"]) {
+        format!("Issue {issue_key} not found in Jira.")
+    } else if has(&["rate limit", "RATE_LIMITED"]) {
+        "Jira rate limit reached. Try again later.".into()
+    } else if has(&["reach", "NETWORK_ERROR"]) {
+        "Could not reach Jira. Check your connection.".into()
+    } else if has(&["already logged", "INELIGIBLE"]) {
+        "Worklog already logged for this session.".into()
+    } else if has(&["60 seconds", "minimum"]) {
+        "Session too short (minimum 60 seconds for Jira).".into()
+    } else {
+        "Failed to log work to Jira.".into()
+    }
+}
 
 /// `3600 -> "1h"`, `5400 -> "1h 30m"`, `45 -> "45s"` (`formatDuration` of the dialog).
 pub fn format_duration(seconds: i64) -> String {
@@ -76,8 +99,20 @@ pub fn check(uploadable_count: usize, start: &str, end: &str, summary: &Summary)
 
 #[cfg(test)]
 mod tests {
-    use super::{check, defaults, format_duration, from_local_value, iso_from_ms, merged_blocks, summarize, to_local_value};
+    use super::{check, defaults, failure_message, format_duration, from_local_value, iso_from_ms, merged_blocks, summarize, to_local_value};
     use lizmeter_core::{Session, TimerType, WorklogStatus};
+
+    #[test]
+    fn a_failed_log_is_worded_for_the_person_not_the_provider() {
+        let m = |e: &str| failure_message(e, "PROJ-1");
+        assert_eq!(m("Jira credentials are invalid. Check your email and API token."), "Jira authentication failed. Check your credentials.");
+        assert_eq!(m("Resource not found in Jira. The issue may have been deleted."), "Issue PROJ-1 not found in Jira.");
+        assert_eq!(m("Jira API rate limit reached. Try again in a few minutes."), "Jira rate limit reached. Try again later.");
+        assert_eq!(m("Could not reach https://x.atlassian.net. Check the domain and your internet connection."), "Could not reach Jira. Check your connection.");
+        assert_eq!(m("Only work and stopwatch sessions can be uploaded to Jira"), "Failed to log work to Jira.");
+        assert_eq!(m("Session duration is less than 60 seconds (Jira minimum)"), "Session too short (minimum 60 seconds for Jira).");
+        assert_eq!(m("boom"), "Failed to log work to Jira.");
+    }
 
     fn session(id: &str, timer_type: TimerType, secs: i64, completed: &str) -> Session {
         Session {

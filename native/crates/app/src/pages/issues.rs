@@ -191,11 +191,16 @@ impl IssuesPage {
                 }
             }
             ["tab", name] => {
-                self.tab = match *name {
+                let tab = match *name {
                     "linear" => Tab::Linear,
                     "jira" => Tab::Jira,
                     _ => Tab::Github,
                 };
+                if self.fixture {
+                    self.tab = tab;
+                } else {
+                    self.switch_tab(tab, cx);
+                }
             }
             _ => {}
         }
@@ -257,7 +262,7 @@ impl IssuesPage {
                 .border_b_2()
                 .border_color(col(if on { TN_BLUE } else { TRANSPARENT }))
                 .text_size(px(12.0))
-                .line_height(px(15.0))
+                .line_height(px(13.0))
                 .font_weight(FontWeight(600.0))
                 .text_color(col(if on { TN_BLUE } else { TN_TEXT_DIM }))
                 .cursor_pointer()
@@ -416,9 +421,11 @@ impl IssuesPage {
             .on_click(move |_, _, app| me.update(app, |p, cx| p.toggle_card(&picked, cx)))
     }
 
-    /// Title, repo, priority and label chips: the part of a card that does not change when it opens.
+    /// Title, repo (`.cardMeta`, under the title), priority and label chips: the part of a card that does not change when it opens.
     fn card_body(&self, mut body: Stateful<Div>, card: &Card) -> Stateful<Div> {
         let mut inner = div().flex().flex_col();
+        let has_chips = card.priority.is_some() || card.assignee.is_some() || !card.labels.is_empty();
+        inner = inner.child(ui_text(15.0).mb(px(if has_chips { 10.0 } else { 10.0 })).line_height(px(22.5)).font_weight(FontWeight(500.0)).text_color(col(TN_TEXT)).child(card.title.clone()));
         if let Some(repo) = &card.repo {
             inner = inner.child(
                 div().mb(px(8.0)).flex().flex_row().child(
@@ -426,8 +433,6 @@ impl IssuesPage {
                 ),
             );
         }
-        let has_chips = card.priority.is_some() || card.assignee.is_some() || !card.labels.is_empty();
-        inner = inner.child(ui_text(15.0).mb(px(if has_chips { 10.0 } else { 10.0 })).line_height(px(22.5)).font_weight(FontWeight(500.0)).text_color(col(TN_TEXT)).child(card.title.clone()));
         let mut chips = div().flex().flex_row().flex_wrap().gap(px(6.0));
         if let Some((label, level)) = &card.priority {
             chips = chips.child(Self::badge(label, priority_color(*level)));
