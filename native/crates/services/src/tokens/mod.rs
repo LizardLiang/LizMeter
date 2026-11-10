@@ -74,6 +74,7 @@ pub enum MigrationState {
 pub struct TokenStore {
     dir: PathBuf,
     user_data: PathBuf,
+    write_lock: std::sync::Mutex<()>,
 }
 
 impl fmt::Debug for TokenStore {
@@ -84,7 +85,7 @@ impl fmt::Debug for TokenStore {
 
 impl TokenStore {
     pub fn new(user_data: &Path) -> Self {
-        TokenStore { dir: user_data.join("native-tokens"), user_data: user_data.to_path_buf() }
+        TokenStore { dir: user_data.join("native-tokens"), user_data: user_data.to_path_buf(), write_lock: std::sync::Mutex::new(()) }
     }
 
     pub fn user_data(&self) -> &Path {
@@ -118,8 +119,9 @@ impl TokenStore {
         String::from_utf8(plain).ok().map(Secret::new)
     }
 
+    /// Whether a token is stored and opens for this Windows user.
     pub fn has(&self, p: Provider) -> bool {
-        self.path(p).exists()
+        self.load(p).is_some()
     }
 
     pub fn delete(&self, p: Provider) {
@@ -127,10 +129,14 @@ impl TokenStore {
     }
 
     pub fn states(&self) -> BTreeMap<Provider, MigrationState> {
-        std::fs::read(self.status_path()).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+        match std::fs::read(self.status_path()) {
+            Ok(b) => serde_json::from_slice(&b).unwrap_or_else(|_| Provider::ALL.into_iter().map(|p| (p, MigrationState::Done)).collect()),
+            Err(_) => BTreeMap::new(),
+        }
     }
 
     pub fn set_state(&self, p: Provider, state: MigrationState) -> Result<(), String> {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let mut all = self.states();
         all.insert(p, state);
         let json = serde_json::to_vec_pretty(&all).map_err(|e| e.to_string())?;
@@ -167,7 +173,7 @@ mod tests {
         let store = TokenStore::new(dir.path());
         std::fs::create_dir_all(dir.path().join("native-tokens")).unwrap();
         std::fs::write(dir.path().join("native-tokens").join("jira.dpapi"), dpapi::protect_plain(b"x").unwrap()).unwrap();
-        assert!(store.has(Provider::Jira));
+        assert!(!store.has(Provider::Jira), "a blob that does not open is not a configured token");
         assert!(store.load(Provider::Jira).is_none());
     }
 

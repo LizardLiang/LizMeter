@@ -26,6 +26,8 @@ pub(crate) struct Hub {
     pub(crate) tokens: TokenStore,
     endpoints: Mutex<Endpoints>,
     http: OnceLock<Client>,
+    /// Bumped when a token or setting changes; a fetch that started before the bump does not cache.
+    epoch: std::sync::atomic::AtomicU64,
     github_issues: Mutex<HashMap<String, Vec<Issue>>>,
     github_user: Mutex<Option<String>>,
     linear_issues: Mutex<HashMap<String, Vec<LinearIssue>>>,
@@ -38,6 +40,7 @@ impl Hub {
             tokens: TokenStore::new(user_data),
             endpoints: Mutex::new(Endpoints::from_env()),
             http: OnceLock::new(),
+            epoch: std::sync::atomic::AtomicU64::new(0),
             github_issues: Mutex::default(),
             github_user: Mutex::default(),
             linear_issues: Mutex::default(),
@@ -53,7 +56,12 @@ impl Hub {
         lock(&self.endpoints).clone()
     }
 
+    fn epoch(&self) -> u64 {
+        self.epoch.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     fn clear_caches(&self) {
+        self.epoch.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         lock(&self.github_issues).clear();
         *lock(&self.github_user) = None;
         lock(&self.linear_issues).clear();
@@ -205,9 +213,11 @@ impl Services {
         if let Some(hit) = lock(&self.hub.github_issues).get(&key) {
             return Ok(hit.clone());
         }
-        let endpoints = self.hub.endpoints();
+        let (endpoints, epoch) = (self.hub.endpoints(), self.hub.epoch());
         let issues = self.github_client(&token, &endpoints).list_issues(input.repo.as_deref())?;
-        lock(&self.hub.github_issues).insert(key, issues.clone());
+        if epoch == self.hub.epoch() {
+            lock(&self.hub.github_issues).insert(key, issues.clone());
+        }
         Ok(issues)
     }
 
@@ -276,9 +286,11 @@ impl Services {
         if let Some(hit) = lock(&self.hub.linear_issues).get(&team_id) {
             return Ok(hit.clone());
         }
-        let endpoints = self.hub.endpoints();
+        let (endpoints, epoch) = (self.hub.endpoints(), self.hub.epoch());
         let issues = self.linear_client(&key, &endpoints).fetch_issues(&team_id)?;
-        lock(&self.hub.linear_issues).insert(team_id, issues.clone());
+        if epoch == self.hub.epoch() {
+            lock(&self.hub.linear_issues).insert(team_id, issues.clone());
+        }
         Ok(issues)
     }
 
@@ -372,8 +384,11 @@ impl Services {
         if let Some(hit) = lock(&self.hub.jira_issues).get(&key) {
             return Ok(hit.clone());
         }
+        let epoch = self.hub.epoch();
         let issues = self.with_jira(|j| j.fetch_issues(project.as_deref(), jql.as_deref()))?;
-        lock(&self.hub.jira_issues).insert(key, issues.clone());
+        if epoch == self.hub.epoch() {
+            lock(&self.hub.jira_issues).insert(key, issues.clone());
+        }
         Ok(issues)
     }
 
