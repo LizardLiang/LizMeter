@@ -7,7 +7,7 @@
 //!
 //! A file source can seek (the decoder restarts at the offset). A stream source (yt-dlp output still
 //! arriving) cannot until the track is cached; [`Transport::mark_seekable`] then points it at the
-//! finished file. Speed is applied by ffmpeg's `atempo`, so it follows the same rule.
+//! finished file. Speed is applied by the in-process stretch (cached file) or ffmpeg's `atempo`, so it follows the same rule.
 
 use crate::error::{MusicError, Result};
 use crate::native;
@@ -228,7 +228,7 @@ impl Transport {
         }
     }
 
-    /// Changes the tempo. Applies at once for a seekable source (ffmpeg restarts at the current
+    /// Changes the tempo. Applies at once for a seekable source (the decoder restarts at the current
     /// position) and at the next seek or load for a stream that is still arriving.
     pub fn set_speed(&self, speed: f64) -> Result<()> {
         let mut g = lock(&self.inner);
