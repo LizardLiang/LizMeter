@@ -3307,6 +3307,7 @@ dependencies = [
  "png 0.18.1",
  "raw-window-handle",
  "serde_json",
+ "tempfile",
  "windows 0.61.3",
 ]
 

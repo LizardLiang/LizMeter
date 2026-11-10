@@ -9,6 +9,7 @@ mod chrome;
 mod gallery;
 mod modal;
 mod music_cli;
+mod music_hub;
 mod controls;
 mod engine;
 mod flow;
@@ -47,7 +48,7 @@ mod embedded {
     pub struct Assets;
     impl AssetSource for Assets {
         fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-            Ok(ICONS.iter().find(|(p, _)| *p == path).map(|(_, b)| Cow::Borrowed(*b)).or_else(|| crate::pages::todos_icons::load(path)))
+            Ok(ICONS.iter().find(|(p, _)| *p == path).map(|(_, b)| Cow::Borrowed(*b)).or_else(|| crate::pages::todos_icons::load(path)).or_else(|| crate::pages::music_icons::load(path)))
         }
         fn list(&self, _path: &str) -> Result<Vec<SharedString>> {
             Ok(ICONS.iter().map(|(p, _)| SharedString::from(*p)).collect())
@@ -175,6 +176,12 @@ fn main() {
     let mut args_steps = std::mem::take(&mut args.steps);
     let mut args_html = args.html.take();
     let args_focus = args.focus;
+    // The system media keys belong to the live app: not to a screenshot or a headless hook.
+    if !shot && args.ops.is_empty() && args.page != "widget" {
+        if let Some(manager) = services.clone().and_then(music_hub::start_media_keys) {
+            std::mem::forget(manager);
+        }
+    }
     let for_shutdown = services.clone();
     let services_bg = services.clone();
     Application::new().with_assets(embedded::Assets).run(move |cx: &mut App| {
@@ -230,6 +237,7 @@ fn main() {
                 "claude" => (Page::Claude, true, false),
                 "todos" => (Page::Todos, true, false),
                 "issues" => (Page::Issues, true, false),
+                name if name.starts_with("music") => (Page::Music, true, false),
                 name if name.starts_with("activity") => (Page::Activity, true, false),
                 name if name.starts_with("stats") => (Page::Stats, true, false),
                 _ => (Page::Timer, true, false),

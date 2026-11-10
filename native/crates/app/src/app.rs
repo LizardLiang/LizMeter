@@ -8,7 +8,10 @@ use crate::modal::IssuePrompt;
 use crate::pages::activity::ActivityPage;
 use crate::pages::claude::ClaudePage;
 use crate::pages::history::HistoryPage;
+use crate::music_hub::{HubEvent, MusicHub};
 use crate::pages::issues::IssuesPage;
+use crate::pages::music::MusicPage;
+use crate::pages::music_bar::{MusicBar, BAR_HEIGHT};
 use crate::pages::settings::SettingsPage;
 use crate::pages::stats::StatsPage;
 use crate::pages::tags::TagsPage;
@@ -16,6 +19,7 @@ use crate::pages::todos::TodosPage;
 use crate::tag_picker::TagPicker;
 use crate::ui::*;
 use crate::gallery;
+use gpui::prelude::FluentBuilder;
 use gpui::*;
 use lizmeter_core::{IssueRef, StopwatchSettings, Tag};
 use lizmeter_services::Services;
@@ -34,6 +38,7 @@ pub enum Page {
     Tags,
     Todos,
     Issues,
+    Music,
     Settings,
     Claude,
     Activity,
@@ -109,6 +114,9 @@ pub struct Root {
     pub activity: Entity<ActivityPage>,
     pub claude_page: Entity<ClaudePage>,
     pub todos: Entity<TodosPage>,
+    pub music_hub: Entity<MusicHub>,
+    pub music_bar: Entity<MusicBar>,
+    pub music: Entity<MusicPage>,
     /// A session was saved while History was not refreshed; the next History render reloads.
     pub history_stale: bool,
 }
@@ -153,6 +161,16 @@ impl Root {
         let claude_page = cx.new(|_| ClaudePage::new(svc.clone()));
         let todos = cx.new(|cx| TodosPage::new(svc.clone(), window, cx));
         cx.subscribe_in(&todos, window, Self::on_page_event::<TodosPage>).detach();
+
+        let music_hub = cx.new(|cx| MusicHub::new(svc.clone(), cx));
+        cx.subscribe(&music_hub, |_, _, ev: &HubEvent, cx| {
+            if matches!(ev, HubEvent::Structure) {
+                cx.notify();
+            }
+        })
+        .detach();
+        let music_bar = cx.new(|cx| MusicBar::new(music_hub.clone(), cx));
+        let music = cx.new(|cx| MusicPage::new(svc.clone(), music_hub.clone(), window, cx));
 
         let idle = claude_flow::idle_minutes_from(svc.get_setting_value("claude_tracker.idle_threshold_minutes").ok().flatten().as_deref());
         let cc_select_timer = cx.new(|_| ClaudeSessionSelect::new(svc.clone(), "cc-timer"));
@@ -203,6 +221,9 @@ impl Root {
             activity,
             claude_page,
             todos,
+            music_hub,
+            music_bar,
+            music,
             history_stale: false,
         };
         root.reload_tags(cx);
@@ -229,6 +250,9 @@ impl Root {
         }
         if page == Page::Issues {
             root.show_issues(cx);
+        }
+        if page == Page::Music {
+            root.show_music(cx);
         }
         root
     }
@@ -396,6 +420,12 @@ impl Root {
         cx.notify();
     }
 
+    pub fn show_music(&mut self, cx: &mut Context<Self>) {
+        self.music.update(cx, |m, cx| m.show(cx));
+        self.page = Page::Music;
+        cx.notify();
+    }
+
     pub fn show_claude(&mut self, cx: &mut Context<Self>) {
         self.claude_page.update(cx, |c, cx| c.show(cx));
         self.page = Page::Claude;
@@ -422,6 +452,7 @@ impl Root {
             Page::Issues => Some(3),
             Page::Claude => Some(4),
             Page::Activity => Some(5),
+            Page::Music => Some(6),
             Page::Stats => Some(7),
             Page::Tags => Some(8),
             Page::Settings => Some(9),
@@ -508,6 +539,7 @@ impl Root {
             3 => Page::Issues,
             4 => Page::Claude,
             5 => Page::Activity,
+            6 => Page::Music,
             7 => Page::Stats,
             8 => Page::Tags,
             9 => Page::Settings,
@@ -519,6 +551,7 @@ impl Root {
         self.link_dropdown = None;
         self.settings.update(cx, |s, _| s.hide());
         self.activity.update(cx, |a, _| a.hide());
+        self.music.update(cx, |m, _| m.hide());
         if self.page != Self::page_for(index) {
             lizmeter_ui::scrollbar::reset_all();
         }
@@ -532,6 +565,7 @@ impl Root {
             3 => self.show_issues(cx),
             4 => self.show_claude(cx),
             5 => self.show_activity(cx),
+            6 => self.show_music(cx),
             7 => self.show_stats(cx),
             8 => self.show_tags(cx),
             9 => self.show_settings(cx),
@@ -584,6 +618,7 @@ impl Render for Root {
             Page::Issues => self.issues.clone().into_any_element(),
             Page::Claude => self.claude_page.clone().into_any_element(),
             Page::Activity => self.activity.clone().into_any_element(),
+            Page::Music => self.music.clone().into_any_element(),
             Page::Gallery => div().flex_1().h_full().overflow_hidden().child(gallery::page()).into_any_element(),
             Page::Notes(v) => {
                 let width = if v == MdVariant::Framed { 640.0 } else { 720.0 };
@@ -623,6 +658,8 @@ impl Render for Root {
                 .into_any_element(),
         };
         let sidebar = self.sidebar(cx);
+        let bar_visible = self.music_bar.read(cx).visible(cx);
+        let page = div().flex().flex_row().flex_1().h_full().min_w_0().when(bar_visible, |d| d.pb(px(BAR_HEIGHT))).child(page);
         div()
             .size_full()
             .relative()
@@ -642,6 +679,7 @@ impl Render for Root {
                     .child(sidebar)
                     .child(page),
             )
+            .children(bar_visible.then(|| div().absolute().bottom_0().left_0().right_0().child(self.music_bar.clone())))
             .children(self.notes_modal.clone().map(|m| deferred(div().absolute().top(px(32.0)).left_0().right_0().bottom_0().child(m)).with_priority(5)))
             .children(self.rich_modal.clone().map(|(m, _)| deferred(div().absolute().top(px(32.0)).left_0().right_0().bottom_0().child(m)).with_priority(5)))
             .children(self.prompt.clone().map(|(p, _)| deferred(div().absolute().top(px(32.0)).left_0().right_0().bottom_0().child(p)).with_priority(6)))

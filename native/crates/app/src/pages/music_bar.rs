@@ -265,6 +265,7 @@ impl Render for MusicBar {
             .flex_shrink_0()
             .child(
                 div()
+                    .w(px(148.0))
                     .truncate()
                     .font_family(UI_FONT)
                     .text_size(px(13.0))
@@ -273,7 +274,7 @@ impl Render for MusicBar {
                     .text_color(col(TN_TEXT))
                     .child(v.title.clone().unwrap_or_else(|| "No track".into())),
             )
-            .children(v.artist.clone().map(|a| div().truncate().font_family(UI_FONT).text_size(px(11.0)).line_height(px(14.3)).text_color(col(TN_TEXT_DIM)).child(a)));
+            .children(v.artist.clone().map(|a| div().w(px(148.0)).truncate().font_family(UI_FONT).text_size(px(11.0)).line_height(px(14.3)).text_color(col(TN_TEXT_DIM)).child(a)));
         let m_clear = me.clone();
         let clear = div()
             .id("bar-clear")

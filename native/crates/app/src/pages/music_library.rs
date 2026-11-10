@@ -556,7 +556,7 @@ impl MusicPage {
             .overflow_hidden()
             .when(focused, |d| d.shadow(shadows(&[Sh { dx: 0.0, dy: 0.0, blur: 0.0, spread: 2.0, color: rgba(122, 162, 247, 0.08) }])))
             .child(div().ml(px(12.0)).flex_shrink_0().child(ico("search", 14.0, 14.0, ICON_DIM)))
-            .child(div().flex_1().min_w_0().py(px(9.0)).pl(px(8.0)).pr(px(10.0)).child(self.library.search.clone()))
+            .child(div().flex_1().min_w_0().py(px(9.5)).pl(px(8.0)).pr(px(10.0)).child(self.library.search.clone()))
             .children(has_text.then(|| {
                 div()
                     .id("lib-clear-search")

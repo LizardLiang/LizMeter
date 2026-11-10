@@ -5,6 +5,8 @@
 //! * `music-download`: download yt-dlp and ffmpeg into `<data dir>/bin` (needs the network).
 //! * `music-play:<file>`: play a local audio file through the sound device at volume 0.1, pausing,
 //!   resuming and seeking on the way (about a second of quiet sound).
+//! * `music-library-play`: play the first cached library track through the service (the path the
+//!   Music page takes), print the state for 2 s at volume 0.1, then stop.
 //! * `music-latency:<file>`: time from each call (play, seek, speed change, seek at that speed) to
 //!   the first frame the device takes from the new source, at volume 0.1.
 
@@ -27,6 +29,9 @@ pub fn run(svc: &Services, ops: &[String]) -> Option<i32> {
         } else if let Some(file) = op.strip_prefix("music-play:") {
             ran = true;
             play(svc.music(), Path::new(file))
+        } else if op == "music-library-play" {
+            ran = true;
+            library_play(svc.music())
         } else if let Some(file) = op.strip_prefix("music-latency:") {
             ran = true;
             latency(svc.music(), Path::new(file))
@@ -156,4 +161,41 @@ fn latency(m: &MusicService, file: &Path) -> Result<(), String> {
     std::thread::sleep(Duration::from_millis(300));
     m.stop();
     Ok(())
+}
+
+fn library_play(m: &MusicService) -> Result<(), String> {
+    m.set_volume(0.1);
+    let input = lizmeter_core::MusicLibraryListInput { cached_only: Some(true), limit: Some(1), ..Default::default() };
+    let track = m.library_list(&input).map_err(|e| e.message)?.tracks.into_iter().next().ok_or("no cached track in the library")?;
+    // The app checks the binaries and opens the sound device once at start, in the background; the
+    // timed play below starts after that.
+    let warm = Instant::now();
+    m.warm_up();
+    let warm_ms = warm.elapsed().as_millis();
+    let started = Instant::now();
+    let url = track.source_url.clone();
+    // The play call itself, then the first frame the device takes: both from the same start.
+    let returned = m.play(&url, Some(track)).map(|_| started.elapsed()).map_err(|e| e.message)?;
+    let mut first_frame = None;
+    while started.elapsed() < Duration::from_millis(3000) {
+        if first_frame.is_none() && m.output().and_then(|o| o.current_feed()).is_some_and(|f| f.played_frames() > 0) {
+            first_frame = Some(started.elapsed());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let snap = m.snapshot();
+    println!(
+        "{}",
+        serde_json::json!({
+            "op": "music-library-play",
+            "warm_up_ms": warm_ms,
+            "play_returned_ms": returned.as_millis(),
+            "first_frame_ms": first_frame.map(|d| d.as_millis()),
+            "state": snap.playback_state,
+            "time": snap.current_time,
+            "native_decode": m.is_native_decode(),
+        })
+    );
+    m.stop();
+    first_frame.map(|_| ()).ok_or_else(|| "no frame reached the device".to_string())
 }

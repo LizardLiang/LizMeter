@@ -3,7 +3,7 @@
 use super::music::spinner;
 use super::music_logic::{format_bytes, format_speed};
 use super::todo_widgets::{dialog_glass, modal_overlay};
-use crate::css::{linear, rgba};
+use crate::css::rgba;
 use crate::ui::*;
 use gpui::*;
 use lizmeter_core::{BinaryDownloadProgress, BinaryInfo};
@@ -300,10 +300,10 @@ impl Render for ConsentDialog {
                         .border(px(1.0))
                         .border_color(col(rgba(224, 175, 104, 0.3)))
                         .bg(col(rgba(224, 175, 104, 0.06)))
-                        .child(div().flex_shrink_0().mt(px(1.0)).text_size(px(14.0)).line_height(px(14.0)).child("\u{26A0}"))
+                        .child(div().flex_shrink_0().mt(px(1.0)).child(super::music_ui::ico("warning-outline", 14.0, 14.0, TN_TEXT)))
                         .child(
                             div()
-                                .flex_1()
+                                .w(px(388.0))
                                 .font_family(UI_FONT)
                                 .text_size(px(12.0))
                                 .line_height(px(18.0))
@@ -372,7 +372,7 @@ impl Render for ConsentDialog {
             Phase::Loading | Phase::Error => footer.child(cancel("Close", true, me.clone())),
         };
 
-        let dialog = dialog_glass(18.0).w(px(480.0)).flex().flex_col().overflow_hidden().font_family(UI_FONT).child(header).child(body).child(footer);
+        let dialog = dialog_glass(18.0).w(px(480.0)).flex().flex_col().overflow_hidden().font_family(UI_FONT).child(header).child(body).child(footer).children(escape);
         let close = me;
         let overlay = modal_overlay(
             "music-consent",
@@ -386,8 +386,7 @@ impl Render for ConsentDialog {
                 })
             },
         );
-        let _ = linear;
-        div().child(overlay).children(escape)
+        overlay
     }
 }
 

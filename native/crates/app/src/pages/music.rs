@@ -380,7 +380,8 @@ impl MusicPage {
             } else {
                 ico("url-play", 16.0, 16.0, if enabled { TN_BLUE } else { rgba(65, 72, 104, 1.0) }).into_any_element()
             });
-        let field = div().flex_1().px(px(16.0)).py(px(12.0)).child(self.url.clone());
+        // 16 x 12 of the CSS plus the 1px border the glass frame paints inside its box.
+        let field = div().flex_1().px(px(17.0)).py(px(13.0)).child(self.url.clone());
         let mut form = div().mb(px(24.0)).child(url_frame(focused).flex().flex_row().overflow_hidden().child(field).child(button));
         if let Some(since) = self.extracting {
             let slow = since.elapsed() >= Duration::from_secs(5);
@@ -443,7 +444,8 @@ impl MusicPage {
             .flex()
             .flex_row()
             .gap(px(2.0))
-            .p(px(3.0));
+            // 3px of the CSS plus the 1px border the glass frame paints inside its box.
+            .p(px(4.0));
         for tab in Tab::ALL {
             let active = self.tab == tab;
             let me = cx.entity();
@@ -483,7 +485,8 @@ impl MusicPage {
             .solid(rgba(16, 18, 36, 0.45))
             .border(1.0, rgba(122, 162, 247, 0.1))
             .inset(0.0, 1.0, wh(0.06));
-        Glass::new(12.0, 20.0, 1.4, spec).shadows(&[sh(0.0, 4.0, 24.0, bk(0.25))]).el().min_h(px(240.0)).flex().flex_col().overflow_hidden().child(body)
+        // The 1px border is painted inside the box, so the content sits one pixel in from each edge.
+        Glass::new(12.0, 20.0, 1.4, spec).shadows(&[sh(0.0, 4.0, 24.0, bk(0.25))]).el().min_h(px(240.0)).flex().flex_col().overflow_hidden().p(px(1.0)).child(body)
     }
 
     fn toast_layer(&self) -> Option<impl IntoElement> {
@@ -521,7 +524,7 @@ pub fn spinner(size: f32) -> AnyElement {
 
 impl Render for MusicPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let heading = page_heading("Music").mt(px(8.7)).mb(px(24.0));
+        let heading = page_heading("Music").mt(px(8.7)).mb(px(22.0));
         let banner = self.setup_banner(cx);
         let url_bar = self.url_bar(window, cx);
         let tabs = self.tab_bar(cx);

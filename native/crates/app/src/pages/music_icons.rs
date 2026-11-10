@@ -52,6 +52,7 @@ const EMPTY_LIBRARY: &str = glyph!(
     "0 0 24 24",
     r#"<path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/><path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z"/>"#
 );
+const WARNING_OUTLINE: &str = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#000" stroke-width="1.1" stroke-linejoin="round" stroke-linecap="round"><path d="M8 1.8 15 14H1z"/><path d="M8 6.2v4"/><circle cx="8" cy="12" r="0.45" fill="#000"/></svg>"##;
 const SORT_UP: &str = glyph!("0 0 24 24", r#"<path d="M7 14l5-5 5 5z"/>"#);
 
 fn volume(parts: &[&str]) -> String {
@@ -95,6 +96,7 @@ pub fn load(path: &str) -> Option<Cow<'static, [u8]>> {
         "empty-queue" => fixed(EMPTY_QUEUE),
         "empty-library" => fixed(EMPTY_LIBRARY),
         "sort-up" => fixed(SORT_UP),
+        "warning-outline" => fixed(WARNING_OUTLINE),
         "vol-high" => Some(Cow::Owned(volume(&[WAVE_HIGH, WAVE_LOW]).into_bytes())),
         "vol-low" => Some(Cow::Owned(volume(&[WAVE_LOW]).into_bytes())),
         "vol-muted" => Some(Cow::Owned(volume(&[WAVE_MUTE]).into_bytes())),
@@ -111,7 +113,7 @@ mod tests {
         for name in [
             "play", "pause", "prev", "next", "note", "shuffle", "repeat", "repeat-one", "clear", "buffering", "dots", "chevron", "plus",
             "play-small", "url-play", "pencil", "trash", "grip", "close", "search", "download", "check-circle", "warning", "arrow-left",
-            "track-note", "empty-queue", "empty-library", "sort-up", "vol-high", "vol-low", "vol-muted",
+            "track-note", "empty-queue", "empty-library", "sort-up", "warning-outline", "vol-high", "vol-low", "vol-muted",
         ] {
             let svg = String::from_utf8(load(&format!("music/{name}.svg")).unwrap_or_else(|| panic!("{name} missing")).into_owned()).unwrap();
             assert!(svg.starts_with("<svg ") && svg.ends_with("</svg>"), "{name}: {svg}");

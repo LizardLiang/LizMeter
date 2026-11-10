@@ -313,6 +313,14 @@ impl Root {
                 let op = op.trim_start_matches("history-").to_string();
                 self.history.update(cx, |h, cx| h.capture(&op, window, cx));
             }
+            op if op.starts_with("music-") => {
+                let op = op.trim_start_matches("music-").to_string();
+                if op == "speed-menu" {
+                    self.music_bar.update(cx, |b, cx| b.capture_speed_menu(cx));
+                } else {
+                    self.music.update(cx, |p, cx| p.capture(&op, window, cx));
+                }
+            }
             op if op.starts_with("issues-") => {
                 let op = op.trim_start_matches("issues-").to_string();
                 self.issues.update(cx, |p, cx| p.capture(&op, cx));
