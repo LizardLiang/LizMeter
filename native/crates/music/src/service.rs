@@ -134,6 +134,9 @@ pub struct MusicService {
     pub(crate) extractor: Arc<Extractor>,
     output_kind: OutputKind,
     transport: Mutex<Option<Arc<Transport>>>,
+    /// Held while the transport is being made (opening the sound device can take seconds), so a
+    /// reader of `transport` never waits for it.
+    creating: Mutex<()>,
     pub(crate) st: Mutex<State>,
     /// Held while a play request is replaced or committed, so "is this request still current" and
     /// "load it" are one step.
@@ -173,6 +176,7 @@ impl MusicService {
             pm,
             output_kind: output,
             transport: Mutex::new(None),
+            creating: Mutex::new(()),
             st: Mutex::new(State {
                 queue: QueueState::new(seed()),
                 current_track: None,
@@ -240,9 +244,12 @@ impl MusicService {
 
     /// The transport, created (and the sound device opened) on first use.
     fn transport(&self) -> Result<Arc<Transport>> {
-        let mut g = lock(&self.transport);
-        if let Some(t) = g.as_ref() {
-            return Ok(t.clone());
+        if let Some(t) = lock(&self.transport).clone() {
+            return Ok(t);
+        }
+        let _creating = lock(&self.creating);
+        if let Some(t) = lock(&self.transport).clone() {
+            return Ok(t);
         }
         let output = match self.output_kind {
             OutputKind::Device => OutputHandle::open_device()?,
@@ -256,7 +263,7 @@ impl MusicService {
             let _ = t.set_speed(st.speed);
         }
         spawn_worker(self.me.clone(), rx);
-        *g = Some(t.clone());
+        *lock(&self.transport) = Some(t.clone());
         Ok(t)
     }
 
