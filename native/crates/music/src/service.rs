@@ -269,6 +269,13 @@ impl MusicService {
         self.transport_if_any().map(|t| t.output().clone())
     }
 
+    /// Does the slow first-use work now: runs each binary once (about a second) and opens the
+    /// sound device, so the first play does not wait for either. Call it off the UI thread.
+    pub fn warm_up(&self) {
+        let _ = self.bins.check();
+        let _ = self.transport();
+    }
+
     /// Whether the loaded source decodes inside the app rather than through an ffmpeg process.
     pub fn is_native_decode(&self) -> bool {
         self.transport_if_any().is_some_and(|t| t.is_native())

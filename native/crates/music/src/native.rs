@@ -136,3 +136,54 @@ fn run(mut o: Opened, feed: Arc<Feed>, tempo: f64) {
         feed.finish();
     }
 }
+
+/// A cached file opened only to ask whether it is whole: its length, and whether audio decodes
+/// near its end. This is what `ffmpeg -i` and `ffmpeg -ss <end> -t 1` answer, without starting a
+/// process (which costs 1-2 s on this machine for each question).
+pub struct ProbeFile {
+    format: Box<dyn FormatReader>,
+    decoder: Box<dyn Decoder>,
+    track_id: u32,
+    duration: f64,
+}
+
+impl ProbeFile {
+    /// `None` when symphonia cannot read the file or does not know its length: ffmpeg decides.
+    pub fn open(path: &Path) -> Option<ProbeFile> {
+        let file = File::open(path).ok()?;
+        let stream = MediaSourceStream::new(Box::new(file), Default::default());
+        let probed = symphonia::default::get_probe()
+            .format(&Hint::new(), stream, &FormatOptions { enable_gapless: true, ..Default::default() }, &MetadataOptions::default())
+            .ok()?;
+        let format = probed.format;
+        let track = format.tracks().iter().find(|t| t.codec_params.codec != CODEC_TYPE_NULL)?;
+        let (params, track_id) = (track.codec_params.clone(), track.id);
+        let (frames, tb) = (params.n_frames?, params.time_base?);
+        let t = tb.calc_time(frames);
+        let duration = t.seconds as f64 + t.frac;
+        let decoder = symphonia::default::get_codecs().make(&params, &DecoderOptions::default()).ok()?;
+        Some(ProbeFile { format, decoder, track_id, duration })
+    }
+
+    /// The container's length in seconds.
+    pub fn duration(&self) -> f64 {
+        self.duration
+    }
+
+    /// Whether a packet decodes after seeking to `secs`.
+    pub fn can_decode_at(&mut self, secs: f64) -> bool {
+        let to = SeekTo::Time { time: Time::from(secs.max(0.0)), track_id: Some(self.track_id) };
+        if self.format.seek(SeekMode::Accurate, to).is_err() {
+            return false;
+        }
+        self.decoder.reset();
+        for _ in 0..8 {
+            let Ok(packet) = self.format.next_packet() else { return false };
+            if packet.track_id() != self.track_id {
+                continue;
+            }
+            return self.decoder.decode(&packet).is_ok();
+        }
+        false
+    }
+}

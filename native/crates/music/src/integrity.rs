@@ -81,8 +81,25 @@ fn num(x: f64) -> String {
     }
 }
 
-/// Probes one cached track. `None` means healthy.
+/// Probes one cached track with ffmpeg. `None` means healthy.
 pub fn probe_track(track: &InternalTrackRecord, ffmpeg: &Path, timeout: Duration) -> Option<DamagedTrackInfo> {
+    probe_with(track, &|file| container_duration(file, ffmpeg, timeout), &|file, seek| can_decode_at(file, ffmpeg, seek, timeout))
+}
+
+/// Probes one cached track in this process when symphonia can read it (no ffmpeg start-up), else
+/// with ffmpeg. `None` means healthy.
+pub fn probe_track_fast(track: &InternalTrackRecord, ffmpeg: &Path, timeout: Duration) -> Option<DamagedTrackInfo> {
+    let file = Path::new(track.cached_file_path.as_deref()?);
+    if let Some(native) = file.exists().then(|| crate::native::ProbeFile::open(file)).flatten() {
+        let native = std::cell::RefCell::new(native);
+        return probe_with(track, &|_| Some(native.borrow().duration()), &|_, seek| native.borrow_mut().can_decode_at(seek));
+    }
+    probe_track(track, ffmpeg, timeout)
+}
+
+/// The two questions of a probe, answered by `container_of` (length in seconds) and `decodes` (does
+/// audio decode at this second).
+fn probe_with(track: &InternalTrackRecord, container_of: &dyn Fn(&Path) -> Option<f64>, decodes: &dyn Fn(&Path, f64) -> bool) -> Option<DamagedTrackInfo> {
     let file = Path::new(track.cached_file_path.as_deref()?);
     if !file.exists() {
         return Some(damaged(track, DamageReason::Missing, "Cache file no longer exists on disk".into(), None));
@@ -95,7 +112,7 @@ pub fn probe_track(track: &InternalTrackRecord, ffmpeg: &Path, timeout: Duration
         Err(_) => return Some(damaged(track, DamageReason::Unreadable, "Cannot read cache file".into(), None)),
     }
 
-    let Some(container) = container_duration(file, ffmpeg, timeout) else {
+    let Some(container) = container_of(file) else {
         return Some(damaged(track, DamageReason::Corrupt, "Cannot read audio metadata (missing moov atom or invalid container)".into(), None));
     };
 
@@ -116,7 +133,7 @@ pub fn probe_track(track: &InternalTrackRecord, ffmpeg: &Path, timeout: Duration
     let reference = expected.unwrap_or(container);
     if reference > 10.0 {
         let seek = reference - 5.0;
-        if !can_decode_at(file, ffmpeg, seek, timeout) {
+        if !decodes(file, seek) {
             return Some(damaged(
                 track,
                 DamageReason::Truncated,
@@ -145,7 +162,7 @@ impl IntegrityChecker {
         if !ffmpeg.exists() {
             return None;
         }
-        probe_track(track, &ffmpeg, FINALIZE_TIMEOUT)
+        probe_track_fast(track, &ffmpeg, FINALIZE_TIMEOUT)
     }
 
     /// Scans every cached track. Only one scan runs at a time.

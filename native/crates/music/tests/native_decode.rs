@@ -182,3 +182,57 @@ fn a_cut_off_file_ends_instead_of_hanging() {
     let ev = r.ended(10);
     assert!(matches!(ev.kind, FeedEvent::Ended | FeedEvent::Failed(_)), "{ev:?}");
 }
+
+fn record(path: &Path, expected: Option<f64>) -> lizmeter_db::InternalTrackRecord {
+    lizmeter_db::InternalTrackRecord {
+        id: "t".into(),
+        source_url: "https://example.com/t".into(),
+        source_id: "t".into(),
+        source_site: "youtube".into(),
+        title: "T".into(),
+        artist: None,
+        duration_seconds: expected,
+        thumbnail_url: None,
+        cached_file_path: Some(path.to_string_lossy().into_owned()),
+        cache_size_bytes: None,
+        play_count: 0,
+        last_played_at: None,
+        added_at: "2026-01-01T00:00:00.000Z".into(),
+    }
+}
+
+#[test]
+fn the_play_time_probe_needs_no_ffmpeg_for_a_file_it_can_read() {
+    let ff = need_ffmpeg!();
+    let r = rig(&ff, 44_100);
+    let file = r.dir.path().join("whole.m4a");
+    common::make_tone_with(&ff, &file, 14.0, 440, &["-ac", "2", "-c:a", "aac", "-b:a", "64k", "-movflags", "+faststart"]);
+    // A path that cannot run: a verdict still comes, so no process was started.
+    let nowhere = r.dir.path().join("no-ffmpeg.exe");
+    let t0 = Instant::now();
+    assert!(lizmeter_music::integrity::probe_track_fast(&record(&file, Some(14.0)), &nowhere, Duration::from_secs(5)).is_none(), "a whole file is healthy");
+    assert!(t0.elapsed() < Duration::from_millis(300), "the probe took {:?}", t0.elapsed());
+
+    let short = lizmeter_music::integrity::probe_track_fast(&record(&file, Some(60.0)), &nowhere, Duration::from_secs(5)).expect("a 14 s file is not a 60 s track");
+    assert_eq!(short.reason, lizmeter_core::DamageReason::Truncated);
+    assert!(short.detail.starts_with("Container duration 14s vs expected 60s"), "{}", short.detail);
+
+    // A file symphonia cannot open (here: audio cut off, the usual `-ss` blind spot of the ffmpeg
+    // probe applies) is handed to ffmpeg, never judged healthy by this path alone.
+    let bytes = std::fs::read(&file).unwrap();
+    let cut = r.dir.path().join("cut.m4a");
+    std::fs::write(&cut, &bytes[..bytes.len() / 2]).unwrap();
+    assert!(lizmeter_music::native::ProbeFile::open(&cut).is_none());
+}
+
+#[test]
+fn the_play_time_probe_leaves_other_containers_to_ffmpeg() {
+    let ff = need_ffmpeg!();
+    let r = rig(&ff, 44_100);
+    let opus = r.dir.path().join("opus.m4a");
+    common::make_tone_with(&ff, &opus, 3.0, 440, &["-ac", "2", "-c:a", "libopus", "-b:a", "64k", "-f", "webm"]);
+    let t0 = Instant::now();
+    let verdict = lizmeter_music::integrity::probe_track_fast(&record(&opus, Some(3.0)), &ff, Duration::from_secs(20));
+    assert!(verdict.is_none(), "ffmpeg finds the Opus file healthy: {verdict:?}");
+    eprintln!("ffmpeg fallback probe took {:?}", t0.elapsed());
+}
