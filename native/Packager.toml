@@ -1,0 +1,35 @@
+# cargo-packager config for the native LizMeter installer (per-user NSIS).
+# Build: cargo build --release -p lizmeter-app, then, from native/:
+#   cargo packager --release -c Packager.toml
+name = "lizmeter"
+product-name = "LizMeter"
+identifier = "com.lizmeter.native"
+version = "2.0.0"
+publisher = "LizMeter"
+description = "LizMeter: Pomodoro timer, todos and worklogs."
+formats = ["nsis"]
+out-dir = "target/packager"
+binaries-dir = "target/release"
+icons = ["../build/icon.ico"]
+binaries = [{ path = "lizmeter.exe", main = true }]
+
+[nsis]
+installer-mode = "currentUser"
+installer-icon = "../build/icon.ico"
+# Runs before the native files are installed. Removes the Electron build of LizMeter, if present:
+# reads the per-user uninstall key electron-builder wrote for appId com.lizmeter.app and runs that
+# uninstaller silently for the current user. Nothing here reads, copies, moves or deletes
+# %APPDATA%\lizmeter: the data stays in place.
+preinstall-section = '''
+Var ElectronUninstall
+Var ElectronExit
+Section ElectronCleanup
+  ReadRegStr $ElectronUninstall HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\d7c9c3d8-3982-5ac5-a5ff-124a887808d8" "QuietUninstallString"
+  StrCmp $ElectronUninstall "" electron_done
+  ExecWait '$ElectronUninstall' $ElectronExit
+  IntCmp $ElectronExit 0 electron_done
+  MessageBox MB_OK|MB_ICONSTOP "The previous LizMeter could not be removed (exit code $ElectronExit). Close LizMeter and run this installer again. Your data was not changed."
+  Abort
+  electron_done:
+SectionEnd
+'''
