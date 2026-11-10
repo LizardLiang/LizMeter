@@ -5,11 +5,15 @@ pub mod cache;
 pub mod error;
 pub mod extractor;
 pub mod integrity;
+pub mod library;
 pub mod output;
 pub mod process;
+pub mod queue;
+pub mod service;
 pub mod transport;
 
 pub use error::{MusicError, Result};
+pub use service::{MusicEvent, MusicService, MusicSnapshot, OutputKind, PlayResult};
 use lizmeter_db::Database;
 use std::sync::{Arc, Mutex};
 

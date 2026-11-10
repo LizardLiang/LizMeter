@@ -176,3 +176,27 @@ pub fn pid_alive(pid: u32) -> bool {
     let out = std::process::Command::new("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().unwrap();
     String::from_utf8_lossy(&out.stdout).contains(&pid.to_string())
 }
+
+/// A bin folder as the app has it: the fake yt-dlp plus the real ffmpeg (hard-linked, or copied).
+pub fn link_ffmpeg(bin: &Path, ffmpeg: &Path) {
+    let dst = bin.join("ffmpeg.exe");
+    if std::fs::hard_link(ffmpeg, &dst).is_err() {
+        std::fs::copy(ffmpeg, &dst).unwrap();
+    }
+}
+
+/// A faststart m4a tone, made once per length and reused by every test in the process.
+pub fn tone_m4a(ffmpeg: &Path, seconds: f64) -> Vec<u8> {
+    use std::collections::HashMap;
+    static CACHE: OnceLock<Mutex<HashMap<u64, Vec<u8>>>> = OnceLock::new();
+    let key = (seconds * 1000.0) as u64;
+    let mut map = CACHE.get_or_init(Default::default).lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(key)
+        .or_insert_with(|| {
+            let dir = tempfile::tempdir().unwrap();
+            let f = dir.path().join("t.m4a");
+            make_tone_with(ffmpeg, &f, seconds, 440, &["-movflags", "+faststart"]);
+            std::fs::read(&f).unwrap()
+        })
+        .clone()
+}

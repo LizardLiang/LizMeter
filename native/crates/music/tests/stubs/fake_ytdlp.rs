@@ -40,6 +40,14 @@ fn main() {
         .open(dir.join("pids.log"))
         .and_then(|mut f| f.write_all(format!("{role} {}\n", std::process::id()).as_bytes()));
 
+    // A URL that contains `fail_url` fails: metadata and stream alike.
+    if let Some(bad) = cfg("fail_url") {
+        if role != "version" && args.iter().any(|a| a.contains(&bad)) {
+            eprintln!("ERROR: Video unavailable");
+            std::process::exit(1);
+        }
+    }
+
     let delay = cfg("chunk_delay_ms").and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
     let out = std::io::stdout();
     let mut out = out.lock();
@@ -67,10 +75,19 @@ fn main() {
                 eprintln!("{}", cfg("stderr_msg").unwrap_or_else(|| "meta failed".into()));
                 std::process::exit(code);
             }
+            if let Some(slow) = cfg("slow_url") {
+                if args.iter().any(|a| a.contains(&slow)) {
+                    std::thread::sleep(std::time::Duration::from_millis(1500));
+                }
+            }
             if cfg("meta_hang").is_some() {
                 std::thread::sleep(std::time::Duration::from_secs(600));
             }
             let text = std::fs::read_to_string(dir.join(cfg("meta_file").unwrap_or_default())).unwrap_or_default();
+            // `{url}` and `{id}` (the text after the last '/' or '=') make one template serve many URLs.
+            let url = args.last().cloned().unwrap_or_default();
+            let id = url.rsplit(|c| c == '/' || c == '=').next().unwrap_or("").to_string();
+            let text = text.replace("{url}", &url).replace("{id}", &id);
             let _ = write!(out, "{text}");
         }
         _ => {

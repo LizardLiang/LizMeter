@@ -162,6 +162,15 @@ impl Drop for AudioStream {
 }
 
 impl AudioStream {
+    /// A function that stops the extraction from any thread, even while a read is blocked.
+    pub fn abort_handle(&self) -> Box<dyn Fn() + Send + Sync> {
+        let (cancel, pm, key) = (self.cancel.clone(), self.pm.clone(), self.key.clone());
+        Box::new(move || {
+            cancel.store(true, Ordering::SeqCst);
+            pm.kill_process(&key);
+        })
+    }
+
     /// The [`MusicError`] inside an I/O error this stream returned.
     pub fn error_of(e: &std::io::Error) -> Option<&MusicError> {
         e.get_ref().and_then(|inner| inner.downcast_ref::<MusicError>())

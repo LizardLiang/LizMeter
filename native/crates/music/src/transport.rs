@@ -24,8 +24,9 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 /// Where the audio comes from.
 pub enum Source {
     File(PathBuf),
-    /// Container bytes still arriving (yt-dlp output). The reader is drained by a feeder thread.
-    Stream(Box<dyn Read + Send>),
+    /// Container bytes still arriving (yt-dlp output). A feeder thread drains `reader`; `abort`
+    /// stops whatever produces it (the feeder may be blocked in a read).
+    Stream { reader: Box<dyn Read + Send>, abort: Box<dyn Fn() + Send + Sync> },
 }
 
 /// What happened to the loaded source. `generation` ties it to a [`Transport::load`].
@@ -37,11 +38,15 @@ pub struct TransportEvent {
 
 struct Decoder {
     child: Arc<Mutex<Child>>,
+    abort: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl Decoder {
     /// ffmpeg starts no children, so ending the process itself is enough and immediate.
     fn stop(&self) {
+        if let Some(a) = &self.abort {
+            a();
+        }
         let _ = lock(&self.child).kill();
         let _ = lock(&self.child).wait();
     }
@@ -126,7 +131,7 @@ impl Transport {
         let mut g = lock(&self.inner);
         let (seekable, is_stream) = match &source {
             Source::File(p) => (Some(p.clone()), false),
-            Source::Stream(_) => (None, true),
+            Source::Stream { .. } => (None, true),
         };
         self.start_locked(&mut g, source, start_secs.max(0.0), seekable, is_stream, false)
     }
@@ -300,7 +305,7 @@ impl Drop for Transport {
 
 fn spawn_decoder(ffmpeg: &Path, source: Source, feed: &Arc<Feed>, start_secs: f64, speed: f64) -> Result<Decoder> {
     let fail = |m: String| MusicError::new(MusicErrorCode::FormatError, m);
-    let piped = matches!(source, Source::Stream(_));
+    let piped = matches!(source, Source::Stream { .. });
     let mut cmd = command(ffmpeg);
     cmd.args(["-v", "error"]);
     if !piped {
@@ -311,7 +316,7 @@ fn spawn_decoder(ffmpeg: &Path, source: Source, feed: &Arc<Feed>, start_secs: f6
     }
     let input = match &source {
         Source::File(p) => p.to_string_lossy().into_owned(),
-        Source::Stream(_) => "pipe:0".to_string(),
+        Source::Stream { .. } => "pipe:0".to_string(),
     };
     cmd.arg("-i").arg(input).arg("-vn");
     if let Some(af) = atempo_chain(speed) {
@@ -337,7 +342,9 @@ fn spawn_decoder(ffmpeg: &Path, source: Source, feed: &Arc<Feed>, start_secs: f6
     }
 
     // Source -> ffmpeg stdin, for a stream.
-    if let (Source::Stream(mut reader), Some(mut stdin)) = (source, stdin) {
+    let mut abort = None;
+    if let (Source::Stream { mut reader, abort: a }, Some(mut stdin)) = (source, stdin) {
+        abort = Some(a);
         let feed = feed.clone();
         std::thread::spawn(move || {
             let mut buf = vec![0u8; 64 * 1024];
@@ -407,5 +414,5 @@ fn spawn_decoder(ffmpeg: &Path, source: Source, feed: &Arc<Feed>, start_secs: f6
             }
         });
     }
-    Ok(Decoder { child })
+    Ok(Decoder { child, abort })
 }

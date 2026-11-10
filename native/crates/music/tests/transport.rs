@@ -22,6 +22,10 @@ macro_rules! need_ffmpeg {
     };
 }
 
+fn stream(r: impl Read + Send + 'static) -> Source {
+    Source::Stream { reader: Box::new(r), abort: Box::new(|| {}) }
+}
+
 struct Rig {
     t: Arc<Transport>,
     rx: Receiver<TransportEvent>,
@@ -179,7 +183,7 @@ fn a_stream_cannot_seek_until_it_is_marked_cached() {
     let r = rig(&ff);
     let tone = r.tone("a.wav", 3.0);
     let reader = std::fs::File::open(&tone).unwrap();
-    let generation = r.t.load(Source::Stream(Box::new(reader)), 0.0).unwrap();
+    let generation = r.t.load(stream(reader), 0.0).unwrap();
     wait_until("playing", 5, || r.t.position() > 0.2);
     assert!(r.t.is_stream() && !r.t.is_seekable());
     let e = r.t.seek(1.0).unwrap_err();
@@ -195,7 +199,7 @@ fn a_stale_mark_seekable_is_ignored() {
     let ff = need_ffmpeg!();
     let r = rig(&ff);
     let a = r.tone("a.wav", 2.0);
-    let g1 = r.t.load(Source::Stream(Box::new(std::fs::File::open(&a).unwrap())), 0.0).unwrap();
+    let g1 = r.t.load(stream(std::fs::File::open(&a).unwrap()), 0.0).unwrap();
     r.t.load(Source::File(r.tone("b.wav", 2.0)), 0.0).unwrap();
     r.t.mark_seekable(g1, a);
     assert!(!r.t.is_stream());
@@ -230,7 +234,7 @@ impl Read for FailingReader {
 fn a_stream_that_errors_fails_the_track_with_the_stream_message() {
     let ff = need_ffmpeg!();
     let r = rig(&ff);
-    r.t.load(Source::Stream(Box::new(FailingReader(1))), 0.0).unwrap();
+    r.t.load(stream(FailingReader(1)), 0.0).unwrap();
     let ev = r.wait_event(Duration::from_secs(5)).expect("failure");
     assert_eq!(ev.kind, FeedEvent::Failed("network dropped".into()));
 }
