@@ -12,6 +12,7 @@ pub mod claude_tracker;
 mod dispatch;
 mod error;
 mod issues;
+pub mod pipe;
 pub mod providers;
 pub mod tokens;
 pub mod os;

@@ -502,6 +502,13 @@ impl Database {
         self.attach_labels(rows)
     }
 
+    /// A todo's permanent uuid, which (unlike its number) never changes. `None` for a missing row
+    /// or a row not yet stamped.
+    pub fn todo_uuid(&self, id: i64) -> Result<Option<String>> {
+        let row = optional_row(self.conn().query_row("SELECT uuid FROM todos WHERE id = ?", [id], |r| r.get::<_, Option<String>>(0)))?;
+        Ok(row.flatten())
+    }
+
     /// Total rows `list_todos` would match for the same filter fields, ignoring `id`/`limit`/`offset`.
     pub fn count_todos(&self, input: &ListTodosInput) -> Result<i64> {
         let FilterClause { where_sql, params: p } = build_todo_filter_clause(input);
