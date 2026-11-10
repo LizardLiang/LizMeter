@@ -51,7 +51,6 @@ impl QueueUi {
     }
 }
 
-/// The row a pointer at `y` (list-local) is over, clamped to the list.
 /// dnd-kit's `verticalListSortingStrategy`: while row `from` is dragged over slot `over`, the row
 /// itself sits in that slot and the rows it passes move one slot out of its way.
 pub fn sort_shift(drag: Option<(usize, usize)>, index: usize) -> f32 {
@@ -64,6 +63,7 @@ pub fn sort_shift(drag: Option<(usize, usize)>, index: usize) -> f32 {
     }
 }
 
+/// The row a pointer at `y` (list-local) is over, clamped to the list.
 pub fn row_at(y: f32, count: usize) -> usize {
     if count == 0 {
         return 0;
@@ -347,7 +347,7 @@ impl MusicPage {
         for i in 0..n {
             list = list.child(self.queue_row(i, cx));
         }
-        let (m_move, m_drop) = (me.clone(), me);
+        let (m_move, m_drop, m_cancel) = (me.clone(), me.clone(), me);
         let list = list
             .on_drag_move(move |ev: &DragMoveEvent<QueueDrag>, _, app| {
                 let from = ev.drag(app).0;
@@ -364,6 +364,13 @@ impl MusicPage {
             .on_drop(move |d: &QueueDrag, _, app| {
                 let from = d.0;
                 m_drop.update(app, |p, cx| p.drop_queue_row(from, cx))
+            })
+            .on_mouse_up_out(MouseButton::Left, move |_, _, app| {
+                m_cancel.update(app, |p, cx| {
+                    if p.queue_ui.drag.take().is_some() {
+                        cx.notify();
+                    }
+                })
             });
         body.child(list).into_any_element()
     }

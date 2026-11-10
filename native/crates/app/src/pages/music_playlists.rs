@@ -574,7 +574,7 @@ impl MusicPage {
             for i in 0..n {
                 rows = rows.child(self.playlist_track_row(i, cx));
             }
-            let (m_move, m_drop) = (me.clone(), me.clone());
+            let (m_move, m_drop, m_cancel) = (me.clone(), me.clone(), me.clone());
             rows.on_drag_move(move |ev: &DragMoveEvent<PlaylistDrag>, _, app| {
                 let from = ev.drag(app).0;
                 let y = f32::from(ev.event.position.y) - f32::from(ev.bounds.origin.y);
@@ -589,6 +589,13 @@ impl MusicPage {
             .on_drop(move |d: &PlaylistDrag, _, app| {
                 let from = d.0;
                 m_drop.update(app, |p, cx| p.drop_playlist_row(from, cx))
+            })
+            .on_mouse_up_out(MouseButton::Left, move |_, _, app| {
+                m_cancel.update(app, |p, cx| {
+                    if p.playlists.drag.take().is_some() {
+                        cx.notify();
+                    }
+                })
             })
             .into_any_element()
         };

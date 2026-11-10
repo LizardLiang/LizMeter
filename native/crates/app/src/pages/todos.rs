@@ -1051,7 +1051,8 @@ impl TodosPage {
 
         let body = div().id(SharedString::from(format!("todo-body-{id}")));
         let body = match todo.notes.as_deref().filter(|n| !n.is_empty()) {
-            Some(notes) => titled(body, plain_summary(notes, 200)),
+            Some(notes) if !plain_summary(notes, 200).is_empty() => titled(body, plain_summary(notes, 200)),
+            Some(_) => body,
             None => body,
         };
         let mut body = body
