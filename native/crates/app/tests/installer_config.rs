@@ -34,7 +34,8 @@ fn removes_the_electron_build_through_its_own_quiet_uninstaller() {
     // electron-builder's per-user key for appId com.lizmeter.app (uuid v5 of the appId).
     assert!(h.contains(r#"HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\d7c9c3d8-3982-5ac5-a5ff-124a887808d8""#));
     assert!(h.contains("\"QuietUninstallString\""));
-    assert!(h.contains("ExecWait '$ElectronUninstall'"));
+    // `_?=` keeps the uninstaller in place, so ExecWait waits for the real uninstall and its exit code.
+    assert!(h.contains(r#"ExecWait '"$ElectronDir\Uninstall LizMeter.exe" /currentuser /S _?=$ElectronDir'"#));
     // A missing Electron install (empty value) skips the removal; a failed removal stops the install.
     assert!(h.contains("StrCmp $ElectronUninstall \"\" electron_done"));
     assert!(h.contains("Abort"));
@@ -43,10 +44,16 @@ fn removes_the_electron_build_through_its_own_quiet_uninstaller() {
 #[test]
 fn the_hook_never_touches_the_data_folder() {
     let lines = hook_lines().join("\n").to_lowercase();
-    for forbidden in ["appdata", "lizmeter-soak", "rmdir", "delete", "copyfiles", "rename", "fileopen", "deleteregkey"] {
+    for forbidden in ["$appdata", "%appdata%", "lizmeter-soak", "copyfiles", "rename", "fileopen", "deleteregkey"] {
         assert!(!lines.contains(forbidden), "hook mentions {forbidden}");
     }
-    // The only registry access is one read.
-    assert_eq!(lines.matches("readregstr").count(), 1);
+    // Delete and RMDir touch only the Electron install folder.
+    for l in hook_lines() {
+        let l = l.to_lowercase();
+        if l.starts_with("delete") || l.starts_with("rmdir") {
+            assert!(l.contains("$electrondir"), "{l}");
+        }
+    }
+    // Registry access is reads only.
     assert!(!lines.contains("writeregstr"));
 }

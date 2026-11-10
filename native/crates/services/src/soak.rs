@@ -199,6 +199,7 @@ pub fn setup(source: &Path, soak: &Path, sync: &Path, roots: &[PathBuf]) -> Resu
             copied.push(name.to_string());
         }
     }
+    verify_copy(&soak.join(DB_FILE_NAME))?;
     let soak_loc = DataLocation::new(soak);
     soak_loc.mark_private_db()?;
     soak_loc.set_custom_data_dir(sync)?;
@@ -208,6 +209,15 @@ pub fn setup(source: &Path, soak: &Path, sync: &Path, roots: &[PathBuf]) -> Resu
     let device_identity_kept = soak.join("device-identity.json").is_file();
     let baseline = check(soak).ok().map(|r| (r.todo_count, r.ids_digest));
     Ok(SetupReport { soak: soak.to_path_buf(), sync: sync.to_path_buf(), copied, attachments_copied, device_identity_kept, baseline })
+}
+
+/// Opens the copied database read-only and runs SQLite's quick check. A copy taken while an app
+/// wrote the source can pair a `.db` with a `-wal` from another moment, and the check fails then.
+fn verify_copy(db: &Path) -> Result<(), SoakError> {
+    let fail = |e: String| SoakError::Other(format!("The copied database failed its check ({e}). Close every LizMeter and run setup again."));
+    let conn = rusqlite::Connection::open_with_flags(db, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| fail(e.to_string()))?;
+    let verdict: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0)).map_err(|e| fail(e.to_string()))?;
+    if verdict == "ok" { Ok(()) } else { Err(fail(verdict)) }
 }
 
 /// A one-screen summary of a soak profile, to compare against a clean-run checklist.
