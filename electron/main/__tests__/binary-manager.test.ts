@@ -37,6 +37,7 @@ const YT_URL = "https://github.com/yt-dlp/yt-dlp/releases/download/v1/yt-dlp.exe
 const YT_CHECKSUM_URL = "https://github.com/yt-dlp/yt-dlp/releases/download/v1/SHA2-256SUMS";
 const FFMPEG_URL = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/v1/ffmpeg-win64.zip";
 const FFMPEG_CHECKSUM_URL = `${FFMPEG_URL}.sha256`;
+const FFMPEG_MANIFEST_URL = "https://github.com/yt-dlp/FFmpeg-Builds/releases/download/v1/checksums.sha256";
 
 const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lizmeter-binary-manager-"));
 
@@ -168,6 +169,58 @@ describe("binary checksum verification", () => {
     installRoutes(routes);
 
     await expect(downloadBinaries(vi.fn())).rejects.toMatchObject({ code: "CHECKSUM_UNAVAILABLE" });
+  });
+
+  describe("ffmpeg release manifest fallback", () => {
+    const ytDlp = Buffer.from("yt-dlp");
+    const ffmpegArchive = Buffer.from("ffmpeg-archive");
+
+    function manifestRoutes(manifestBody: string): Map<string, MockResponse | MockResponse[]> {
+      const routes = baseRoutes();
+      routes.set(YT_URL, { status: 200, body: ytDlp });
+      routes.set(YT_CHECKSUM_URL, { status: 200, body: `${sha256(ytDlp)}  yt-dlp.exe
+` });
+      routes.set(FFMPEG_URL, { status: 200, body: ffmpegArchive });
+      routes.set(FFMPEG_CHECKSUM_URL, { status: 404 });
+      routes.set(FFMPEG_MANIFEST_URL, { status: 200, body: manifestBody });
+      return routes;
+    }
+
+    it("passes the checksum step with only checksums.sha256 and a matching entry", async () => {
+      installRoutes(manifestRoutes(
+        `${"1".repeat(64)}  other.zip
+${sha256(ffmpegArchive)}  ffmpeg-win64.zip
+`,
+      ));
+
+      // Extraction of the fake archive fails after verification; CHECKSUM_* would mean verification failed.
+      const result = await downloadBinaries(vi.fn()).then(() => null, (e: unknown) => e);
+      expect(result).not.toMatchObject({ code: "CHECKSUM_UNAVAILABLE" });
+      expect(result).not.toMatchObject({ code: "HASH_MISMATCH" });
+      expect(mocks.get.mock.calls.some(([url]) => url === FFMPEG_MANIFEST_URL)).toBe(true);
+    });
+
+    it("rejects a manifest entry whose hash does not match", async () => {
+      installRoutes(manifestRoutes(`${"0".repeat(64)}  ffmpeg-win64.zip
+`));
+
+      await expect(downloadBinaries(vi.fn())).rejects.toMatchObject({ code: "HASH_MISMATCH" });
+    });
+
+    it("fails closed when the manifest has no entry for the archive", async () => {
+      installRoutes(manifestRoutes(`${sha256(ffmpegArchive)}  different-archive.zip
+`));
+
+      await expect(downloadBinaries(vi.fn())).rejects.toMatchObject({ code: "CHECKSUM_UNAVAILABLE" });
+    });
+
+    it("fails closed when neither checksum file exists", async () => {
+      const routes = manifestRoutes("");
+      routes.set(FFMPEG_MANIFEST_URL, { status: 404 });
+      installRoutes(routes);
+
+      await expect(downloadBinaries(vi.fn())).rejects.toMatchObject({ code: "CHECKSUM_UNAVAILABLE" });
+    });
   });
 });
 

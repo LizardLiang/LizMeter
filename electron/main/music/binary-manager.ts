@@ -499,17 +499,6 @@ async function verifyYtDlpChecksum(binaryUrl: string, filePath: string): Promise
  * v2.0 (MINOR-03 fix): explicit dual-checksum verification.
  */
 async function verifyFfmpegChecksum(archiveUrl: string, archivePath: string): Promise<void> {
-  // FFmpeg-Builds provides a separate checksum file alongside each archive
-  // The checksum file has the same name as the archive + ".sha256"
-  const checksumUrl = archiveUrl + ".sha256";
-
-  let checksumContent: string;
-  try {
-    checksumContent = await fetchText(checksumUrl);
-  } catch (error) {
-    throw checksumUnavailable("ffmpeg archive", error);
-  }
-
   // The archive is downloaded to a generic temporary filename, so match the
   // checksum entry against the release asset's filename from the trusted URL.
   let archiveFilename: string;
@@ -518,9 +507,24 @@ async function verifyFfmpegChecksum(archiveUrl: string, archivePath: string): Pr
   } catch (error) {
     throw checksumUnavailable("ffmpeg archive", error);
   }
-  const expectedHash = parseChecksumFile(checksumContent, archiveFilename);
+
+  // FFmpeg-Builds publishes one `checksums.sha256` per release, not a file per archive.
+  // Try the per-archive file first, then fall back to the release manifest.
+  const manifestUrl = archiveUrl.replace(/\/[^/]+$/, "/checksums.sha256");
+  let expectedHash: string | null = null;
+  let firstError: unknown;
+  for (const checksumUrl of [archiveUrl + ".sha256", manifestUrl]) {
+    try {
+      expectedHash = parseChecksumFile(await fetchText(checksumUrl), archiveFilename);
+    } catch (error) {
+      firstError ??= error;
+      continue;
+    }
+    if (expectedHash) break;
+  }
 
   if (!expectedHash) {
+    if (firstError) throw checksumUnavailable("ffmpeg archive", firstError);
     throw new MusicError(
       `SHA256 verification unavailable for ffmpeg archive: no valid checksum entry for ${archiveFilename}`,
       "CHECKSUM_UNAVAILABLE",
