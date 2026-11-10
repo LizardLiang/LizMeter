@@ -513,9 +513,12 @@ async function verifyFfmpegChecksum(archiveUrl: string, archivePath: string): Pr
   const manifestUrl = archiveUrl.replace(/\/[^/]+$/, "/checksums.sha256");
   let expectedHash: string | null = null;
   let firstError: unknown;
+  let fetchedAny = false;
   for (const checksumUrl of [archiveUrl + ".sha256", manifestUrl]) {
     try {
-      expectedHash = parseChecksumFile(await fetchText(checksumUrl), archiveFilename);
+      const content = await fetchText(checksumUrl);
+      fetchedAny = true;
+      expectedHash = parseChecksumFile(content, archiveFilename);
     } catch (error) {
       firstError ??= error;
       continue;
@@ -524,7 +527,7 @@ async function verifyFfmpegChecksum(archiveUrl: string, archivePath: string): Pr
   }
 
   if (!expectedHash) {
-    if (firstError) throw checksumUnavailable("ffmpeg archive", firstError);
+    if (!fetchedAny) throw checksumUnavailable("ffmpeg archive", firstError);
     throw new MusicError(
       `SHA256 verification unavailable for ffmpeg archive: no valid checksum entry for ${archiveFilename}`,
       "CHECKSUM_UNAVAILABLE",
