@@ -4,8 +4,6 @@
 
 use super::settings_ui::*;
 use super::PageEvent;
-use crate::controls::*;
-use crate::ui::*;
 use gpui::*;
 use lizmeter_core::{DataLocationInfo, DataLocationMoveErrorCode, DataLocationMoveInput, DataLocationMoveResult, RenumberStatus, StopwatchSettings, SyncNotice, SyncStatus, TimerSettings, MAX_DURATION};
 use lizmeter_services::Services;
@@ -48,18 +46,16 @@ pub struct SettingsPage {
     pub sound: bool,
     pub sw: StopwatchSettings,
     pub max_hours: Entity<TextField>,
-    // Issue trackers (the providers arrive with a later phase)
+    // Issue trackers
+    pub prov: super::settings_providers::ProviderState,
     pub gh_token: Entity<TextField>,
-    pub gh_msg: Option<String>,
     pub lin_key: Entity<TextField>,
-    pub lin_msg: Option<String>,
     pub jira_auth: JiraAuth,
     pub jira_domain: Entity<TextField>,
     pub jira_email: Entity<TextField>,
     pub jira_token: Entity<TextField>,
     pub jira_project: Entity<TextField>,
     pub jira_jql: Entity<TextField>,
-    pub jira_msg: Option<String>,
     // Widget
     pub widget_enabled: bool,
     pub widget_visibility: String,
@@ -142,17 +138,15 @@ impl SettingsPage {
             sound: true,
             sw: StopwatchSettings { max_duration_seconds: NO_LIMIT_DEFAULT_SECONDS, prompt_for_issue: true },
             max_hours,
+            prov: Default::default(),
             gh_token: secret("ghp_\u{2026}", window, cx),
-            gh_msg: None,
             lin_key: secret("lin_api_\u{2026}", window, cx),
-            lin_msg: None,
             jira_auth: JiraAuth::Cloud,
             jira_domain: plain("mycompany.atlassian.net", window, cx),
             jira_email: plain("you@company.com", window, cx),
             jira_token: secret("API token", window, cx),
             jira_project: plain("PROJ", window, cx),
             jira_jql: plain("assignee = currentUser() AND status != Done", window, cx),
-            jira_msg: None,
             widget_enabled: false,
             widget_visibility: "always".into(),
             cache_limit_mb: 1024,
@@ -189,6 +183,7 @@ impl SettingsPage {
         self.widget_visibility = self.svc.get_setting_value("widget_visibility").ok().flatten().unwrap_or_else(|| "always".into());
         self.data = Some(self.svc.data_location_get());
         self.refresh_sync(cx);
+        self.refresh_providers(cx);
         cx.notify();
     }
 
@@ -298,33 +293,6 @@ impl SettingsPage {
     }
 
     // --- Issue trackers ---
-
-    const PROVIDERS_LATER: &'static str = "Saving tokens arrives with the issue-provider port.";
-
-    pub fn save_github(&mut self, cx: &mut Context<Self>) {
-        let empty = self.gh_token.read(cx).text().trim().is_empty();
-        self.gh_msg = Some(if empty { "Token cannot be empty.".into() } else { Self::PROVIDERS_LATER.into() });
-        cx.notify();
-    }
-
-    pub fn save_linear(&mut self, cx: &mut Context<Self>) {
-        let empty = self.lin_key.read(cx).text().trim().is_empty();
-        self.lin_msg = Some(if empty { "API key cannot be empty.".into() } else { Self::PROVIDERS_LATER.into() });
-        cx.notify();
-    }
-
-    pub fn save_jira(&mut self, cx: &mut Context<Self>) {
-        let (domain, email, token) = (self.jira_domain.read(cx).text().trim().to_string(), self.jira_email.read(cx).text().trim().to_string(), self.jira_token.read(cx).text().trim().to_string());
-        self.jira_msg = Some(if domain.is_empty() || email.is_empty() || token.is_empty() {
-            match self.jira_auth {
-                JiraAuth::Cloud => "Domain, email and API token are required.".into(),
-                JiraAuth::Server => "Server URL, username and password are required.".into(),
-            }
-        } else {
-            Self::PROVIDERS_LATER.into()
-        });
-        cx.notify();
-    }
 
     pub fn open_link(&self, url: &str) {
         self.svc.open_external(url);

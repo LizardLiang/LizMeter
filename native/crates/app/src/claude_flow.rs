@@ -317,6 +317,10 @@ impl Root {
                 let op = op.trim_start_matches("issues-").to_string();
                 self.issues.update(cx, |p, cx| p.capture(&op, cx));
             }
+            op if op.starts_with("settings-") => {
+                let op = op.trim_start_matches("settings-").to_string();
+                self.settings.update(cx, |p, cx| p.capture(&op, cx));
+            }
             op if op.starts_with("prompt-") => {
                 let state = op.trim_start_matches("prompt-").to_string();
                 if self.prompt.is_none() {

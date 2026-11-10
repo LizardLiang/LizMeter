@@ -64,7 +64,7 @@ fn github_lists_assigned_issues_with_octokits_request_and_maps_them() {
     assert_eq!(issues[0].labels.iter().map(|l| (l.name.as_str(), l.color.as_str())).collect::<Vec<_>>(), vec![("bug", "d73a4a"), ("plain", "7aa2f7"), ("", "7aa2f7")]);
     assert_eq!(issues[1].repo, "", "no repository_url and no requested repo");
     let req = &mock.requests()[0];
-    assert_eq!((req.method.as_str(), req.path()), ("GET", "/issues"));
+    assert_eq!((req.method.as_str(), req.path()), ("GET", "/user/issues"));
     for (k, v) in [("filter", "assigned"), ("state", "open"), ("sort", "updated"), ("direction", "desc"), ("per_page", "100")] {
         assert_eq!(req.query(k).as_deref(), Some(v), "{k}");
     }

@@ -81,7 +81,7 @@ impl GitHub<'_> {
                 let username = self.username()?;
                 self.json(self.get(&format!("/repos/{owner}/{name}/issues")).query(&query(Some(&username))), RATE)?
             }
-            None => self.json(self.get("/issues").query(&query(None)), RATE)?,
+            None => self.json(self.get("/user/issues").query(&query(None)), RATE)?,
         };
         let items = items.as_array().cloned().unwrap_or_default();
         Ok(items.iter().filter(|i| i.get("pull_request").is_none_or(Value::is_null)).map(|i| map_issue(i, repo)).collect())

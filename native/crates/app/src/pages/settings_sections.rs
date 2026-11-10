@@ -3,7 +3,8 @@
 use super::settings::*;
 use super::settings_ui::*;
 use crate::controls::*;
-use crate::css::hex;
+use crate::css::{hex, rgba, Spec};
+use lizmeter_services::tokens::Provider;
 use crate::fmt::local;
 use crate::ui::*;
 use chrono::{Datelike, Timelike};
@@ -85,30 +86,153 @@ impl SettingsPage {
             .child(div().mt(px(16.0)).child(checkbox("sound", sound, "Play sound when timer completes", move |_, a| m_sound.update(a, |p, cx| p.set_sound(!sound, cx)))))
     }
 
-    fn token_form(&self, title: &str, hint_row_el: Div, field: &Entity<TextField>, msg: &Option<String>, button: &str, id: &'static str, on_save: impl Fn(&mut Window, &mut App) + 'static, window: &Window, cx: &App) -> Div {
+    /// `.tokenForm`: label, hint, the input, what went wrong, and the save button.
+    fn token_form(&self, title: &str, hint_row_el: Div, field: &Entity<TextField>, notes: Vec<String>, button: &str, enabled: bool, id: &'static str, on_save: impl Fn(&mut Window, &mut App) + 'static, window: &Window, cx: &App) -> Div {
         let mut f = div().flex().flex_col().gap(px(8.0)).child(label(title)).child(hint_row_el).child(token_frame(field, focused(field, window, cx)));
-        if let Some(m) = msg {
-            f = f.child(error_text(m.clone()));
+        for m in notes {
+            f = f.child(error_text(m));
         }
-        f.child(save_button(id, button, true, on_save))
+        f.child(save_button(id, button, enabled, on_save))
+    }
+
+    /// `.tokenConnected`: the status line with its Test and Remove buttons, then the test result.
+    fn connected_row(&self, status: Div, test_id: &'static str, remove_id: &'static str, remove_text: &str, testing: bool, result: &Option<(bool, String)>, on_test: impl Fn(&mut Window, &mut App) + 'static, on_remove: impl Fn(&mut Window, &mut App) + 'static) -> Div {
+        let actions = div().flex().flex_col().gap(px(12.0)).child(status).child(
+            div()
+                .flex()
+                .flex_row()
+                .items_center()
+                .gap(px(8.0))
+                .child(ghost_button(test_id, if testing { "Testing\u{2026}" } else { "Test Connection" }, TN_BLUE, !testing, on_test))
+                .child(ghost_button(remove_id, remove_text, TN_RED, true, on_remove)),
+        );
+        // The result is a sibling of `.tokenConnected`, so it sits right under the buttons.
+        let mut d = div().flex().flex_col().child(actions);
+        if let Some((ok, message)) = result {
+            d = d.child(if *ok { success_text(message.clone()) } else { error_text(message.clone()) });
+        }
+        d
+    }
+
+    fn reentry_note(&self, p: Provider, what: &str) -> Option<String> {
+        self.prov.needs_reentry(p).then(|| format!("Your saved {} {what} could not be carried over from the previous LizMeter. Enter it again.", p.display()))
+    }
+
+    fn status_line(text: String) -> Div {
+        ui_text(13.0).font_weight(FontWeight(600.0)).text_color(col(TN_GREEN)).child(text)
     }
 
     fn github_section(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let me = cx.entity();
+        let s = &self.prov.gh;
+        if self.prov.github_configured() {
+            let (m_test, m_remove) = (me.clone(), me.clone());
+            return section("Issue Tracker", true).child(self.connected_row(
+                Self::status_line("GitHub \u{2014} Connected \u{2713}".into()),
+                "gh-test",
+                "gh-remove",
+                "Remove token",
+                s.testing,
+                &s.test,
+                move |_, a| m_test.update(a, |p, cx| p.test_github(cx)),
+                move |_, a| m_remove.update(a, |p, cx| p.remove_github(cx)),
+            ));
+        }
         let m_save = me.clone();
         let hint = hint_row(vec![t("Needs\u{a0}"), code("repo"), t("\u{a0}scope.\u{a0}"), link("gh-link", "Create token \u{2197}", "https://github.com/settings/tokens", &me).into_any_element()]);
-        section("Issue Tracker", true).child(self.token_form("GitHub Personal Access Token", hint, &self.gh_token, &self.gh_msg, "Save Token", "gh-save", move |_, a| m_save.update(a, |p, cx| p.save_github(cx)), window, cx))
+        let button = if s.saving { "Saving\u{2026}" } else if s.saved { "Saved \u{2713}" } else { "Save Token" };
+        let notes: Vec<String> = self.reentry_note(Provider::Github, "token").into_iter().chain(s.error.clone()).collect();
+        section("Issue Tracker", true).child(self.token_form("GitHub Personal Access Token", hint, &self.gh_token, notes, button, !s.saving, "gh-save", move |_, a| m_save.update(a, |p, cx| p.save_github(cx)), window, cx))
     }
 
     fn linear_section(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let me = cx.entity();
-        let m_save = me.clone();
-        let hint = hint_row(vec![t("Generate at\u{a0}"), link("lin-link", "Settings > Account > API in Linear \u{2197}", "https://linear.app/settings/api", &me).into_any_element()]);
-        section("Linear", true).child(self.token_form("Linear API Key", hint, &self.lin_key, &self.lin_msg, "Save Key", "lin-save", move |_, a| m_save.update(a, |p, cx| p.save_linear(cx)), window, cx))
+        let s = &self.prov.lin;
+        let Some(status) = self.prov.linear.as_ref().filter(|l| l.configured) else {
+            let m_save = me.clone();
+            let hint = hint_row(vec![t("Generate at\u{a0}"), link("lin-link", "Settings > Account > API in Linear \u{2197}", "https://linear.app/settings/api", &me).into_any_element()]);
+            let notes: Vec<String> = self.reentry_note(Provider::Linear, "API key").into_iter().chain(s.error.clone()).collect();
+            return section("Linear", true).child(self.token_form("Linear API Key", hint, &self.lin_key, notes, if s.saving { "Saving\u{2026}" } else { "Save Key" }, !s.saving, "lin-save", move |_, a| m_save.update(a, |p, cx| p.save_linear(cx)), window, cx));
+        };
+        let (m_test, m_remove) = (me.clone(), me.clone());
+        let mut line = Self::status_line("Linear \u{2014} Connected \u{2713}".into());
+        if let (true, Some(team)) = (status.team_selected, status.team_name.clone()) {
+            line = line.child(ui_text(13.0).font_weight(FontWeight(400.0)).text_color(col(TN_GREEN)).child(format!("\u{b7} {team}")));
+        }
+        let mut out = section("Linear", true).child(self.connected_row(
+            line.flex().flex_row(),
+            "lin-test",
+            "lin-remove",
+            "Disconnect",
+            s.testing,
+            &s.test,
+            move |_, a| m_test.update(a, |p, cx| p.test_linear(cx)),
+            move |_, a| m_remove.update(a, |p, cx| p.disconnect_linear(cx)),
+        ));
+        if !status.team_selected {
+            let hint_line = |text: &str| hint().child(text.to_string());
+            let mut teams = div().mt(px(12.0)).flex().flex_col().gap(px(8.0));
+            if self.prov.teams_loading {
+                teams = teams.child(hint_line("Loading teams\u{2026}"));
+            }
+            if let Some(e) = &self.prov.teams_error {
+                teams = teams.child(error_text(e.clone()).mb(px(0.0)));
+            }
+            let tested_ok = s.test.as_ref().is_some_and(|(ok, _)| *ok);
+            if !self.prov.teams_loading && self.prov.teams_error.is_none() && self.prov.teams.is_empty() && tested_ok {
+                teams = teams.child(hint_line("No teams found in your workspace."));
+            }
+            if !self.prov.teams_loading && self.prov.teams.len() > 1 {
+                let mut list = div().mt(px(4.0)).flex().flex_col().gap(px(4.0));
+                for (i, team) in self.prov.teams.iter().enumerate() {
+                    let (m_pick, id, name) = (me.clone(), team.id.clone(), team.name.clone());
+                    list = list.child(
+                        Glass::new(8.0, 8.0, 1.0, Spec::rrect(8.0).solid(rgba(16, 18, 36, 0.4)).border(1.0, rgba(41, 46, 66, 0.8)))
+                            .el()
+                            .id(SharedString::from(format!("lin-team-{i}")))
+                            .px(px(12.0))
+                            .py(px(8.0))
+                            .flex()
+                            .flex_row()
+                            .items_center()
+                            .justify_between()
+                            .cursor_pointer()
+                            .font_family(BTN_FONT)
+                            .text_size(px(13.0))
+                            .text_color(col(TN_TEXT))
+                            .on_click(move |_, _, a| m_pick.update(a, |p, cx| p.pick_linear_team(&id, &name, cx)))
+                            .child(team.name.clone())
+                            .child(div().px(px(6.0)).py(px(2.0)).rounded(px(3.0)).bg(col(hex(0x292e42))).text_size(px(11.0)).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT_DIM)).child(team.key.clone())),
+                    );
+                }
+                teams = teams.child(label("Select Team")).child(list);
+            }
+            if !self.prov.teams_loading && self.prov.teams.is_empty() && s.test.is_none() {
+                let m_load = me.clone();
+                teams = teams.child(div().mt(px(8.0)).flex().flex_row().child(ghost_button("lin-load-teams", "Load Teams", TN_BLUE, true, move |_, a| m_load.update(a, |p, cx| p.load_linear_teams(cx)))));
+            }
+            out = out.child(teams);
+        }
+        out
     }
 
     fn jira_section(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let me = cx.entity();
+        let s = &self.prov.jira_slot;
+        if let Some(status) = self.prov.jira.as_ref().filter(|j| j.configured) {
+            let (m_test, m_remove) = (me.clone(), me.clone());
+            let server = status.auth_type == Some(lizmeter_core::JiraAuthType::Server);
+            return section("Jira", true).child(self.connected_row(
+                Self::status_line(format!("Jira{} \u{2014} Connected \u{2713}", if server { " Server" } else { "" })),
+                "jira-test",
+                "jira-remove",
+                "Disconnect",
+                s.testing,
+                &s.test,
+                move |_, a| m_test.update(a, |p, cx| p.test_jira(cx)),
+                move |_, a| m_remove.update(a, |p, cx| p.disconnect_jira(cx)),
+            ));
+        }
         let cloud = self.jira_auth == JiraAuth::Cloud;
         let m_pick = me.clone();
         let m_save = me.clone();
@@ -148,10 +272,10 @@ impl SettingsPage {
             .child(lbl("JQL Filter (optional)", 12.0))
             .child(hint().child("Custom JQL overrides the project key filter"))
             .child(input(&self.jira_jql));
-        if let Some(m) = &self.jira_msg {
-            form = form.child(error_text(m.clone()));
+        for m in self.reentry_note(Provider::Jira, if cloud { "API token" } else { "password" }).into_iter().chain(s.error.clone()) {
+            form = form.child(error_text(m));
         }
-        section("Jira", true).child(form.child(save_button("jira-save", "Save & Connect", true, move |_, a| m_save.update(a, |p, cx| p.save_jira(cx)))))
+        section("Jira", true).child(form.child(save_button("jira-save", if s.saving { "Saving\u{2026}" } else { "Save & Connect" }, !s.saving, move |_, a| m_save.update(a, |p, cx| p.save_jira(cx)))))
     }
 
     fn widget_section(&self, cx: &mut Context<Self>) -> Div {

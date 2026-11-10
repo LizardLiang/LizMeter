@@ -6,6 +6,7 @@ pub mod history;
 pub mod issues;
 pub mod issues_logic;
 pub mod settings;
+pub mod settings_providers;
 pub mod settings_sections;
 pub mod settings_ui;
 pub mod stats;
