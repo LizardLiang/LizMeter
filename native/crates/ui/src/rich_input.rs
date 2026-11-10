@@ -1197,6 +1197,8 @@ impl RichInput {
             .child(toolbar)
             .child(body)
             .child(footer);
+        // `modalEntrance` 0.2s cubic-bezier(0.34, 1.56, 0.64, 1): opacity, translateY(8px -> 0).
+        let dialog = animate(dialog, "rich-modal-entrance", 200, false, overshoot(), 1.0, |el, t| el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t))));
         let overlay = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
             .el()
             .absolute()

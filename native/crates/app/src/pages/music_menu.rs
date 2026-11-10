@@ -115,6 +115,7 @@ impl MusicPage {
                 })
             });
         let list = popup_glass()
+            .relative()
             .min_w(px(MENU_W))
             .flex()
             .flex_col()
@@ -124,6 +125,8 @@ impl MusicPage {
             .child(sub_row)
             .child(menu_divider())
             .child(menu_row("tm-delete", "Delete from Library", true).on_click(move |_, _, app| m_del.update(app, |p, cx| p.menu_delete(cx))));
+        // `.menu { animation: menuFadeIn 0.12s ease-out }`: opacity 0 -> 1, translateY(-4px -> 0) (the scale is not drawn).
+        let list = animate(list, "tm-menu", 120, false, ease_out(), 1.0, |el, p| el.opacity(p).top(px(-4.0 * (1.0 - p))));
         let close = me.clone();
         let back = backdrop(window, None, move |_, app| {
             close.update(app, |p, cx| {
@@ -135,7 +138,7 @@ impl MusicPage {
         if menu.sub_row_hover || menu.sub_hover {
             if let Some(row) = menu.sub_row.get() {
                 let m_sub = me.clone();
-                let mut sub = popup_glass().min_w(px(SUBMENU_W)).flex().flex_col();
+                let mut sub = popup_glass().relative().min_w(px(SUBMENU_W)).flex().flex_col();
                 if self.playlists.list.is_empty() {
                     sub = sub.child(div().px(px(10.0)).py(px(7.0)).font_family(UI_FONT).text_size(px(11.0)).line_height(px(14.3)).italic().text_color(col(TN_TEXT_DIM)).child("No playlists"));
                 }
@@ -143,6 +146,7 @@ impl MusicPage {
                     let (id, m) = (p.id, me.clone());
                     sub = sub.child(menu_row(SharedString::from(format!("tm-pl-{id}")), &p.name, false).on_click(move |_, _, app| m.update(app, |pg, cx| pg.menu_add_to_playlist(id, cx))));
                 }
+                let sub = animate(sub, "tm-submenu", 120, false, ease_out(), 1.0, |el, p| el.opacity(p).top(px(-4.0 * (1.0 - p))));
                 layer = layer.child(deferred(anchored().position(submenu_origin(row, f32::from(vp.width))).anchor(Corner::TopLeft).child(div().id("tm-sub").on_hover(move |hovered, _, app| {
                     m_sub.update(app, |p, cx| {
                         if let Some(m) = &mut p.menu {

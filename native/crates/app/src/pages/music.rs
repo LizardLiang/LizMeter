@@ -495,8 +495,7 @@ impl MusicPage {
         }
         let mut col_el = div().absolute().bottom(px(96.0)).left_0().right_0().flex().flex_col().items_center().gap(px(8.0));
         for t in &self.toasts {
-            col_el = col_el.child(
-                Glass::new(8.0, 12.0, 1.0, Spec::rrect(8.0).solid(rgba(22, 24, 40, 0.92)).border(1.0, rgba(122, 162, 247, 0.15)))
+            let toast = Glass::new(8.0, 12.0, 1.0, Spec::rrect(8.0).solid(rgba(22, 24, 40, 0.92)).border(1.0, rgba(122, 162, 247, 0.15)))
                     .shadows(&[sh(0.0, 4.0, 20.0, bk(0.4))])
                     .el()
                     .px(px(20.0))
@@ -506,8 +505,9 @@ impl MusicPage {
                     .line_height(px(16.9))
                     .font_weight(FontWeight(500.0))
                     .text_color(col(TN_TEXT))
-                    .child(t.message.clone()),
-            );
+                    .child(t.message.clone());
+            // `.toast { animation: fadeIn 0.2s ease-out }`: opacity 0 -> 1, translateY(8px -> 0).
+            col_el = col_el.child(animate(toast, SharedString::from(format!("music-toast-{}", t.id)), 200, false, ease_out(), 1.0, |el, p| el.opacity(p).top(px(8.0 * (1.0 - p)))));
         }
         Some(col_el)
     }

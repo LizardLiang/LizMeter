@@ -30,6 +30,23 @@ pub fn col(c: C) -> Hsla {
 pub static FREEZE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub const FREEZE_T: f32 = 0.55;
 
+/// Device pixels per CSS pixel of the window being drawn, in hundredths (`Root::render` sets it).
+static DEVICE_SCALE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(100);
+
+pub fn set_device_scale(scale: f32) {
+    DEVICE_SCALE.store((scale * 100.0).round().max(1.0) as u32, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A CSS border width as Chromium draws it: a width of 1px or more is cut down to whole device
+/// pixels, so `1.5px` is one device pixel at 100% and two at 150%.
+pub fn css_border(width: f32) -> f32 {
+    if width < 1.0 {
+        return width;
+    }
+    let scale = DEVICE_SCALE.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.0;
+    (width * scale).floor().max(1.0) / scale
+}
+
 /// `--anim-time <ms>`: every animation renders the state it has `ms` after it started (u32::MAX = unset).
 pub static ANIM_TIME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 
@@ -312,7 +329,7 @@ pub fn bk(a: f32) -> C {
 
 #[cfg(test)]
 mod animation_tests {
-    use super::{gpui_animation, overshoot};
+    use super::{css_border, gpui_animation, overshoot, set_device_scale};
 
     fn samples() -> impl Iterator<Item = f32> {
         (0..=100).map(|i| i as f32 / 100.0)
@@ -333,6 +350,16 @@ mod animation_tests {
                 assert!((0.0..=1.0).contains(&d), "gpui would assert on {d} at t={t}");
             }
         }
+    }
+
+    #[test]
+    fn a_fractional_css_border_is_cut_to_whole_device_pixels() {
+        set_device_scale(1.0);
+        assert_eq!(css_border(1.5), 1.0);
+        assert_eq!(css_border(0.5), 0.5);
+        set_device_scale(1.5);
+        assert!((css_border(1.5) - 2.0 / 1.5).abs() < 1e-6);
+        set_device_scale(1.0);
     }
 
     #[test]

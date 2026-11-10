@@ -207,6 +207,79 @@ pub fn format_day(iso_date: &str) -> String {
     }
 }
 
+/// `toPlainSummary` (markdownPlain.ts): the notes as one line of plain text, at most `max_len`
+/// UTF-16 units, ending in an ellipsis when cut. It is the row tooltip.
+pub fn plain_summary(md: &str, max_len: usize) -> String {
+    let mut text = String::new();
+    let mut in_fence = false;
+    for raw in md.lines() {
+        let trimmed = raw.trim_start();
+        if trimmed.starts_with("```") {
+            let rest = trimmed.trim_start_matches('`');
+            let tag = !in_fence && !rest.is_empty() && rest.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '+' || c == '-');
+            in_fence = !in_fence;
+            if tag || rest.is_empty() {
+                continue;
+            }
+        }
+        let line = if in_fence { raw.to_string() } else { strip_line_markers(raw) };
+        text.push_str(&strip_inline(&line));
+        text.push(' ');
+    }
+    let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let units: Vec<u16> = collapsed.encode_utf16().collect();
+    if units.len() <= max_len {
+        return collapsed;
+    }
+    let cut = String::from_utf16_lossy(&units[..max_len.saturating_sub(1)]);
+    format!("{cut}\u{2026}")
+}
+
+fn strip_line_markers(line: &str) -> String {
+    let mut l = line.trim_start().to_string();
+    let rule = l.len() >= 3 && ['-', '*', '_'].iter().any(|c| l.trim_end().chars().all(|x| x == *c));
+    if rule {
+        return String::new();
+    }
+    l = l.trim_start_matches('#').trim_start().to_string();
+    while let Some(rest) = l.strip_prefix('>') {
+        l = rest.trim_start().to_string();
+    }
+    let digits = l.chars().take_while(|c| c.is_ascii_digit()).count();
+    if digits > 0 && l[digits..].starts_with(". ") {
+        l = l[digits + 2..].trim_start().to_string();
+    } else if ["- ", "* ", "+ "].iter().any(|m| l.starts_with(m)) {
+        l = l[2..].trim_start().to_string();
+    }
+    l
+}
+
+fn strip_inline(line: &str) -> String {
+    let chars: Vec<char> = line.chars().collect();
+    let mut out = String::new();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let open = if c == '!' && chars.get(i + 1) == Some(&'[') { Some(i + 1) } else if c == '[' { Some(i) } else { None };
+        if let Some(open) = open {
+            if let Some(close) = chars[open..].iter().position(|&x| x == ']').map(|p| p + open) {
+                if chars.get(close + 1) == Some(&'(') {
+                    if let Some(end) = chars[close + 1..].iter().position(|&x| x == ')').map(|p| p + close + 1) {
+                        out.extend(&chars[open + 1..close]);
+                        i = end + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        if !matches!(c, '`' | '*' | '_' | '~') {
+            out.push(c);
+        }
+        i += 1;
+    }
+    out
+}
+
 pub fn is_overdue(todo: &Todo, today_iso: &str) -> bool {
     todo.due_date.as_deref().is_some_and(|d| !todo.state.is_completed && d < today_iso)
 }
@@ -464,6 +537,23 @@ pub fn page_max_width(window_w: f32) -> f32 {
 mod tests {
     use super::*;
     use lizmeter_core::TodoSource;
+
+    #[test]
+    fn the_plain_summary_matches_to_plain_summary() {
+        let p = |s: &str| plain_summary(s, 200);
+        assert_eq!(p("![screenshot](app-media://attachments/deadbeef.png)"), "screenshot");
+        assert_eq!(p("before ![](app-media://attachments/deadbeef.png) after"), "before after");
+        assert_eq!(p("see [the docs](https://example.com/docs) for more"), "see the docs for more");
+        assert_eq!(p("**bold *italic* text** and _underline_ and ~~strike~~"), "bold italic text and underline and strike");
+        assert_eq!(p("***bold italic***"), "bold italic");
+        assert_eq!(p("before\n```js\nconst x = 1;\n```\nafter"), "before const x = 1; after");
+        assert_eq!(p("run `bun run test` first"), "run bun run test first");
+        assert_eq!(p("# Heading\n> a quote\n- item one\n1. item two"), "Heading a quote item one item two");
+        assert_eq!(p("above\n---\nbelow"), "above below");
+        assert_eq!(p("Line one\n\nLine two   \nLine three"), "Line one Line two Line three");
+        assert_eq!(plain_summary(&"a".repeat(10), 10), "a".repeat(10));
+        assert_eq!(plain_summary(&"a".repeat(11), 10), format!("{}\u{2026}", "a".repeat(9)));
+    }
 
     fn state(id: i64, position: i64, done: bool) -> TodoState {
         TodoState { id, label: format!("S{id}"), color: "#7aa2f7".into(), position, is_completed: done, is_default: id == 1, created_at: String::new() }

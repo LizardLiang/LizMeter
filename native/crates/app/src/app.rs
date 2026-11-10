@@ -502,10 +502,15 @@ impl Root {
                 },
             ));
         }
-        // The effects gallery stays pinned to the bottom of the rail.
+        // The effects gallery is a developer page: Electron has no such button, so a release build
+        // shows it only with `LIZMETER_GALLERY` set.
+        col_el = col_el.child(div().flex_1());
+        if !(cfg!(debug_assertions) || std::env::var_os("LIZMETER_GALLERY").is_some()) {
+            return col_el;
+        }
         let hover_me = me.clone();
         let click_me = me.clone();
-        col_el = col_el.child(div().flex_1()).child(chrome::nav_button(
+        col_el = col_el.child(chrome::nav_button(
             NavButton {
                 index: 99,
                 active: self.page == Page::Gallery,
@@ -591,6 +596,7 @@ pub fn image_resolver(svc: &Arc<Services>) -> Rc<dyn Fn(&str) -> Option<std::pat
 
 impl Render for Root {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        set_device_scale(window.scale_factor());
         if self.page == Page::EmojiSample {
             return gallery::emoji_sample().into_any_element();
         }
@@ -601,7 +607,13 @@ impl Render for Root {
             return gallery::anim_page(i).into_any_element();
         }
         let page = match self.page {
-            Page::Timer => div().flex_1().h_full().flex().justify_center().overflow_hidden().child(self.timer_page(window, cx)).into_any_element(),
+            Page::Timer => {
+                // `.timerPage { animation: fade-in-up 0.28s ease both }`: opacity 0 -> 1, translateY(10px -> 0).
+                let timer = animate(div().relative().size_full().child(self.timer_page(window, cx)), "timer-page-enter", 280, false, ease(), 1.0, |el, t| {
+                    el.opacity(t.clamp(0.0, 1.0)).top(px(10.0 * (1.0 - t)))
+                });
+                div().flex_1().h_full().flex().justify_center().overflow_hidden().child(timer).into_any_element()
+            }
             Page::History => {
                 let active = self.countdown.status != Status::Idle || self.stopwatch_active();
                 if self.history_stale {

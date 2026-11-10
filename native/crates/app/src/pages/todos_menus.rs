@@ -517,7 +517,7 @@ pub fn shortcuts_overlay(window: &Window, on_close: Rc<dyn Fn(&mut Window, &mut 
 
     let top = (vh * 0.10).max(0.0);
     let backdrop_close = on_close;
-    let overlay = Glass::new(0.0, 16.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.06)))
+    let overlay = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
         .el()
         .w(vp.width)
         .h(vp.height)

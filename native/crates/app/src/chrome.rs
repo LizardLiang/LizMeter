@@ -258,3 +258,28 @@ pub fn titlebar(hover: Option<&'static str>) -> impl IntoElement {
 
 #[allow(dead_code)]
 pub fn fill_unused(_: Fill) {}
+
+/// The hover text of an HTML `title` attribute: Chromium shows it after 0.5 s next to the pointer.
+pub struct TitleTip(SharedString);
+
+impl Render for TitleTip {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        Glass::new(7.0, 12.0, 1.0, Spec::rrect(7.0).solid(rgba(22, 24, 40, 0.92)).border(1.0, rgba(122, 162, 247, 0.14)))
+            .shadows(&[sh(0.0, 4.0, 20.0, bk(0.5))])
+            .el()
+            .max_w(px(360.0))
+            .px(px(10.0))
+            .py(px(6.0))
+            .text_color(col(TN_TEXT))
+            .font_family(UI_FONT)
+            .text_size(px(12.0))
+            .line_height(px(16.0))
+            .child(self.0.clone())
+    }
+}
+
+/// An element with an HTML `title`: `el.tooltip` builds a `TitleTip` for it.
+pub fn titled<E: StatefulInteractiveElement>(el: E, text: impl Into<SharedString>) -> E {
+    let text: SharedString = text.into();
+    el.tooltip(move |_, cx| cx.new(|_| TitleTip(text.clone())).into())
+}

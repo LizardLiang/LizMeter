@@ -10,6 +10,7 @@ use super::todos_icons as icons;
 use super::todos_logic::*;
 use super::todos_menus::*;
 use super::PageEvent;
+use crate::chrome::titled;
 use crate::controls::parse_color;
 use crate::css::{hex, rgba, Spec, C};
 use crate::select::{SelectBox, SelectEvent, SelectOption};
@@ -983,7 +984,7 @@ fn dim() -> C {
 
 fn state_dot(color: &str, filled: bool, size: f32, border: f32) -> Div {
     let c = col(parse_color(color));
-    let d = div().flex_shrink_0().size(px(size)).rounded(px(size / 2.0)).border(px(border)).border_color(c);
+    let d = div().flex_shrink_0().size(px(size)).rounded(px(size / 2.0)).border(px(css_border(border))).border_color(c);
     if filled { d.bg(c) } else { d }
 }
 
@@ -1048,8 +1049,12 @@ impl TodosPage {
             })
             .children(selected.then(|| icon("gen/check.svg".into(), 11.0, 11.0, hex(0x1a1b26)).m(px(0.0))));
 
-        let mut body = div()
-            .id(SharedString::from(format!("todo-body-{id}")))
+        let body = div().id(SharedString::from(format!("todo-body-{id}")));
+        let body = match todo.notes.as_deref().filter(|n| !n.is_empty()) {
+            Some(notes) => titled(body, plain_summary(notes, 200)),
+            None => body,
+        };
+        let mut body = body
             .flex_1()
             .min_w_0()
             .h_full()
@@ -1059,19 +1064,24 @@ impl TodosPage {
             .gap(px(8.0))
             .cursor_pointer()
             .on_click(move |_, window, app| m_open.update(app, |p, cx| p.open_detail(id, window, cx)))
-            .child(icon(icons::priority_path(todo.priority), 13.0, 13.0, priority_color(todo.priority)))
+            .child(titled(div().id(SharedString::from(format!("todo-prio-{id}"))).flex_shrink_0().child(icon(icons::priority_path(todo.priority), 13.0, 13.0, priority_color(todo.priority))), lizmeter_core::todo_priority_label(todo.priority)))
             .child(div().flex_shrink_0().min_w(px(52.0)).text_size(px(11.0)).line_height(px(14.0)).text_color(col(dim())).child(format!("#{id}")))
             .child(state_dot(&todo.state.color, todo.state.is_completed, 11.0, 1.5));
         if let Some(parent) = &todo.parent_title {
-            body = body.child(div().flex_shrink().min_w_0().max_w(px(192.0)).truncate().text_size(px(12.0)).line_height(px(16.0)).text_color(col(dim())).child(format!("{parent} \u{203a}")));
+            body = body.child(titled(
+                div().id(SharedString::from(format!("todo-crumb-{id}"))).flex_shrink().min_w_0().max_w(px(192.0)).truncate().text_size(px(12.0)).line_height(px(16.0)).text_color(col(dim())).child(format!("{parent} \u{203a}")),
+                format!("Sub-issue of {parent}"),
+            ));
         }
         let mut title = div().min_w_0().truncate().text_size(px(12.5)).line_height(px(16.0)).font_weight(FontWeight(500.0));
         title = if todo.state.is_completed { title.text_color(col(dim())).line_through() } else { title.text_color(col(TN_TEXT)) };
         body = body.child(title.child(todo.title.clone()));
         if todo.child_count > 0 {
             let all = todo.completed_child_count >= todo.child_count;
-            body = body.child(
+            let pill_tip = format!("{} of {} sub-issue{} done", todo.completed_child_count, todo.child_count, if todo.child_count == 1 { "" } else { "s" });
+            body = body.child(titled(
                 div()
+                    .id(SharedString::from(format!("todo-kids-{id}")))
                     .flex_shrink_0()
                     .flex()
                     .flex_row()
@@ -1088,7 +1098,8 @@ impl TodosPage {
                     .text_color(col(hex(0xa3abc9)))
                     .child(icon(icons::ring_path(todo.completed_child_count, todo.child_count), 12.0, 12.0, if all { TN_GREEN } else { TN_BLUE }))
                     .child(format!("{}/{}", todo.completed_child_count, todo.child_count)),
-            );
+                pill_tip,
+            ));
         }
         if let Some(ms) = &todo.milestone {
             body = body.child(div().flex_shrink().min_w_0().truncate().text_size(px(12.0)).line_height(px(16.0)).text_color(col(dim())).child(format!("\u{203a} {ms}")));
@@ -1136,7 +1147,11 @@ impl TodosPage {
                     .child(div().min_w_0().truncate().child(p.name.clone())),
             );
         }
-        body = body.child(source_icon(todo));
+        let source_tip = match todo.source {
+            TodoSource::User => "Added by you".to_string(),
+            TodoSource::Ai => format!("Added by {}", todo.source_label.as_deref().unwrap_or("AI")),
+        };
+        body = body.child(titled(div().id(SharedString::from(format!("todo-src-{id}"))).flex_shrink_0().child(source_icon(todo)), source_tip));
         let date = div().flex_shrink_0().min_w(px(56.0)).flex().justify_end().text_size(px(11.5)).line_height(px(15.0));
         body = body.child(if overdue { date.text_color(col(TN_RED)).font_weight(FontWeight(600.0)) } else { date.text_color(col(TN_TEXT_DIM)) }.child(format_day(row_date(todo))));
 
@@ -1271,7 +1286,7 @@ impl TodosPage {
             .gap(px(8.0))
             .child(self.project_select.clone())
             .child(self.label_select.clone())
-            .child(ghost("todo-help", "?".into()).w(px(27.0)).px(px(0.0)).flex().justify_center().font_weight(FontWeight(600.0)).on_click(move |_, _, app| {
+            .child(titled(ghost("todo-help", "?".into()), "Keyboard shortcuts (?)").w(px(27.0)).px(px(0.0)).flex().justify_center().font_weight(FontWeight(600.0)).on_click(move |_, _, app| {
                 m_help.update(app, |p, cx| {
                     p.overlay = Overlay::Shortcuts;
                     cx.notify();
@@ -1563,9 +1578,8 @@ impl TodosPage {
         }
         if let Some(c) = self.copy.filter(|c| !c.from_menu) {
             let (text, color) = if c.failed { ("Copy failed", TN_RED) } else if c.action == CopyAction::Id { ("Copied id", TN_TEXT) } else { ("Copied prompt", TN_TEXT) };
-            root = root.child(
-                div().absolute().right(px(24.0)).bottom(px(24.0)).child(
-                    div()
+            let pill = div()
+                        .relative()
                         .px(px(16.0))
                         .py(px(8.0))
                         .rounded(px(10.0))
@@ -1578,9 +1592,10 @@ impl TodosPage {
                         .line_height(px(16.0))
                         .font_weight(FontWeight(500.0))
                         .text_color(col(color))
-                        .child(text),
-                ),
-            );
+                        .child(text);
+            // `.copyPill { animation: fade-in-up 0.15s ease-out }`: opacity 0 -> 1, translateY(10px -> 0).
+            let pill = animate(pill, "todos-copy-pill", 150, false, ease_out(), 1.0, |el, t| el.opacity(t).top(px(10.0 * (1.0 - t))));
+            root = root.child(div().absolute().right(px(24.0)).bottom(px(24.0)).child(pill));
         }
         if let Some((d, at)) = self.drag.as_ref().and_then(|d| d.held_at.map(|at| (d, at))) {
             root = root.child(div().absolute().left(at.x).top(at.y).child(ghost_el(&d.title, Some(&d.state), d.ids.len())));

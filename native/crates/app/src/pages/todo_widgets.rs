@@ -65,7 +65,7 @@ pub fn trigger_frame(focused: bool) -> Div {
 /// A small dot in a state, project or label colour.
 pub fn dot(color: &str, filled: bool, size: f32, border: f32) -> Div {
     let c = col(parse_color(color));
-    let d = div().flex_shrink_0().size(px(size)).rounded(px(size / 2.0)).border(px(border)).border_color(c);
+    let d = div().flex_shrink_0().size(px(size)).rounded(px(size / 2.0)).border(px(css_border(border))).border_color(c);
     if filled { d.bg(c) } else { d }
 }
 
@@ -95,7 +95,7 @@ pub fn dialog_glass(radius: f32) -> Div {
 /// `top` pins the dialog that far from the top (the pickers); `None` centres it.
 pub fn modal_overlay(id: &'static str, top: Option<f32>, dialog: impl IntoElement, on_close: impl Fn(&mut Window, &mut App) + 'static) -> Stateful<Div> {
     let entrance = animate(div().relative().child(dialog), id, 200, false, overshoot(), 1.0, |el, t| el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t))));
-    let mut o = Glass::new(0.0, 16.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.06)))
+    let mut o = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
         .el()
         .id(SharedString::from(format!("{id}-overlay")))
         .absolute()

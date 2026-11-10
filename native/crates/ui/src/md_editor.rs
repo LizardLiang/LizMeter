@@ -1766,9 +1766,9 @@ impl MarkdownEditor {
             .child(EditorElement { view })
     }
 
-    fn hint_el(&self) -> Option<Div> {
+    fn hint_el(&self) -> Option<AnyElement> {
         let (msg, _) = self.hint.as_ref()?;
-        Some(
+        let hint =
             Glass::new(6.0, 8.0, 1.0, Spec::rrect(6.0).solid(rgba(20, 16, 28, 0.92)).border(1.0, rgba(224, 175, 104, 0.35)))
                 .shadows(&[sh(0.0, 4.0, 14.0, rgba(0, 0, 0, 0.35))])
                 .el()
@@ -1781,8 +1781,9 @@ impl MarkdownEditor {
                 .font_family(UI_FONT)
                 .text_size(px(12.0))
                 .text_color(col(TN_YELLOW))
-                .child(msg.clone()),
-        )
+                .child(msg.clone());
+        // `.dropHint { animation: dropHintEntrance 0.16s ease-out }`: opacity 0 -> 1, translateY(4px -> 0).
+        Some(animate(hint, SharedString::from(format!("md-drop-hint-{msg}")), 160, false, ease_out(), 1.0, |el, t| el.opacity(t).bottom(px(8.0 - 4.0 * (1.0 - t)))))
     }
 
     fn render_inline(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -1925,7 +1926,9 @@ impl MarkdownEditor {
             .child(header)
             .child(body)
             .child(footer);
-        let overlay = Glass::new(0.0, 16.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.06)))
+        // `modalEntrance` 0.2s cubic-bezier(0.34, 1.56, 0.64, 1): opacity, translateY(8px -> 0).
+        let dialog = animate(dialog, "md-modal-entrance", 200, false, overshoot(), 1.0, |el, t| el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t))));
+        let overlay = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
             .el()
             .absolute()
             .top(px(0.0))
