@@ -379,3 +379,15 @@ collapsed.
 - **`todo:changed` is a poll.** The pipe bumps a counter after each write; the main window checks it every 250 ms and reloads the Todos page and an open detail page (a field with a draft keeps it). Screens that only show todos in passing (timer todo badges, pickers) refresh when next shown. Sync merges do not bump the counter yet.
 - **Unknown `source` on create** (the phase 4 note): the pipe always sends `ai`, so it never reaches the deserialiser.
 - **Small differences from the TS server, none visible to the MCP server:** (1) a UTF-8 character split across two reads is decoded whole (Node decodes each chunk alone and turns the halves into U+FFFD); (2) a non-string `agent` is refused before the title is validated (TS: after); (3) a `todoId` of 1e300 is treated as not an integer (TS: an integer, then a database error).
+
+## Native port, phase 11B (2026-11-10)
+
+- **Closed:** the "gpui `truncate()` shows no ellipsis in flex-resolved widths" gap (6c, 9b). The vendored `elements/text.rs` measure cache returned the first (untruncated) layout for any later width; it now also compares the truncation width. Todos titles, Activity file names, select labels and popover rows show the ellipsis.
+- **Closed:** the row hover tooltips of the Todos list (7a): notes summary, priority, source, sub-issue crumb and count, and the `?` button, through `chrome::titled`. **Still open:** `title=` attributes elsewhere (detail page, attachments, state manager flags, music bar). The helper applies unchanged.
+- **Closed:** queue and playlist rows now shift while dragging (9b), as dnd-kit's vertical sort does. Still no keyboard sensor and no auto-scroll.
+- **Closed:** the state dot ring is cut to whole device pixels, as Chromium cuts `1.5px` (`ui::css_border`, fed by `Root::render`). The widget window and any other window with another scale reads the last value the main window set.
+- **Dialog overlays are 28 px / 1.25 / 10 % tint, not Electron's 16 px** (user's readability rule). `native/docs/effects-coverage.md` lists the 12 overlay rules this affects.
+- **`menuFadeIn` and `modalEntrance` draw opacity and the vertical rise only**; gpui cannot scale a laid-out element, so the 0.95 to 1 scale is missing.
+- **`Sidebar.module.scss` is dead in Electron** (`Sidebar.tsx` is imported by nothing but its test); no native counterpart exists.
+- **The effects gallery nav button shows only in debug builds or with `LIZMETER_GALLERY` set.**
+- **Tooltips and the copy pill are not covered by screenshots** (they need a pointer or a clipboard action and no foreground input automation is allowed).
