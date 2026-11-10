@@ -182,6 +182,21 @@ fn main() {
             std::mem::forget(manager);
         }
     }
+    // The named pipe belongs to a live app: not to a screenshot, a headless hook or the widget. A
+    // path another process owns is reported and the app carries on without a pipe.
+    let mut pipe = None;
+    let mut todo_changes = None;
+    if !shot && args.ops.is_empty() && args.page != "widget" {
+        if let Some(svc) = services.clone() {
+            match lizmeter_services::pipe::PipeServer::start(svc) {
+                Ok(server) => {
+                    todo_changes = Some(server.change_counter());
+                    pipe = Some(server);
+                }
+                Err(e) => eprintln!("[pipe] Server error: {e}"),
+            }
+        }
+    }
     let for_shutdown = services.clone();
     let services_bg = services.clone();
     Application::new().with_assets(embedded::Assets).run(move |cx: &mut App| {
@@ -306,6 +321,25 @@ fn main() {
             }
         }
         cx.activate(!shot);
+        if let Some(changes) = todo_changes.take() {
+            // A pipe write refreshes the Todos page, as `todo:changed` does in the Electron build.
+            cx.spawn(async move |cx| {
+                let mut seen = changes.load(std::sync::atomic::Ordering::SeqCst);
+                loop {
+                    cx.background_executor().timer(Duration::from_millis(250)).await;
+                    let now = changes.load(std::sync::atomic::Ordering::SeqCst);
+                    if now == seen {
+                        continue;
+                    }
+                    seen = now;
+                    let Some(ent) = handle.downcast::<Root>().and_then(|r| r.entity(cx).ok()) else { return };
+                    if handle.update(cx, |_, _, cx| ent.update(cx, |r, cx| r.todos_changed_outside(cx))).is_err() {
+                        return;
+                    }
+                }
+            })
+            .detach();
+        }
         if !args.ops.is_empty() {
             let ops = args.ops.clone();
             cx.spawn(async move |cx| {
@@ -368,6 +402,7 @@ fn main() {
             .detach();
         }
     });
+    drop(pipe);
     if let Some(svc) = for_shutdown {
         svc.shutdown();
     }

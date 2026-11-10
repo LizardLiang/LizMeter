@@ -219,6 +219,11 @@ impl TodoDetailPage {
 
     // ---- Loading ----
 
+    /// An outside writer changed the todos: show the stored values again.
+    pub fn reload_after_outside_write(&mut self, cx: &mut Context<Self>) {
+        self.reload(cx);
+    }
+
     fn reload(&mut self, cx: &mut Context<Self>) {
         let found = self.svc.list_todos(&ListTodosInput { id: Some(self.todo_id), ..Default::default() });
         match (found, self.svc.list_todo_states(), self.svc.list_todo_projects(), self.svc.list_todo_labels()) {

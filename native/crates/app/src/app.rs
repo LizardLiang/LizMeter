@@ -420,6 +420,13 @@ impl Root {
         cx.notify();
     }
 
+    /// The pipe server wrote todos: refresh the Todos page if it is the one on screen.
+    pub fn todos_changed_outside(&mut self, cx: &mut Context<Self>) {
+        if self.page == Page::Todos {
+            self.todos.update(cx, |t, cx| t.reload_after_outside_write(cx));
+        }
+    }
+
     pub fn show_music(&mut self, cx: &mut Context<Self>) {
         self.music.update(cx, |m, cx| m.show(cx));
         self.page = Page::Music;

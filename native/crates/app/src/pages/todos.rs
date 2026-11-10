@@ -644,6 +644,16 @@ impl TodosPage {
         cx.notify();
     }
 
+    /// The pipe server (or a sync merge) wrote todos behind this page: reload the list and the open
+    /// detail page. A field holding a draft keeps it (see `TodoDetailPage::apply`).
+    pub fn reload_after_outside_write(&mut self, cx: &mut Context<Self>) {
+        self.reload(cx);
+        if let Some(d) = self.detail.clone() {
+            d.update(cx, |d, cx| d.reload_after_outside_write(cx));
+        }
+        cx.notify();
+    }
+
     /// Leaves the detail page, saving what is still being typed.
     fn close_detail(&mut self, cx: &mut Context<Self>) {
         if let Some(d) = self.detail.take() {
