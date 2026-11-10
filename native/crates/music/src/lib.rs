@@ -2,10 +2,12 @@
 
 pub mod binaries;
 pub mod cache;
+pub mod dsp;
 pub mod error;
 pub mod extractor;
 pub mod integrity;
 pub mod library;
+pub mod native;
 pub mod output;
 pub mod process;
 pub mod queue;

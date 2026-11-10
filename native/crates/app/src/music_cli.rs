@@ -5,6 +5,8 @@
 //! * `music-download`: download yt-dlp and ffmpeg into `<data dir>/bin` (needs the network).
 //! * `music-play:<file>`: play a local audio file through the sound device at volume 0.1, pausing,
 //!   resuming and seeking on the way (about a second of quiet sound).
+//! * `music-latency:<file>`: time from each call (play, seek, speed change, seek at that speed) to
+//!   the first frame the device takes from the new source, at volume 0.1.
 
 use lizmeter_music::{MusicEvent, MusicService};
 use lizmeter_services::Services;
@@ -25,6 +27,9 @@ pub fn run(svc: &Services, ops: &[String]) -> Option<i32> {
         } else if let Some(file) = op.strip_prefix("music-play:") {
             ran = true;
             play(svc.music(), Path::new(file))
+        } else if let Some(file) = op.strip_prefix("music-latency:") {
+            ran = true;
+            latency(svc.music(), Path::new(file))
         } else {
             continue;
         };
@@ -104,5 +109,51 @@ fn play(m: &MusicService, file: &Path) -> Result<(), String> {
     m.stop();
     snap("stopped", m);
     let _ = t1;
+    Ok(())
+}
+
+/// Milliseconds from `action` to the first frame the device takes from the source it started.
+fn first_frame_ms(m: &MusicService, label: &str, action: impl FnOnce() -> Result<(), String>) -> Result<f64, String> {
+    // The sink exists once something has played.
+    let before = m.output().and_then(|o| o.current_feed());
+    let t0 = Instant::now();
+    action()?;
+    loop {
+        let feed = m.output().and_then(|o| o.current_feed());
+        let fresh = match (&feed, &before) {
+            (Some(f), Some(b)) => !std::sync::Arc::ptr_eq(f, b),
+            (Some(_), None) => true,
+            _ => false,
+        };
+        if fresh && feed.as_ref().is_some_and(|f| f.played_frames() > 0) {
+            break;
+        }
+        if t0.elapsed() > Duration::from_secs(10) {
+            let state = feed.map(|f| format!("played {} queued {} paused {} closed {} buffering {}", f.played_frames(), f.queued_frames(), f.is_paused(), f.is_closed(), f.is_buffering()));
+            return Err(format!("{label}: no frame reached the device within 10 s ({}; {:?})", state.unwrap_or_else(|| "no feed".into()), m.snapshot().playback_state));
+        }
+        std::thread::sleep(Duration::from_micros(500));
+    }
+    let ms = (t0.elapsed().as_secs_f64() * 10_000.0).round() / 10.0;
+    println!(
+        "{}",
+        serde_json::json!({ "op": "music-latency", "step": label, "ms": ms, "native_decode": m.is_native_decode(), "position": m.snapshot().current_time })
+    );
+    Ok(ms)
+}
+
+fn latency(m: &MusicService, file: &Path) -> Result<(), String> {
+    m.set_volume(0.1);
+    // The saved speed carries over between runs; the speed step needs to start from normal speed.
+    m.set_playback_speed(1.0).map_err(|e| e.message)?;
+    first_frame_ms(m, "play", || m.play_local_file(file).map_err(|e| e.message))?;
+    std::thread::sleep(Duration::from_millis(400));
+    first_frame_ms(m, "seek to 1.0 s", || m.seek(1.0).map_err(|e| e.message))?;
+    std::thread::sleep(Duration::from_millis(400));
+    first_frame_ms(m, "speed 1.5", || m.set_playback_speed(1.5).map_err(|e| e.message))?;
+    std::thread::sleep(Duration::from_millis(400));
+    first_frame_ms(m, "seek to 0.5 s at 1.5x", || m.seek(0.5).map_err(|e| e.message))?;
+    std::thread::sleep(Duration::from_millis(300));
+    m.stop();
     Ok(())
 }

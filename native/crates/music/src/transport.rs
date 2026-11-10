@@ -2,11 +2,15 @@
 //! the [`OutputHandle`]. Replaces the renderer's `<audio>` element (`useAudioPlayer`) and the
 //! local HTTP server (`stream-server.ts`).
 //!
-//! A file source can seek (ffmpeg restarts at the offset). A stream source (yt-dlp output still
+//! A cached file decodes inside the app ([`crate::native`]): seek and speed changes start at once.
+//! A file symphonia cannot decode (Opus) and a stream still arriving go through ffmpeg.
+//!
+//! A file source can seek (the decoder restarts at the offset). A stream source (yt-dlp output still
 //! arriving) cannot until the track is cached; [`Transport::mark_seekable`] then points it at the
 //! finished file. Speed is applied by ffmpeg's `atempo`, so it follows the same rule.
 
 use crate::error::{MusicError, Result};
+use crate::native;
 use crate::output::{Feed, FeedEvent, OutputHandle};
 use crate::process::command;
 use lizmeter_core::{MusicErrorCode, MusicPlaybackState};
@@ -37,7 +41,8 @@ pub struct TransportEvent {
 }
 
 struct Decoder {
-    child: Arc<Mutex<Child>>,
+    /// `None` for the in-process decoder, which stops when its feed closes.
+    child: Option<Arc<Mutex<Child>>>,
     abort: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
@@ -47,8 +52,14 @@ impl Decoder {
         if let Some(a) = &self.abort {
             a();
         }
-        let _ = lock(&self.child).kill();
-        let _ = lock(&self.child).wait();
+        if let Some(child) = &self.child {
+            let _ = lock(child).kill();
+            let _ = lock(child).wait();
+        }
+    }
+
+    fn is_native(&self) -> bool {
+        self.child.is_none()
     }
 }
 
@@ -144,7 +155,16 @@ impl Transport {
         }
         let (ftx, frx) = channel::<FeedEvent>();
         let feed = Feed::new(self.output.rate(), start_secs, g.speed, g.paused, gain_of(g.volume, g.muted), ftx);
-        let decoder = spawn_decoder(&self.ffmpeg, source, &feed, start_secs, g.speed)?;
+        let decoder = match source {
+            Source::File(path) => match native::open(&path, start_secs, g.speed) {
+                Some(opened) => {
+                    native::spawn(opened, feed.clone(), g.speed);
+                    Decoder { child: None, abort: None }
+                }
+                None => spawn_decoder(&self.ffmpeg, Source::File(path), &feed, start_secs, g.speed)?,
+            },
+            stream => spawn_decoder(&self.ffmpeg, stream, &feed, start_secs, g.speed)?,
+        };
         // Forward this feed's events, stamped with its generation.
         let tx = self.events.clone();
         std::thread::spawn(move || {
@@ -291,6 +311,11 @@ impl Transport {
         lock(&self.inner).loaded.is_some()
     }
 
+    /// Whether the loaded source decodes inside the app (no ffmpeg process).
+    pub fn is_native(&self) -> bool {
+        lock(&self.inner).loaded.as_ref().is_some_and(|l| l.decoder.is_native())
+    }
+
     pub fn is_stream(&self) -> bool {
         lock(&self.inner).loaded.as_ref().is_some_and(|l| l.is_stream)
     }
@@ -414,5 +439,5 @@ fn spawn_decoder(ffmpeg: &Path, source: Source, feed: &Arc<Feed>, start_secs: f6
             }
         });
     }
-    Ok(Decoder { child, abort })
+    Ok(Decoder { child: Some(child), abort })
 }

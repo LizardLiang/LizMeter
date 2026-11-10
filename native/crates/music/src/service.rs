@@ -269,6 +269,11 @@ impl MusicService {
         self.transport_if_any().map(|t| t.output().clone())
     }
 
+    /// Whether the loaded source decodes inside the app rather than through an ffmpeg process.
+    pub fn is_native_decode(&self) -> bool {
+        self.transport_if_any().is_some_and(|t| t.is_native())
+    }
+
     fn raw_state(&self) -> MusicPlaybackState {
         self.transport_if_any().map_or(MusicPlaybackState::Stopped, |t| t.state())
     }
