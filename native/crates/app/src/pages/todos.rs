@@ -644,8 +644,9 @@ impl TodosPage {
         cx.notify();
     }
 
-    /// The pipe server (or a sync merge) wrote todos behind this page: reload the list and the open
-    /// detail page. A field holding a draft keeps it (see `TodoDetailPage::apply`).
+    /// The pipe server wrote todos behind this page: reload the list and the open detail page.
+    /// The title and notes fields keep a draft (see `TodoDetailPage::apply`); the other fields show
+    /// the stored value.
     pub fn reload_after_outside_write(&mut self, cx: &mut Context<Self>) {
         self.reload(cx);
         if let Some(d) = self.detail.clone() {

@@ -160,11 +160,13 @@ impl Protocol {
             Ok(r) => r,
             Err(e) => Err(e.to_string()),
         };
+        // A write command that fails part-way (the row is gone, the blob sweep failed) still
+        // changed what the screen shows, so any non-read command bumps the counter.
+        if !matches!(kind.as_str(), "ping" | "todo.states" | "todo.projects" | "todo.labels" | "todo.list") {
+            self.changes.fetch_add(1, Ordering::SeqCst);
+        }
         match outcome {
-            Ok((result, wrote)) => {
-                if wrote {
-                    self.changes.fetch_add(1, Ordering::SeqCst);
-                }
+            Ok((result, _)) => {
                 if let Some(id) = id {
                     reply(&format!("{{\"id\":{},\"ok\":true,\"result\":{}}}\n", json_id(id), result));
                 }
@@ -769,7 +771,7 @@ mod tests {
             replies,
             vec!["{\"id\":1,\"ok\":false,\"error\":\"LizMeter is restarting to use the new data folder\"}\n".to_string()]
         );
-        assert_eq!(proto.change_counter().load(Ordering::SeqCst), 0);
+        assert_eq!(proto.change_counter().load(Ordering::SeqCst), 1); // a refused write still asks the screen to reload
 
         svc.retired.store(false, Ordering::SeqCst);
         assert!(svc.list_todos(&Default::default()).unwrap().is_empty());

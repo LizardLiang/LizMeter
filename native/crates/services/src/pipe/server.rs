@@ -122,13 +122,15 @@ impl PipeServer {
         let proto = Protocol::new(svc);
         let stop = Arc::new(AtomicBool::new(false));
         let pending = Arc::new(AtomicUsize::new(0));
+        // Built before the listeners start: if a later instance fails, dropping it stops them.
+        let server = PipeServer { path: path.to_string(), proto: proto.clone(), stop: stop.clone(), pending: pending.clone(), stopped: false };
         spawn_listener(first, path, &proto, &stop, &pending);
         for _ in 1..BACKLOG {
             let instance = create_instance(path, false).map_err(|e| listen_error(path, e))?;
             spawn_listener(instance, path, &proto, &stop, &pending);
         }
         eprintln!("[pipe] Listening on {path}");
-        Ok(PipeServer { path: path.to_string(), proto, stop, pending, stopped: false })
+        Ok(server)
     }
 
     pub fn path(&self) -> &str {

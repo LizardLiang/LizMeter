@@ -228,8 +228,9 @@ fn a_write_counts_as_a_change_and_a_read_does_not() {
     assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 0);
     h.send(json!({ "id": 2, "type": "todo.add", "title": "a" }));
     assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
+    // A write that fails may still have changed the screen, so it counts too.
     h.send(json!({ "id": 3, "type": "todo.add" }));
-    assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 1);
+    assert_eq!(counter.load(std::sync::atomic::Ordering::SeqCst), 2);
 }
 
 // --- Stale-write guard ---
@@ -698,7 +699,7 @@ fn the_limit_counts_characters_not_bytes_and_accumulates_across_chunks() {
     let mut wire = FakeWire::new();
     conn.on_data(&h.proto, "é".repeat(100_000).as_bytes(), &mut wire);
     assert!(wire.written.is_empty());
-    // A second chunk that tips the buffered total over the limit overflows.
+    // 200 000 characters buffered is still under the limit; the third chunk tips it over.
     conn.on_data(&h.proto, "é".repeat(100_000).as_bytes(), &mut wire);
     conn.on_data(&h.proto, "é".repeat(100_000).as_bytes(), &mut wire);
     assert_eq!(wire.written.len(), 1);
