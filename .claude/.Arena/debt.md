@@ -391,3 +391,12 @@ collapsed.
 - **`Sidebar.module.scss` is dead in Electron** (`Sidebar.tsx` is imported by nothing but its test); no native counterpart exists.
 - **The effects gallery nav button shows only in debug builds or with `LIZMETER_GALLERY` set.**
 - **Tooltips and the copy pill are not covered by screenshots** (they need a pointer or a clipboard action and no foreground input automation is allowed).
+
+## Phase 12 (packaging, soak, cutover)
+
+- **Release build has no console (`windows_subsystem = "windows"`).** `eprintln!` output (for example `[pipe] Server error`) is lost in the installed app. `--soak-setup` and `--soak-check` write to the parent console or to a redirected stdout. From PowerShell run them as `Start-Process <exe> -ArgumentList ... -Wait -NoNewWindow -PassThru`: a plain `& exe` does not wait for a GUI-subsystem program. A log file under the user-data folder would make runtime errors visible; not done.
+- **Soak guard runs at launch only.** `--soak` refuses a OneDrive data folder when it starts. A move of the data folder from the soak app's Settings page to a OneDrive folder is not blocked.
+- **Soak cannot prove two-machine convergence.** The test sync folder may not sit in OneDrive, so a soak runs on one machine. `--soak-check` compares todo `id|title` digests; the two-machine check happens in the real swap (runbook sections 4 and 5).
+- **`cargo packager` caches NSIS in `%LOCALAPPDATA%\.cargo-packager`** (it ignores a `LOCALAPPDATA` override) and fails with `Plugin not found` while `NSISDIR` points at scoop's NSIS.
+- **Installer run in an isolated profile is not done.** No Windows Sandbox on the dev machine. The installer was built and compiled by makensis, never executed.
+- **Native pipe guard vs fake profiles.** `Services::open_guarded` runs the Electron process check whenever the data folder is `%APPDATA%\lizmeter` (also a redirected `%APPDATA%`), so a running Electron build refuses a fake profile at that path in tests. Tests use another folder name.
