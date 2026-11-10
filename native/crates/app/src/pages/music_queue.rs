@@ -52,6 +52,18 @@ impl QueueUi {
 }
 
 /// The row a pointer at `y` (list-local) is over, clamped to the list.
+/// dnd-kit's `verticalListSortingStrategy`: while row `from` is dragged over slot `over`, the row
+/// itself sits in that slot and the rows it passes move one slot out of its way.
+pub fn sort_shift(drag: Option<(usize, usize)>, index: usize) -> f32 {
+    let step = ROW_H + ROW_GAP;
+    match drag {
+        Some((from, over)) if index == from => (over as f32 - from as f32) * step,
+        Some((from, over)) if from < over && index > from && index <= over => -step,
+        Some((from, over)) if over < from && index >= over && index < from => step,
+        _ => 0.0,
+    }
+}
+
 pub fn row_at(y: f32, count: usize) -> usize {
     if count == 0 {
         return 0;
@@ -220,6 +232,8 @@ impl MusicPage {
         div()
             .id(SharedString::from(format!("queue-row-{index}")))
             .group(group)
+            .relative()
+            .top(px(sort_shift(self.queue_ui.drag, index)))
             .flex()
             .flex_row()
             .items_center()
@@ -333,12 +347,6 @@ impl MusicPage {
         for i in 0..n {
             list = list.child(self.queue_row(i, cx));
         }
-        if let Some((from, over)) = self.queue_ui.drag {
-            if over != from {
-                let y = if over > from { (over as f32 + 1.0) * (ROW_H + ROW_GAP) - ROW_GAP / 2.0 } else { over as f32 * (ROW_H + ROW_GAP) - ROW_GAP / 2.0 };
-                list = list.child(div().absolute().left_0().w_full().top(px(y - 1.0)).h(px(2.0)).rounded(px(1.0)).bg(col(TN_BLUE)));
-            }
-        }
         let (m_move, m_drop) = (me.clone(), me);
         let list = list
             .on_drag_move(move |ev: &DragMoveEvent<QueueDrag>, _, app| {
@@ -358,5 +366,20 @@ impl MusicPage {
                 m_drop.update(app, |p, cx| p.drop_queue_row(from, cx))
             });
         body.child(list).into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{sort_shift, ROW_GAP, ROW_H};
+
+    #[test]
+    fn a_dragged_row_takes_the_slot_and_the_rows_it_passes_make_room() {
+        let step = ROW_H + ROW_GAP;
+        let moved = |from, over| (0..5).map(|i| sort_shift(Some((from, over)), i)).collect::<Vec<_>>();
+        assert_eq!(moved(1, 3), vec![0.0, 2.0 * step, -step, -step, 0.0]);
+        assert_eq!(moved(3, 1), vec![0.0, step, step, -2.0 * step, 0.0]);
+        assert_eq!(moved(2, 2), vec![0.0; 5]);
+        assert_eq!(sort_shift(None, 2), 0.0);
     }
 }

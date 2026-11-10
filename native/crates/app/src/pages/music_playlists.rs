@@ -2,7 +2,7 @@
 //! tracks on the right with drag reorder, remove and add-by-URL.
 
 use super::music::{is_url, spinner, url_field, MusicPage};
-use super::music_queue::{duration_label, row_at, thumb, track_text, Ghost, ROW_GAP, ROW_H};
+use super::music_queue::{duration_label, row_at, sort_shift, thumb, track_text, Ghost, ROW_GAP, ROW_H};
 use super::music_ui::*;
 use crate::css::rgba;
 use crate::ui::*;
@@ -290,6 +290,8 @@ impl MusicPage {
         div()
             .id(SharedString::from(format!("pl-row-{index}")))
             .group(group)
+            .relative()
+            .top(px(sort_shift(self.playlists.drag, index)))
             .flex()
             .flex_row()
             .items_center()
@@ -571,12 +573,6 @@ impl MusicPage {
             let mut rows = div().relative().flex().flex_col().gap(px(ROW_GAP));
             for i in 0..n {
                 rows = rows.child(self.playlist_track_row(i, cx));
-            }
-            if let Some((from, over)) = self.playlists.drag {
-                if over != from {
-                    let y = if over > from { (over as f32 + 1.0) * (ROW_H + ROW_GAP) - ROW_GAP / 2.0 } else { over as f32 * (ROW_H + ROW_GAP) - ROW_GAP / 2.0 };
-                    rows = rows.child(div().absolute().left_0().w_full().top(px(y - 1.0)).h(px(2.0)).rounded(px(1.0)).bg(col(TN_BLUE)));
-                }
             }
             let (m_move, m_drop) = (me.clone(), me.clone());
             rows.on_drag_move(move |ev: &DragMoveEvent<PlaylistDrag>, _, app| {
