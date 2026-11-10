@@ -245,11 +245,15 @@ pub fn animate<E: IntoElement + 'static + Styled>(
     if frozen() {
         return f(el, easing(freeze_t)).into_any_element();
     }
-    let mut anim = Animation::new(Duration::from_millis(duration_ms)).with_easing(easing);
-    if repeat {
-        anim = anim.repeat();
-    }
-    el.with_animation(id, anim, f).into_any_element()
+    el.with_animation(id, gpui_animation(duration_ms, repeat), move |e, delta| f(e, easing(delta))).into_any_element()
+}
+
+/// The animation gpui runs: linear, so the progress it hands over stays inside 0..1. gpui asserts
+/// that an easing returns 0..1 in debug builds, and `overshoot` (cubic-bezier y1 = 1.56) rises
+/// above 1 on purpose, so the easing is applied by `animate` to the linear progress instead.
+pub fn gpui_animation(duration_ms: u64, repeat: bool) -> Animation {
+    let anim = Animation::new(Duration::from_millis(duration_ms));
+    if repeat { anim.repeat() } else { anim }
 }
 
 /// Cubic-bezier easing (CSS `cubic-bezier(x1, y1, x2, y2)`).
@@ -304,4 +308,37 @@ pub fn wh(a: f32) -> C {
 }
 pub fn bk(a: f32) -> C {
     rgba(0, 0, 0, a)
+}
+
+#[cfg(test)]
+mod animation_tests {
+    use super::{gpui_animation, overshoot};
+
+    fn samples() -> impl Iterator<Item = f32> {
+        (0..=100).map(|i| i as f32 / 100.0)
+    }
+
+    #[test]
+    fn overshoot_rises_above_one_by_design() {
+        let e = overshoot();
+        assert!(samples().any(|t| e(t) > 1.0), "the CSS overshoot curve must exceed 1");
+    }
+
+    #[test]
+    fn gpui_never_sees_a_progress_outside_zero_to_one() {
+        for repeat in [false, true] {
+            let anim = gpui_animation(200, repeat);
+            for t in samples() {
+                let d = (anim.easing)(t);
+                assert!((0.0..=1.0).contains(&d), "gpui would assert on {d} at t={t}");
+            }
+        }
+    }
+
+    #[test]
+    fn the_modal_entrance_still_overshoots() {
+        let e = overshoot();
+        let lin = gpui_animation(200, false);
+        assert!(samples().any(|t| e((lin.easing)(t)) > 1.0));
+    }
 }
