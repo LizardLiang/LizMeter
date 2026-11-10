@@ -1,7 +1,7 @@
 //! The IPC channels of `electron/preload/index.ts` and who owns each in the native app.
 
 /// Channels answered by [`crate::Services::dispatch`] in this phase.
-pub const SERVICE_CHANNELS: [&str; 91] = [
+pub const SERVICE_CHANNELS: [&str; 115] = [
     "session:save",
     "session:save-with-tracking",
     "session:list",
@@ -93,13 +93,35 @@ pub const SERVICE_CHANNELS: [&str; 91] = [
     "jira:set-email",
     "jira:set-project-key",
     "jira:set-jql-filter",
+    "music:play",
+    "music:stop",
+    "music:meta",
+    "music:library:list",
+    "music:library:delete",
+    "music:library:clear",
+    "music:playlist:create",
+    "music:playlist:rename",
+    "music:playlist:delete",
+    "music:playlist:list",
+    "music:playlist:tracks",
+    "music:playlist:add-track",
+    "music:playlist:remove-track",
+    "music:playlist:reorder",
+    "music:cache:stats",
+    "music:cache:clear",
+    "music:cache:set-limit",
+    "music:binary:status",
+    "music:binary:info",
+    "music:binary:download",
+    "music:import:cancel",
+    "music:reset",
+    "music:integrity:check",
+    "music:integrity:repair",
 ];
 
 /// Who answers a channel that [`SERVICE_CHANNELS`] does not list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Deferred {
-    /// Music library, playlists, cache, binaries, playback.
-    Music,
     /// The desktop widget and its avatars.
     Widget,
 }
@@ -108,7 +130,6 @@ impl Deferred {
     /// The plan phase that ports it.
     pub fn phase(self) -> u8 {
         match self {
-            Deferred::Music => 9,
             Deferred::Widget => 11,
         }
     }
@@ -121,7 +142,6 @@ pub fn deferred_owner(channel: &str) -> Option<Deferred> {
     }
     let (prefix, _) = channel.split_once(':')?;
     match prefix {
-        "music" => Some(Deferred::Music),
         "widget" => Some(Deferred::Widget),
         _ => None,
     }

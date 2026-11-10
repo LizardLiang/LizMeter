@@ -15,6 +15,12 @@ pub enum ServiceError {
     Json(#[from] serde_json::Error),
 }
 
+impl From<lizmeter_music::MusicError> for ServiceError {
+    fn from(e: lizmeter_music::MusicError) -> Self {
+        ServiceError::Message(e.message)
+    }
+}
+
 pub type Result<T> = std::result::Result<T, ServiceError>;
 
 pub(crate) fn fail<T>(message: impl Into<String>) -> Result<T> {

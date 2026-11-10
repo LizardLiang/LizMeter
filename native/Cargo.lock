@@ -3355,6 +3355,7 @@ dependencies = [
  "chrono",
  "lizmeter-core",
  "lizmeter-db",
+ "lizmeter-music",
  "lizmeter-sync",
  "reqwest",
  "serde",

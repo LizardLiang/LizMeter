@@ -60,6 +60,27 @@ impl Default for Sources {
     }
 }
 
+impl Sources {
+    /// The defaults, with the release URLs overridden by `LIZMETER_YT_DLP_API_URL` and
+    /// `LIZMETER_FFMPEG_API_URL` in debug builds (a release build ignores them). The override's
+    /// host is allowed as a redirect target and plain `http:` is accepted.
+    pub fn from_env() -> Self {
+        let mut s = Sources::default();
+        if cfg!(debug_assertions) {
+            for (var, slot) in [("LIZMETER_YT_DLP_API_URL", &mut s.yt_dlp_api), ("LIZMETER_FFMPEG_API_URL", &mut s.ffmpeg_api)] {
+                if let Ok(v) = std::env::var(var) {
+                    if let Some(host) = reqwest::Url::parse(&v).ok().and_then(|u| u.host_str().map(str::to_string)) {
+                        s.extra_allowed_hosts.push(host);
+                        s.allow_http = true;
+                        *slot = v;
+                    }
+                }
+            }
+        }
+        s
+    }
+}
+
 #[derive(Deserialize)]
 struct GitHubAsset {
     name: String,

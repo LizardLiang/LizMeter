@@ -18,6 +18,9 @@ pub struct Rig {
 }
 
 pub fn rig() -> Rig {
+    // The music release URLs point at a closed port: no test may reach GitHub.
+    std::env::set_var("LIZMETER_YT_DLP_API_URL", "http://127.0.0.1:9/yt-dlp");
+    std::env::set_var("LIZMETER_FFMPEG_API_URL", "http://127.0.0.1:9/ffmpeg");
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().to_path_buf();
     let user_data = root.join("userData");

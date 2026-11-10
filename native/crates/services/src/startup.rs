@@ -49,6 +49,7 @@ impl Services {
         let user_data_dir = location.default_data_dir().to_path_buf();
         let user_data_dir_copy = user_data_dir.clone();
         let user_data_hub = user_data_dir.clone();
+        let user_data_music = user_data_dir.clone();
         let mut report = StartupReport::default();
 
         // Step 1 of 2 for a deferred sync action: marker files, before the database opens.
@@ -128,6 +129,7 @@ impl Services {
             }
         };
 
+        let db_for_music = db.clone();
         let services = Arc::new(Services {
             db,
             location,
@@ -138,6 +140,12 @@ impl Services {
             retired: AtomicBool::new(false),
             guards: Mutex::new(Vec::new()),
             hub: crate::issues::Hub::new(&user_data_hub),
+            music: lizmeter_music::MusicService::with_sources(
+                &user_data_music,
+                db_for_music,
+                lizmeter_music::OutputKind::Device,
+                lizmeter_music::binaries::Sources::from_env(),
+            ),
         });
         services.migrate_electron_tokens();
         Ok((services, report))
@@ -188,6 +196,7 @@ impl Services {
 
     /// Stops sync and releases the tracker. The database closes when the last handle drops.
     pub fn shutdown(&self) {
+        self.music.shutdown();
         self.sync.stop();
         self.tracker.lock().unwrap_or_else(|e| e.into_inner()).destroy();
     }

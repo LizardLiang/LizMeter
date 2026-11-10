@@ -4,7 +4,7 @@
 //! and the OS host. Every channel in `electron/preload/index.ts` that belongs to the service
 //! layer is a typed method here and is also reachable by name through [`Services::dispatch`]
 //! (same argument order as the preload call, JSON in and out). Channels owned by later phases
-//! (issue providers, music, widget) are listed in [`channels`].
+//! (the widget) are listed in [`channels`].
 
 pub mod attachments;
 pub mod channels;
@@ -65,6 +65,8 @@ pub struct Services {
     pub(crate) guards: Mutex<Vec<os::guard::SingleWriterGuard>>,
     /// Issue-tracker tokens, endpoints and result caches.
     pub(crate) hub: issues::Hub,
+    /// The music library, playlists, cache, binaries and the player.
+    pub(crate) music: Arc<lizmeter_music::MusicService>,
 }
 
 impl Services {
@@ -77,6 +79,12 @@ impl Services {
             return fail("LizMeter is restarting to use the new data folder");
         }
         f(&guard)
+    }
+
+    /// The music backend. The UI drives playback and the library through it directly; the
+    /// `music:*` channels of [`Services::dispatch`] call the same methods.
+    pub fn music(&self) -> &Arc<lizmeter_music::MusicService> {
+        &self.music
     }
 
     pub fn sync_manager(&self) -> &Arc<SyncManager> {

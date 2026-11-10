@@ -421,13 +421,13 @@ impl MusicService {
     }
 
     /// `play(url)` of the context: with something playing the track goes right after it and plays
-    /// at once; otherwise it becomes the first item.
-    pub fn play(&self, url: &str, optimistic: Option<MusicTrack>) -> Result<()> {
+    /// at once; otherwise it becomes the first item. `None`: a newer request replaced this one.
+    pub fn play(&self, url: &str, optimistic: Option<MusicTrack>) -> Result<Option<PlayResult>> {
         let has_active = self.raw_state() != MusicPlaybackState::Stopped && lock(&self.st).queue.current >= 0;
         let current = lock(&self.st).current_track.clone();
         let (req, snap) = self.begin(optimistic.or(current), None);
         match self.start_track(url, req) {
-            Ok(None) => Ok(()),
+            Ok(None) => Ok(None),
             Ok(Some(res)) => {
                 let track = res.track.clone();
                 self.finish_request(req, &res, move |st| {
@@ -437,7 +437,7 @@ impl MusicService {
                         st.queue.insert_first(track);
                     }
                 });
-                Ok(())
+                Ok(Some(res))
             }
             Err(e) => {
                 self.fail_request(req, &e, Some(snap));

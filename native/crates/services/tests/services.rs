@@ -43,7 +43,7 @@ fn every_preload_channel_has_exactly_one_owner() {
 fn a_deferred_channel_names_its_phase_and_an_unknown_one_says_so() {
     let r = rig();
     let msg = r.svc.dispatch("music:play", &[]).unwrap_err().to_string();
-    assert!(msg.contains("phase 9"), "{msg}");
+    assert!(msg.contains("Missing argument"), "music:play is served now: {msg}");
     let msg = r.svc.dispatch("widget:get-settings", &[]).unwrap_err().to_string();
     assert!(msg.contains("phase 11"), "{msg}");
     let msg = r.svc.dispatch("nope:nope", &[]).unwrap_err().to_string();
@@ -237,6 +237,56 @@ fn every_service_channel_round_trips_through_dispatch() {
     c.call("jira:delete-token", vec![]);
     assert_eq!(c.call("settings:get-value", vec![json!("jira_domain")]), Value::Null);
     assert!(c.call_err("worklog:log", vec![json!({"sessionId": "s", "issueKey": "P-1"})]).contains("No Jira credentials configured"));
+
+    // music: no binaries in the scratch folder and release URLs that point at a closed port, so
+    // nothing here touches the network or the sound device
+    assert_eq!(c.call("music:binary:status", vec![]), json!({"ytDlpInstalled": false, "ffmpegInstalled": false, "ytDlpVersion": null}));
+    let info = c.call("music:binary:info", vec![]);
+    assert!(info["error"].as_str().unwrap().starts_with("Failed to fetch binary info"), "{info}");
+    assert!(c.call_err("music:binary:download", vec![]).contains("Failed to fetch binary info"));
+    assert!(c.call_err("music:play", vec![json!({"url": "https://example.com/watch?v=x"})]).contains("yt-dlp or ffmpeg is not installed"));
+    assert!(c.call_err("music:meta", vec![json!({"url": "https://example.com/watch?v=x"})]).contains("yt-dlp is not installed"));
+    assert_eq!(c.call("music:stop", vec![]), Value::Null);
+    assert_eq!(c.call("music:library:list", vec![]), json!({"tracks": [], "total": 0}));
+    assert!(c.call_err("music:library:delete", vec![json!("nope")]).contains("Track not found: nope"));
+    r.svc
+        .with_db(|db| {
+            Ok(db.upsert_track(&lizmeter_db::TrackUpsert {
+                id: "t1".into(),
+                source_url: "https://example.com/t1".into(),
+                source_id: "t1".into(),
+                source_site: "youtube".into(),
+                title: "One".into(),
+                artist: None,
+                duration_seconds: None,
+                thumbnail_url: None,
+                cached_file_path: None,
+                cache_size_bytes: None,
+                added_at: None,
+            })?)
+        })
+        .unwrap();
+    let pl = c.call("music:playlist:create", vec![json!({"name": "Mix", "trackIds": ["t1"]})]);
+    assert_eq!((pl["name"].as_str(), pl["trackCount"].as_i64()), (Some("Mix"), Some(1)));
+    let pid = pl["id"].as_i64().unwrap();
+    c.call("music:playlist:rename", vec![json!({"id": pid, "name": "Mix 2"})]);
+    assert_eq!(c.call("music:playlist:list", vec![])[0]["name"], "Mix 2");
+    let tracks = c.call("music:playlist:tracks", vec![json!(pid)]);
+    assert_eq!(tracks[0]["track"]["title"], "One");
+    let added = c.call("music:playlist:add-track", vec![json!({"playlistId": pid, "trackId": "t1"})]);
+    c.call("music:playlist:reorder", vec![json!({"playlistId": pid, "trackEntryId": added["id"], "toPosition": 0})]);
+    c.call("music:playlist:remove-track", vec![added["id"].clone()]);
+    c.call("music:playlist:delete", vec![json!(pid)]);
+    assert!(c.call_err("music:playlist:delete", vec![json!(pid)]).contains("not found"));
+    assert_eq!(c.call("music:cache:stats", vec![])["maxBytes"], 2_147_483_648_i64);
+    c.call("music:cache:set-limit", vec![json!(1000)]);
+    assert_eq!(c.call("music:cache:stats", vec![])["maxBytes"], 1000);
+    c.call("music:cache:clear", vec![]);
+    assert_eq!(c.call("music:integrity:check", vec![])["error"], "ffmpeg is not installed");
+    assert_eq!(c.call("music:integrity:repair", vec![json!(["t1"])]), json!(0));
+    c.call("music:import:cancel", vec![]);
+    c.call("music:reset", vec![json!({"deleteBinaries": false})]);
+    assert_eq!(c.call("music:library:clear", vec![]), Value::Null);
 
     // data location, last: a move retires this instance
     let info = c.call("data-location:get", vec![]);

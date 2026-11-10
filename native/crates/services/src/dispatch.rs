@@ -150,6 +150,39 @@ struct JqlArg {
     jql: String,
 }
 
+#[derive(serde::Deserialize)]
+struct UrlArg {
+    url: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlaylistCreate {
+    name: String,
+    #[serde(default)]
+    track_ids: Vec<String>,
+}
+
+#[derive(serde::Deserialize)]
+struct PlaylistRename {
+    id: i64,
+    name: String,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlaylistReorder {
+    playlist_id: i64,
+    track_entry_id: i64,
+    to_position: i64,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetArg {
+    delete_binaries: bool,
+}
+
 impl Services {
     /// Calls `channel` with the arguments the preload passes to `ipcRenderer.invoke`.
     pub fn dispatch(&self, channel: &str, args: &[Value]) -> Result<Value> {
@@ -320,6 +353,49 @@ impl Services {
             "jira:set-email" => out(self.jira_set_email(&arg::<EmailArg>(args, 0, "input")?.email)?),
             "jira:set-project-key" => out(self.jira_set_project_key(&arg::<ProjectKeyArg>(args, 0, "input")?.project_key)?),
             "jira:set-jql-filter" => out(self.jira_set_jql_filter(&arg::<JqlArg>(args, 0, "input")?.jql)?),
+
+            // Music. There is no stream URL in the native app: `music:play` returns the track and
+            // whether it came from the cache, and the audio goes straight to the sound device.
+            "music:play" => {
+                let m = self.music.clone();
+                let played = m.play(&arg::<MusicPlayRequest>(args, 0, "input")?.url, None)?;
+                Ok(match played {
+                    Some(p) => json!({ "track": p.track, "fromCache": p.from_cache }),
+                    None => Value::Null,
+                })
+            }
+            "music:stop" => out(self.music.stop()),
+            "music:meta" => out(self.music.meta(&arg::<UrlArg>(args, 0, "input")?.url)?),
+            "music:library:list" => out(self.music.library_list(&arg_or_default::<MusicLibraryListInput>(args, 0)?)?),
+            "music:library:delete" => out(self.music.library_delete(&arg::<String>(args, 0, "trackId")?)?),
+            "music:library:clear" => out(self.music.library_clear()?),
+            "music:playlist:create" => {
+                let a: PlaylistCreate = arg(args, 0, "input")?;
+                out(self.music.playlist_create(&a.name, &a.track_ids)?)
+            }
+            "music:playlist:rename" => {
+                let a: PlaylistRename = arg(args, 0, "input")?;
+                out(self.music.playlist_rename(a.id, &a.name)?)
+            }
+            "music:playlist:delete" => out(self.music.playlist_delete(arg(args, 0, "id")?)?),
+            "music:playlist:list" => out(self.music.playlist_list()?),
+            "music:playlist:tracks" => out(self.music.playlist_tracks(arg(args, 0, "playlistId")?)?),
+            "music:playlist:add-track" => out(self.music.playlist_add_track(&arg::<PlaylistAddTrackInput>(args, 0, "input")?)?),
+            "music:playlist:remove-track" => out(self.music.playlist_remove_track(arg(args, 0, "playlistTrackId")?)?),
+            "music:playlist:reorder" => {
+                let a: PlaylistReorder = arg(args, 0, "input")?;
+                out(self.music.playlist_reorder(a.playlist_id, a.track_entry_id, a.to_position)?)
+            }
+            "music:cache:stats" => out(self.music.cache_stats()?),
+            "music:cache:clear" => out(self.music.cache_clear()?),
+            "music:cache:set-limit" => out(self.music.cache_set_limit(arg(args, 0, "maxBytes")?)?),
+            "music:binary:status" => out(self.music.binary_status()),
+            "music:binary:info" => out(self.music.binary_info()),
+            "music:binary:download" => out(self.music.download_binaries()?),
+            "music:import:cancel" => out(self.music.import_cancel()),
+            "music:reset" => out(self.music.reset(arg::<ResetArg>(args, 0, "input")?.delete_binaries)?),
+            "music:integrity:check" => out(self.music.integrity_check()?),
+            "music:integrity:repair" => out(self.music.integrity_repair(&arg::<Vec<String>>(args, 0, "trackIds")?)?),
 
             other => match crate::channels::deferred_owner(other) {
                 Some(owner) => fail(format!("Channel {other} is not available yet (phase {})", owner.phase())),
