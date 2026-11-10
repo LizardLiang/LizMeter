@@ -223,11 +223,15 @@ pub struct WidgetInit {
     pub avatars: AvatarPaths,
     /// Where a drag is remembered (`widget_pos_x`, `widget_pos_y`); none for a capture.
     pub services: Option<Arc<Services>>,
+    /// The position the window was asked to open at.
+    pub origin: (f32, f32),
 }
 
 pub struct Widget {
     snap: Option<WidgetTimerSnapshot>,
     avatars: [Option<Avatar>; 3],
+    /// Which files (and edit times) the loaded avatars came from.
+    avatar_key: Vec<(String, Option<std::time::SystemTime>)>,
     scale: f32,
     btn: [BtnFx; 2],
     hover: Option<Btn>,
@@ -236,8 +240,22 @@ pub struct Widget {
     dot_status: TimerStatus,
     dot_at: Instant,
     services: Option<Arc<Services>>,
+    /// Where the window was asked to open, and how far `Window::bounds` sits from it once the window
+    /// has its frame (known after the first draw). Saved positions are in the asked-for coordinates.
+    requested: (i32, i32),
+    frame_offset: Option<(i32, i32)>,
     last_pos: Option<(i32, i32)>,
     save_gen: u64,
+}
+
+fn avatar_key(files: &AvatarPaths) -> Vec<(String, Option<std::time::SystemTime>)> {
+    [&files.idle, &files.thinking, &files.tool_use]
+        .into_iter()
+        .map(|p| match p {
+            Some(p) => (p.clone(), std::fs::metadata(p).and_then(|m| m.modified()).ok()),
+            None => (String::new(), None),
+        })
+        .collect()
 }
 
 fn slot_index(slot: lizmeter_services::avatars::AvatarSlot) -> usize {
@@ -250,6 +268,7 @@ impl Widget {
         let mut this = Self {
             snap: init.snap,
             avatars: [None, None, None],
+            avatar_key: avatar_key(&init.avatars),
             scale: window.scale_factor(),
             btn: [BtnFx::new(BtnState::Idle, false), BtnFx::new(BtnState::Idle, true)],
             hover: None,
@@ -258,6 +277,8 @@ impl Widget {
             dot_status: status,
             dot_at: Instant::now() - Duration::from_secs(5),
             services: init.services,
+            requested: (init.origin.0.round() as i32, init.origin.1.round() as i32),
+            frame_offset: None,
             last_pos: None,
             save_gen: 0,
         };
@@ -267,7 +288,6 @@ impl Widget {
             fx.at = Instant::now() - Duration::from_secs(5);
         }
         if this.services.is_some() {
-            this.last_pos = Some(position_of(window));
             cx.observe_window_bounds(window, |this, window, cx| this.on_moved(window, cx)).detach();
         }
         this
@@ -279,6 +299,11 @@ impl Widget {
     }
 
     pub fn set_avatars(&mut self, files: &AvatarPaths, cx: &mut Context<Self>) {
+        let key = avatar_key(files);
+        if key == self.avatar_key {
+            return;
+        }
+        self.avatar_key = key;
         self.load_avatars(files);
         cx.notify();
     }
@@ -296,6 +321,13 @@ impl Widget {
         self.snap = Some(snap);
         self.refresh_buttons();
         cx.notify();
+    }
+
+    /// The window was sent back to its default spot: that spot is not a user move and is not saved.
+    pub fn note_reset(&mut self, x: f32, y: f32) {
+        self.requested = (x.round() as i32, y.round() as i32);
+        self.last_pos = None;
+        self.save_gen += 1;
     }
 
     fn status(&self) -> TimerStatus {
@@ -333,8 +365,10 @@ impl Widget {
 
     /// Remembers where the user dropped the widget (`moved` in `widget-window.ts`), once the drag settles.
     fn on_moved(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let pos = position_of(window);
-        if self.last_pos == Some(pos) {
+        let Some(offset) = self.frame_offset else { return };
+        let actual = position_of(window);
+        let pos = (actual.0 - offset.0, actual.1 - offset.1);
+        if self.last_pos.unwrap_or(self.requested) == pos {
             return;
         }
         self.last_pos = Some(pos);
@@ -463,6 +497,10 @@ fn head_that_fits(widths: &[f32], room: f32) -> usize {
 
 impl Render for Widget {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.frame_offset.is_none() {
+            let actual = position_of(window);
+            self.frame_offset = Some((actual.0 - self.requested.0, actual.1 - self.requested.1));
+        }
         let snap = self.snap.clone();
         let status = self.status();
         let activity = snap.as_ref().and_then(|s| s.claude_activity);
@@ -836,6 +874,7 @@ pub fn open_demo(cx: &mut App) -> AnyWindowHandle {
         snap: Some(demo_snapshot(&state)),
         avatars: AvatarPaths { idle: avatar.clone(), thinking: avatar.clone(), tool_use: avatar },
         services: None,
+        origin: pos,
     };
     let handle = cx
         .open_window(window_options(pos, tall, true), |window, cx| {

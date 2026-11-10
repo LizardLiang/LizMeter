@@ -206,12 +206,8 @@ impl WidgetHost {
             win.entity.update(cx, |w, cx| w.set_avatars(&files, cx));
             if saved_position(&self.svc).is_none() {
                 let (x, y) = widget::default_position(cx);
-                let _ = win.handle.update(cx, |_, window, _| {
-                    let b = window.bounds();
-                    if (f32::from(b.origin.x) - x).abs() > 0.5 || (f32::from(b.origin.y) - y).abs() > 0.5 {
-                        widget::move_to(window, x, y);
-                    }
-                });
+                win.entity.update(cx, |w, _| w.note_reset(x, y));
+                let _ = win.handle.update(cx, |_, window, _| widget::move_to(window, x, y));
             }
         }
         self.apply_visibility(cx);
@@ -222,7 +218,7 @@ impl WidgetHost {
         let pos = widget::start_position(cx, saved_position(&self.svc));
         let snap = self.root.read(cx).widget_snapshot();
         let show = should_show(&self.visibility, snap.status);
-        let init = WidgetInit { snap: Some(snap), avatars: self.svc.avatar_files(), services: Some(self.svc.clone()) };
+        let init = WidgetInit { snap: Some(snap), avatars: self.svc.avatar_files(), services: Some(self.svc.clone()), origin: pos };
         let opened = cx.open_window(widget::window_options(pos, tall, show), |window, cx| {
             widget::make_topmost(window);
             cx.new(|cx| Widget::new(window, cx, init))

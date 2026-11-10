@@ -66,6 +66,12 @@ impl Services {
         std::fs::create_dir_all(&dir)?;
         let ext = src.extension().map(|e| format!(".{}", e.to_string_lossy())).unwrap_or_default();
         let dest = dir.join(format!("avatar-{}{}", slot.name(), ext));
+        // A new image with another extension must not leave the old file behind.
+        if let Some(old) = self.get_setting_value(slot.key())? {
+            if Path::new(&old) != dest {
+                let _ = std::fs::remove_file(&old);
+            }
+        }
         std::fs::copy(src, &dest)?;
         self.set_setting_value(slot.key(), Some(&dest.to_string_lossy()))?;
         Ok(dest)

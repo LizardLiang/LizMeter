@@ -29,6 +29,20 @@ fn an_avatar_is_copied_stored_and_removed() {
 }
 
 #[test]
+fn a_new_extension_replaces_the_old_file() {
+    let rig = common::rig();
+    let svc = &rig.svc;
+    let gif = rig.root.join("a.gif");
+    let png = rig.root.join("b.png");
+    std::fs::write(&gif, b"g").unwrap();
+    std::fs::write(&png, b"p").unwrap();
+    let first = svc.set_avatar(AvatarSlot::Idle, &gif).unwrap();
+    let second = svc.set_avatar(AvatarSlot::Idle, &png).unwrap();
+    assert!(!first.exists());
+    assert!(second.exists());
+}
+
+#[test]
 fn a_missing_file_is_not_reported_but_its_path_still_counts_for_the_height() {
     let rig = common::rig();
     let svc = &rig.svc;
