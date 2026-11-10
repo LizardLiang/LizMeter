@@ -59,6 +59,11 @@ pub struct SettingsPage {
     // Widget
     pub widget_enabled: bool,
     pub widget_visibility: String,
+    /// Bumped by every change the desktop widget has to apply (switch, visibility, reset, avatars).
+    pub widget_rev: u64,
+    /// The three Claude-status avatar previews (idle, thinking, working) and the scale they were made for.
+    pub avatar_previews: [Option<crate::avatar::Avatar>; 3],
+    avatar_scale: f32,
     // Music
     pub cache_limit_mb: i64,
     pub confirm_clear: bool,
@@ -149,6 +154,9 @@ impl SettingsPage {
             jira_jql: plain("assignee = currentUser() AND status != Done", window, cx),
             widget_enabled: false,
             widget_visibility: "always".into(),
+            widget_rev: 0,
+            avatar_previews: [None, None, None],
+            avatar_scale: window.scale_factor(),
             cache_limit_mb: 1024,
             confirm_clear: false,
             data: None,
@@ -181,6 +189,7 @@ impl SettingsPage {
         self.show_max_hours(cx);
         self.widget_enabled = self.svc.get_setting_value("widget_enabled").ok().flatten().as_deref() == Some("true");
         self.widget_visibility = self.svc.get_setting_value("widget_visibility").ok().flatten().unwrap_or_else(|| "always".into());
+        self.load_avatar_previews();
         self.data = Some(self.svc.data_location_get());
         self.refresh_sync(cx);
         self.refresh_providers(cx);
@@ -276,12 +285,14 @@ impl SettingsPage {
     pub fn set_widget_enabled(&mut self, on: bool, cx: &mut Context<Self>) {
         self.widget_enabled = on;
         let _ = self.svc.set_setting_value("widget_enabled", Some(if on { "true" } else { "false" }));
+        self.widget_rev += 1;
         cx.notify();
     }
 
     pub fn set_widget_visibility(&mut self, v: &str, cx: &mut Context<Self>) {
         self.widget_visibility = v.to_string();
         let _ = self.svc.set_setting_value("widget_visibility", Some(v));
+        self.widget_rev += 1;
         cx.notify();
     }
 
@@ -289,6 +300,35 @@ impl SettingsPage {
         for key in ["widget_pos_x", "widget_pos_y"] {
             let _ = self.svc.set_setting_value(key, None);
         }
+        self.widget_rev += 1;
+        cx.notify();
+    }
+
+    fn load_avatar_previews(&mut self) {
+        let files = self.svc.avatar_files();
+        let scale = self.avatar_scale;
+        let load = |p: &Option<String>| p.as_deref().and_then(|p| crate::avatar::load_preview(std::path::Path::new(p), scale));
+        self.avatar_previews = [load(&files.idle), load(&files.thinking), load(&files.tool_use)];
+    }
+
+    /// Click on a slot: pick an image, copy it into the avatars folder and show it in the widget.
+    pub fn upload_avatar(&mut self, slot: lizmeter_services::avatars::AvatarSlot, cx: &mut Context<Self>) {
+        let title = format!("Select avatar for \"{}\" status", slot.name());
+        let filters = [lizmeter_services::os::shell::FileFilter { name: "Images", extensions: &lizmeter_services::avatars::AVATAR_EXTENSIONS }];
+        let Some(path) = lizmeter_services::os::shell::pick_file(&title, &filters) else { return };
+        if let Err(e) = self.svc.set_avatar(slot, &path) {
+            eprintln!("[widget] could not store the avatar: {e}");
+            return;
+        }
+        self.load_avatar_previews();
+        self.widget_rev += 1;
+        cx.notify();
+    }
+
+    pub fn remove_avatar(&mut self, slot: lizmeter_services::avatars::AvatarSlot, cx: &mut Context<Self>) {
+        let _ = self.svc.remove_avatar(slot);
+        self.load_avatar_previews();
+        self.widget_rev += 1;
         cx.notify();
     }
 

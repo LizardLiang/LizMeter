@@ -1,6 +1,7 @@
 //! LizMeter native visual spike: Rust + gpui (DirectX 11) with a patched backdrop-blur renderer.
 
 mod app;
+mod avatar;
 mod cards;
 mod claude_flow;
 mod claude_ui;
@@ -22,13 +23,13 @@ mod tag_picker;
 mod timer;
 pub use lizmeter_ui::{css, ui};
 mod widget;
+mod widget_host;
 
 use app::{Page, Root};
 use gpui::*;
 use lizmeter_ui::md_editor::MdVariant;
 use lizmeter_services::Services;
 use std::{path::PathBuf, sync::Arc, time::Duration};
-use timer::Status;
 
 mod embedded {
     use gpui::{AssetSource, Result, SharedString};
@@ -144,21 +145,6 @@ fn save_png(path: &PathBuf, mut f: gpui::capture::CapturedFrame, composite: Opti
     enc.write_header().unwrap().write_image_data(&f.rgba).unwrap();
 }
 
-#[cfg(target_os = "windows")]
-fn make_topmost(window: &Window) {
-    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{HWND_TOPMOST, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos};
-    if let Ok(handle) = HasWindowHandle::window_handle(window) {
-        if let RawWindowHandle::Win32(h) = handle.as_raw() {
-            let hwnd = HWND(h.hwnd.get() as *mut _);
-            unsafe {
-                let _ = SetWindowPos(hwnd, Some(HWND_TOPMOST), 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
-            }
-        }
-    }
-}
-
 fn main() {
     let mut args = parse_args();
     let shot = args.screenshot.is_some();
@@ -208,28 +194,7 @@ fn main() {
         lizmeter_ui::md_editor::bind_keys(cx);
         let is_widget = args.page == "widget";
         let handle: AnyWindowHandle = if is_widget {
-            let display = cx.primary_display().map(|d| d.bounds()).unwrap_or(Bounds::new(point(px(0.0), px(0.0)), size(px(1920.0), px(1080.0))));
-            let bounds = Bounds::new(point(display.right() - px(280.0), display.top() + px(20.0)), size(px(260.0), px(80.0)));
-            let w = cx
-                .open_window(
-                    WindowOptions {
-                        window_bounds: Some(WindowBounds::Windowed(bounds)),
-                        titlebar: None,
-                        kind: WindowKind::PopUp,
-                        focus: false,
-                        is_resizable: false,
-                        window_background: WindowBackgroundAppearance::Transparent,
-                        ..Default::default()
-                    },
-                    |window, cx| {
-                        #[cfg(target_os = "windows")]
-                        make_topmost(window);
-                        let _ = window;
-                        cx.new(|cx| widget::Widget::new(cx, Status::Running))
-                    },
-                )
-                .unwrap();
-            w.into()
+            widget::open_demo(cx)
         } else {
             let page_name = args.page.clone();
             let args_md = args.md.clone();
@@ -321,6 +286,12 @@ fn main() {
             }
         }
         cx.activate(!shot);
+        // The desktop widget belongs to a live app: not to a screenshot, a headless hook or the widget capture.
+        if !shot && args.ops.is_empty() && !is_widget {
+            if let Some(root) = handle.downcast::<Root>().and_then(|r| r.entity(cx).ok()) {
+                widget_host::WidgetHost::start(root, handle, cx);
+            }
+        }
         if let Some(changes) = todo_changes.take() {
             // A pipe write refreshes the Todos page, as `todo:changed` does in the Electron build.
             cx.spawn(async move |cx| {

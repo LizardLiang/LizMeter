@@ -298,24 +298,52 @@ impl SettingsPage {
                 .child(label("Avatar").mt(px(16.0)))
                 .child(hint().child("Upload GIF/PNG for each Claude session status. Pixel art auto-scales crispy."));
             let mut grid = div().mt(px(12.0)).flex().flex_row().gap(px(12.0));
-            for name in ["Idle", "Thinking", "Working"] {
-                grid = grid.child(
-                    div().flex().flex_col().items_center().gap(px(6.0)).child(ui_text(11.0).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT_DIM)).child(name)).child(
-                        div()
-                            .size(px(64.0))
-                            .rounded(px(8.0))
+            for (i, slot) in lizmeter_services::avatars::AvatarSlot::ALL.into_iter().enumerate() {
+                let (m_pick, m_remove) = (me.clone(), me.clone());
+                let preview = self.avatar_previews[i].clone();
+                let mut box_ = div()
+                    .id(("avatar-slot", i))
+                    .size(px(64.0))
+                    .rounded(px(8.0))
+                    .border(px(1.0))
+                    .border_dashed()
+                    .border_color(col(crate::css::rgba(122, 162, 247, 0.25)))
+                    .bg(col(crate::css::rgba(12, 13, 24, 0.55)))
+                    .hover(|s| s.border_color(col(crate::css::rgba(122, 162, 247, 0.5))).bg(col(crate::css::rgba(12, 13, 24, 0.7))))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .overflow_hidden()
+                    .cursor_pointer()
+                    .on_click(move |_, _, a| m_pick.update(a, |p, cx| p.upload_avatar(slot, cx)));
+                box_ = match &preview {
+                    Some(a) => box_.child(img(a.image.clone()).size_full().object_fit(ObjectFit::Fill)),
+                    None => box_.text_size(px(20.0)).text_color(col(ICON_DIM)).child("+"),
+                };
+                let mut col_el = div()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(6.0))
+                    .child(ui_text(11.0).font_weight(FontWeight(600.0)).text_color(col(TN_TEXT_DIM)).child(slot.label()))
+                    .child(box_);
+                if preview.is_some() {
+                    col_el = col_el.child(
+                        ui_text(10.0)
+                            .id(("avatar-remove", i))
+                            .px(px(8.0))
+                            .py(px(2.0))
+                            .rounded(px(4.0))
                             .border(px(1.0))
-                            .border_dashed()
-                            .border_color(col(crate::css::rgba(122, 162, 247, 0.25)))
-                            .bg(col(crate::css::rgba(12, 13, 24, 0.55)))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_size(px(20.0))
-                            .text_color(col(ICON_DIM))
-                            .child("+"),
-                    ),
-                );
+                            .border_color(col(crate::css::rgba(247, 118, 142, 0.19)))
+                            .text_color(col(TN_RED))
+                            .cursor_pointer()
+                            .hover(|s| s.bg(col(crate::css::rgba(247, 118, 142, 0.06))))
+                            .on_click(move |_, _, a| m_remove.update(a, |p, cx| p.remove_avatar(slot, cx)))
+                            .child("Remove"),
+                    );
+                }
+                grid = grid.child(col_el);
             }
             s = s.child(grid);
         }

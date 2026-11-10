@@ -7,6 +7,7 @@
 //! (the widget) are listed in [`channels`].
 
 pub mod attachments;
+pub mod avatars;
 pub mod channels;
 pub mod claude_tracker;
 mod dispatch;

@@ -17,7 +17,7 @@ serde_json = "1.0.154"
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 gpui.workspace = true
 png.workspace = true
-image.workspace = true
+image = { workspace = true, features = ["png", "gif", "webp"] }
 raw-window-handle.workspace = true
 windows = { workspace = true, features = ["Win32_Globalization"] }
 
