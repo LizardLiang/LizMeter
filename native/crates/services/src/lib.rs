@@ -81,10 +81,7 @@ impl Services {
         if self.retired.load(Ordering::SeqCst) {
             return fail("LizMeter is restarting to use the new data folder");
         }
-        let result = f(&guard);
-        // Each write flushes after its own commit; this also publishes lines a failed closure left behind.
-        guard.flush_outbox();
-        result
+        f(&guard)
     }
 
     /// The music backend. The UI drives playback and the library through it directly; the
