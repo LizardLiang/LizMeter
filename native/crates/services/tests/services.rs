@@ -569,3 +569,21 @@ fn startup_prompt_quit_and_no_prompt_when_the_folder_is_there() {
     location.invalidate_data_dir_cache();
     assert!(lizmeter_services::ensure_data_dir_available(&location, &mut |_| panic!("no prompt")).unwrap());
 }
+
+#[test]
+fn startup_prompt_text_and_buttons_match_electron() {
+    let (_tmp, user_data, _missing, _p) = missing_folder_profile();
+    let location = lizmeter_db::data_location::DataLocation::new(&user_data);
+    let status = location.get_data_dir_status();
+    let prompt = lizmeter_services::missing_data_dir_prompt(&status);
+    assert_eq!(prompt.title, "Data Folder Not Found");
+    assert_eq!(prompt.message, "LizMeter cannot find its data folder.");
+    assert_eq!(prompt.buttons, ["Retry", "Use Default Folder", "Quit"]);
+    assert_eq!(
+        prompt.detail,
+        format!(
+            "{}\n\nThe drive may not be connected. Reconnect it and retry, or go back to the default folder:\n{}\n\nGoing back to the default folder does not delete anything.",
+            status.data_dir, status.default_data_dir
+        )
+    );
+}

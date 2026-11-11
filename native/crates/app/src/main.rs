@@ -427,37 +427,53 @@ fn open_services(data_dir: Option<PathBuf>) -> Arc<Services> {
     }
 }
 
-/// The "Data Folder Not Found" prompt. A Win32 Cancel / Try Again / Continue box: Try Again retries,
-/// Continue goes back to the default folder, Cancel quits.
+/// The "Data Folder Not Found" prompt, laid out as Electron's `dialog.showMessageBoxSync` draws it on
+/// Windows: a task dialog with the warning icon, a main instruction, the detail text, Retry as the
+/// common button and "Use Default Folder" and "Quit" as command links. Close, Esc and Quit all quit.
 #[cfg(target_os = "windows")]
 fn ask_missing_data_dir(status: &lizmeter_core::DataLocationInfo) -> lizmeter_services::DataDirChoice {
     use lizmeter_services::DataDirChoice;
-    use windows::core::PCWSTR;
-    use windows::Win32::UI::WindowsAndMessaging::{
-        IDCONTINUE, IDTRYAGAIN, MB_CANCELTRYCONTINUE, MB_DEFBUTTON1, MB_ICONWARNING, MB_SETFOREGROUND, MessageBoxW,
+    use windows::core::{HSTRING, PCWSTR};
+    use windows::Win32::UI::Controls::{
+        TaskDialogIndirect, TASKDIALOGCONFIG, TASKDIALOG_BUTTON, TDCBF_RETRY_BUTTON, TDF_ALLOW_DIALOG_CANCELLATION,
+        TDF_USE_COMMAND_LINKS, TD_WARNING_ICON,
     };
-    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-    let text = wide(&format!(
-        "LizMeter cannot find its data folder.\n\n{}\n\nThe drive may not be connected. Reconnect it, then choose Try Again.\n\
-         Choose Continue to go back to the default folder:\n{}\n\n\
-         Going back to the default folder does not delete anything.\nCancel quits LizMeter.",
-        status.data_dir, status.default_data_dir
-    ));
-    let title = wide("Data Folder Not Found");
-    let answer = unsafe {
-        MessageBoxW(
-            None,
-            PCWSTR(text.as_ptr()),
-            PCWSTR(title.as_ptr()),
-            MB_CANCELTRYCONTINUE | MB_DEFBUTTON1 | MB_ICONWARNING | MB_SETFOREGROUND,
-        )
+    use windows::Win32::UI::WindowsAndMessaging::IDRETRY;
+    const USE_DEFAULT_ID: i32 = 101;
+    const QUIT_ID: i32 = 102;
+
+    let prompt = lizmeter_services::missing_data_dir_prompt(status);
+    let title = HSTRING::from(prompt.title);
+    let message = HSTRING::from(prompt.message);
+    let detail = HSTRING::from(prompt.detail.as_str());
+    let use_default = HSTRING::from(prompt.buttons[1]);
+    let quit = HSTRING::from(prompt.buttons[2]);
+    let buttons = [
+        TASKDIALOG_BUTTON { nButtonID: USE_DEFAULT_ID, pszButtonText: PCWSTR(use_default.as_ptr()) },
+        TASKDIALOG_BUTTON { nButtonID: QUIT_ID, pszButtonText: PCWSTR(quit.as_ptr()) },
+    ];
+    let mut config = TASKDIALOGCONFIG {
+        cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
+        dwFlags: TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION,
+        dwCommonButtons: TDCBF_RETRY_BUTTON,
+        pszWindowTitle: PCWSTR(title.as_ptr()),
+        pszMainInstruction: PCWSTR(message.as_ptr()),
+        pszContent: PCWSTR(detail.as_ptr()),
+        cButtons: buttons.len() as u32,
+        pButtons: buttons.as_ptr(),
+        nDefaultButton: IDRETRY.0,
+        ..Default::default()
     };
-    if answer == IDTRYAGAIN {
-        DataDirChoice::Retry
-    } else if answer == IDCONTINUE {
-        DataDirChoice::UseDefault
-    } else {
-        DataDirChoice::Quit
+    config.Anonymous1.pszMainIcon = TD_WARNING_ICON;
+    let mut answer = 0i32;
+    let shown = unsafe { TaskDialogIndirect(&config, Some(&mut answer), None, None) };
+    if shown.is_err() {
+        return DataDirChoice::Quit;
+    }
+    match answer {
+        a if a == IDRETRY.0 => DataDirChoice::Retry,
+        USE_DEFAULT_ID => DataDirChoice::UseDefault,
+        _ => DataDirChoice::Quit,
     }
 }
 
