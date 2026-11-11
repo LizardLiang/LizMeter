@@ -216,6 +216,22 @@ fn check_deletes_a_binary_that_cannot_start() {
     assert!(!status.ffmpeg_installed);
 }
 
+/// yt-dlp is a self-unpacking exe: `--version` takes 3-4 s on a normal machine and more under a virus
+/// scan. A check that runs out of time keeps the file; only a binary that cannot start is deleted.
+#[test]
+fn check_keeps_a_binary_that_is_slow_to_answer() {
+    let r = rig();
+    let bin = r.mgr.bin_dir();
+    std::fs::create_dir_all(&bin).unwrap();
+    std::fs::copy(fake_ytdlp_exe(), bin.join("yt-dlp.exe")).unwrap();
+    std::fs::write(bin.join("fake.cfg"), "version_delay_ms=6500
+").unwrap();
+    let status = r.mgr.check();
+    assert!(bin.join("yt-dlp.exe").exists(), "a slow yt-dlp must not be deleted");
+    assert!(status.yt_dlp_installed);
+    assert_eq!(status.yt_dlp_version, None);
+}
+
 #[test]
 fn parses_checksum_manifests() {
     let h = "a".repeat(64);

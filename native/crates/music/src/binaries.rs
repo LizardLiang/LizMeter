@@ -137,8 +137,10 @@ impl BinaryManager {
         self.bin_dir().join(FFMPEG_FILE)
     }
 
-    /// Existence plus a health check: each binary is run, and one that cannot start is deleted so
-    /// the next download replaces it. The result is cached until a download finishes.
+    /// Existence plus a health check: each binary is run, and one that cannot start or exits with an
+    /// error is deleted so the next download replaces it. A check that runs out of time keeps the
+    /// file: yt-dlp unpacks itself on every start (3-4 s, longer under a virus scan), and a slow start
+    /// is not a broken binary. The result is cached until a download finishes.
     pub fn check(&self) -> BinaryStatus {
         if let Some(s) = lock(&self.cached_status).clone() {
             return s;
@@ -153,6 +155,7 @@ impl BinaryManager {
                     let v = o.stdout.trim();
                     version = (!v.is_empty()).then(|| v.to_string());
                 }
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
                 _ => {
                     yt_installed = false;
                     let _ = fs::remove_file(&yt);
@@ -162,6 +165,7 @@ impl BinaryManager {
         if ff_installed {
             match run_capture(&ff, &["-version"], Duration::from_secs(5)) {
                 Ok(o) if o.code == Some(0) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
                 _ => {
                     ff_installed = false;
                     let _ = fs::remove_file(&ff);

@@ -53,6 +53,9 @@ fn main() {
     let mut out = out.lock();
     match role {
         "version" => {
+            if let Some(ms) = cfg("version_delay_ms").and_then(|v| v.parse::<u64>().ok()) {
+                std::thread::sleep(std::time::Duration::from_millis(ms));
+            }
             let _ = writeln!(out, "{}", cfg("version").unwrap_or_else(|| "2099.01.01".into()));
         }
         "playlist" => {
