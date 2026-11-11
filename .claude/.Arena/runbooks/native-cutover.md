@@ -139,8 +139,11 @@ soak 只在一台電腦的本機資料夾上跑，所以它檢查不到兩台電
 ```powershell
 cd C:\Users\lizard_liang\personal\PersonalTool\LizMeter\native
 cargo build --release
+Remove-Item env:NSISDIR -ErrorAction SilentlyContinue
 cargo packager --release -c Packager.toml
 ```
+
+   `Remove-Item env:NSISDIR` 只清除這個 PowerShell 視窗的 `NSISDIR`。scoop 的 NSIS 會設定這個變數，它讓 cargo-packager 的 makensis 到錯的資料夾找外掛，建置會停在 `Plugin not found`。
 
    安裝檔在 `native\target\packager\`。
 4. 執行安裝檔。它會做三件事：

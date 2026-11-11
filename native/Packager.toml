@@ -1,6 +1,9 @@
 # cargo-packager config for the native LizMeter installer (per-user NSIS).
-# Build: cargo build --release -p lizmeter-app, then, from native/:
+# Build: cargo build --release -p lizmeter-app, then, from native/ (PowerShell):
+#   Remove-Item env:NSISDIR -ErrorAction SilentlyContinue
 #   cargo packager --release -c Packager.toml
+# NSISDIR (set by scoop's NSIS) sends cargo-packager's makensis to scoop's plugin folder, which has
+# no nsis_tauri_utils.dll: the build stops with "Plugin not found". Clear it in the shell only.
 name = "lizmeter"
 product-name = "LizMeter"
 identifier = "com.lizmeter.native"

@@ -15,8 +15,11 @@ cargo build --release                 # build native/target/release/lizmeter.exe
 cargo test --workspace                # all native tests
 cargo test -p lizmeter-db             # one crate
 cargo run --release -p lizmeter-app   # start the app
+Remove-Item env:NSISDIR -ErrorAction SilentlyContinue   # PowerShell; scoop's NSIS sets it, see below
 cargo packager --release -c Packager.toml   # per-user NSIS installer (needs: cargo install cargo-packager --locked)
 ```
+
+Clear `NSISDIR` in the shell before `cargo packager`. scoop's NSIS sets it as a user variable, and then cargo-packager's own `makensis` looks for plugins in scoop's folder and stops with `Plugin not found, cannot call nsis_tauri_utils::SemverCompare`. Clear it in the shell only, not in the user environment, which scoop's NSIS needs.
 
 Soak and cutover (details: `.claude/.Arena/runbooks/native-cutover.md`):
 
