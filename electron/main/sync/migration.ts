@@ -14,7 +14,7 @@ import {
 import { moveTodoRowId } from "./merge-engine.ts";
 import { addSyncNotice } from "./notices.ts";
 import { allColumnsFor, encodeRowFields } from "./row-codec.ts";
-import { newUuid, recordUpsert, setSyncEnabled } from "./sync-writer.ts";
+import { flushOutbox, newUuid, recordUpsert, setSyncEnabled, withSyncTransaction } from "./sync-writer.ts";
 
 type DbHandle = Database.Database;
 
@@ -154,6 +154,7 @@ export function renumberBlockAllocatedTodoIds(database: DbHandle, dbPath?: strin
     );
   });
   run();
+  flushOutbox(database);
 
   return { backupPath, renumbered };
 }
@@ -173,7 +174,11 @@ export function enableSyncOnExistingMachine(
   dataDir: string,
 ): SyncMigrationResult {
   const result = runSyncMigration(database, dbPath, dataDir);
-  setSyncEnabled(database, true);
-  publishExistingData(database);
+  // One transaction: a crash leaves either nothing done, or the flag on with every publish line
+  // already queued in the outbox for the startup flush to send.
+  withSyncTransaction(database, () => {
+    setSyncEnabled(database, true);
+    publishExistingData(database);
+  });
   return result;
 }

@@ -66,6 +66,7 @@ import {
   recordLink,
   recordReorder,
   recordUpsert,
+  withSyncTransaction,
 } from "./sync/sync-writer.ts";
 import { toRendererTrack } from "./music/internal-types.ts";
 
@@ -362,6 +363,15 @@ export function initDatabase(dbPath?: string): void {
       hlc_counter       INTEGER NOT NULL,
       hlc_device_number INTEGER NOT NULL,
       PRIMARY KEY (table_name, row_uuid)
+    );
+
+    -- Oplog lines waiting to be appended to this device's file in the shared folder. A line is
+    -- inserted in the same transaction as the row change it describes and removed only after the
+    -- append succeeded (sync-writer.ts flushOutbox). Local only: never snapshotted or synced.
+    CREATE TABLE IF NOT EXISTS sync_outbox (
+      seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+      line        TEXT NOT NULL,
+      created_at  TEXT NOT NULL
     );
   `);
 
@@ -769,47 +779,49 @@ function buildSessionResult(id: string, title: string, input: SaveSessionInput, 
 
 export function saveSession(input: SaveSessionInput): Session {
   const database = getDb();
-  const title = validateSessionInput(input);
+  return withSyncTransaction(database, () => {
+    const title = validateSessionInput(input);
 
-  const id = crypto.randomUUID();
-  const completedAt = new Date().toISOString();
+    const id = crypto.randomUUID();
+    const completedAt = new Date().toISOString();
 
-  const issueProvider = input.issueProvider ?? null;
-  const issueId = input.issueId ?? null;
+    const issueProvider = input.issueProvider ?? null;
+    const issueId = input.issueId ?? null;
 
-  const stmt = database.prepare(`
-    INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url, issue_provider, issue_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+    const stmt = database.prepare(`
+      INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url, issue_provider, issue_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
 
-  stmt.run(
-    id,
-    title,
-    input.timerType,
-    input.plannedDurationSeconds,
-    input.actualDurationSeconds,
-    completedAt,
-    input.issueNumber ?? null,
-    input.issueTitle ?? null,
-    input.issueUrl ?? null,
-    issueProvider,
-    issueId,
-  );
+    stmt.run(
+      id,
+      title,
+      input.timerType,
+      input.plannedDurationSeconds,
+      input.actualDurationSeconds,
+      completedAt,
+      input.issueNumber ?? null,
+      input.issueTitle ?? null,
+      input.issueUrl ?? null,
+      issueProvider,
+      issueId,
+    );
 
-  recordUpsert(database, "sessions", id, {
-    title,
-    timer_type: input.timerType,
-    planned_duration_seconds: input.plannedDurationSeconds,
-    actual_duration_seconds: input.actualDurationSeconds,
-    completed_at: completedAt,
-    issue_number: input.issueNumber ?? null,
-    issue_title: input.issueTitle ?? null,
-    issue_url: input.issueUrl ?? null,
-    issue_provider: issueProvider,
-    issue_id: issueId,
+    recordUpsert(database, "sessions", id, {
+      title,
+      timer_type: input.timerType,
+      planned_duration_seconds: input.plannedDurationSeconds,
+      actual_duration_seconds: input.actualDurationSeconds,
+      completed_at: completedAt,
+      issue_number: input.issueNumber ?? null,
+      issue_title: input.issueTitle ?? null,
+      issue_url: input.issueUrl ?? null,
+      issue_provider: issueProvider,
+      issue_id: issueId,
+    });
+
+    return buildSessionResult(id, title, input, completedAt);
   });
-
-  return buildSessionResult(id, title, input, completedAt);
 }
 
 interface SessionRow {
@@ -931,100 +943,102 @@ export function listSessions(input: ListSessionsInput = {}): ListSessionsResult 
 
 export function saveSessionWithTracking(input: SaveSessionWithTrackingInput): Session {
   const database = getDb();
-  const title = validateSessionInput(input);
+  return withSyncTransaction(database, () => {
+    const title = validateSessionInput(input);
 
-  const id = crypto.randomUUID();
-  const completedAt = new Date().toISOString();
-  const issueProvider = input.issueProvider ?? null;
-  const issueId = input.issueId ?? null;
+    const id = crypto.randomUUID();
+    const completedAt = new Date().toISOString();
+    const issueProvider = input.issueProvider ?? null;
+    const issueId = input.issueId ?? null;
 
-  const insertSession = database.prepare(`
-    INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url, issue_provider, issue_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+    const insertSession = database.prepare(`
+      INSERT INTO sessions (id, title, timer_type, planned_duration_seconds, actual_duration_seconds, completed_at, issue_number, issue_title, issue_url, issue_provider, issue_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
 
-  const insertCcSession = database.prepare(`
-    INSERT OR IGNORE INTO claude_code_sessions
-      (id, session_id, cc_session_uuid, file_edit_count, total_idle_seconds, idle_period_count, first_activity_at, last_activity_at, files_edited)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
+    const insertCcSession = database.prepare(`
+      INSERT OR IGNORE INTO claude_code_sessions
+        (id, session_id, cc_session_uuid, file_edit_count, total_idle_seconds, idle_period_count, first_activity_at, last_activity_at, files_edited)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
 
-  const insertIdlePeriod = database.prepare(`
-    INSERT INTO claude_code_idle_periods (cc_session_id, start_at, end_at, duration_seconds)
-    VALUES (?, ?, ?, ?)
-  `);
+    const insertIdlePeriod = database.prepare(`
+      INSERT INTO claude_code_idle_periods (cc_session_id, start_at, end_at, duration_seconds)
+      VALUES (?, ?, ?, ?)
+    `);
 
-  const runTransaction = database.transaction(() => {
-    insertSession.run(
-      id,
-      title,
-      input.timerType,
-      input.plannedDurationSeconds,
-      input.actualDurationSeconds,
-      completedAt,
-      input.issueNumber ?? null,
-      input.issueTitle ?? null,
-      input.issueUrl ?? null,
-      issueProvider,
-      issueId,
-    );
+    const runTransaction = database.transaction(() => {
+      insertSession.run(
+        id,
+        title,
+        input.timerType,
+        input.plannedDurationSeconds,
+        input.actualDurationSeconds,
+        completedAt,
+        input.issueNumber ?? null,
+        input.issueTitle ?? null,
+        input.issueUrl ?? null,
+        issueProvider,
+        issueId,
+      );
 
-    recordUpsert(database, "sessions", id, {
-      title,
-      timer_type: input.timerType,
-      planned_duration_seconds: input.plannedDurationSeconds,
-      actual_duration_seconds: input.actualDurationSeconds,
-      completed_at: completedAt,
-      issue_number: input.issueNumber ?? null,
-      issue_title: input.issueTitle ?? null,
-      issue_url: input.issueUrl ?? null,
-      issue_provider: issueProvider,
-      issue_id: issueId,
-    });
+      recordUpsert(database, "sessions", id, {
+        title,
+        timer_type: input.timerType,
+        planned_duration_seconds: input.plannedDurationSeconds,
+        actual_duration_seconds: input.actualDurationSeconds,
+        completed_at: completedAt,
+        issue_number: input.issueNumber ?? null,
+        issue_title: input.issueTitle ?? null,
+        issue_url: input.issueUrl ?? null,
+        issue_provider: issueProvider,
+        issue_id: issueId,
+      });
 
-    // Claude Code tracking data is machine-local (FR-003) and never syncs.
-    if (input.claudeCodeSessions && input.claudeCodeSessions.length > 0) {
-      for (const ccSession of input.claudeCodeSessions) {
-        const ccId = crypto.randomUUID();
-        const filesEditedJson = JSON.stringify(ccSession.filesEdited ?? []);
+      // Claude Code tracking data is machine-local (FR-003) and never syncs.
+      if (input.claudeCodeSessions && input.claudeCodeSessions.length > 0) {
+        for (const ccSession of input.claudeCodeSessions) {
+          const ccId = crypto.randomUUID();
+          const filesEditedJson = JSON.stringify(ccSession.filesEdited ?? []);
 
-        // SELECT-before-INSERT: used instead of relying on INSERT OR IGNORE's `changes` count
-        // because the Vitest sql.js shim does not return `changes` from Statement.run().
-        // Within a single transaction this SELECT will always return null for a fresh UUID,
-        // but the pattern provides idempotency safety and test compatibility.
-        const existingRow = database
-          .prepare(
-            "SELECT id FROM claude_code_sessions WHERE session_id = ? AND cc_session_uuid = ?",
-          )
-          .get(id, ccSession.ccSessionUuid);
+          // SELECT-before-INSERT: used instead of relying on INSERT OR IGNORE's `changes` count
+          // because the Vitest sql.js shim does not return `changes` from Statement.run().
+          // Within a single transaction this SELECT will always return null for a fresh UUID,
+          // but the pattern provides idempotency safety and test compatibility.
+          const existingRow = database
+            .prepare(
+              "SELECT id FROM claude_code_sessions WHERE session_id = ? AND cc_session_uuid = ?",
+            )
+            .get(id, ccSession.ccSessionUuid);
 
-        if (!existingRow) {
-          insertCcSession.run(
-            ccId,
-            id,
-            ccSession.ccSessionUuid,
-            ccSession.fileEditCount,
-            ccSession.totalIdleSeconds,
-            ccSession.idlePeriodCount,
-            ccSession.firstActivityAt ?? null,
-            ccSession.lastActivityAt ?? null,
-            filesEditedJson,
-          );
+          if (!existingRow) {
+            insertCcSession.run(
+              ccId,
+              id,
+              ccSession.ccSessionUuid,
+              ccSession.fileEditCount,
+              ccSession.totalIdleSeconds,
+              ccSession.idlePeriodCount,
+              ccSession.firstActivityAt ?? null,
+              ccSession.lastActivityAt ?? null,
+              filesEditedJson,
+            );
 
-          // Insert idle periods for this CC session
-          if (ccSession.idlePeriods && ccSession.idlePeriods.length > 0) {
-            for (const period of ccSession.idlePeriods) {
-              insertIdlePeriod.run(ccId, period.startAt, period.endAt, period.durationSeconds);
+            // Insert idle periods for this CC session
+            if (ccSession.idlePeriods && ccSession.idlePeriods.length > 0) {
+              for (const period of ccSession.idlePeriods) {
+                insertIdlePeriod.run(ccId, period.startAt, period.endAt, period.durationSeconds);
+              }
             }
           }
         }
       }
-    }
+    });
+
+    runTransaction();
+
+    return buildSessionResult(id, title, input, completedAt);
   });
-
-  runTransaction();
-
-  return buildSessionResult(id, title, input, completedAt);
 }
 
 export function getClaudeCodeDataForSession(
@@ -1100,9 +1114,11 @@ export function getClaudeCodeDataForSession(
 
 export function deleteSession(id: string): void {
   const database = getDb();
-  // No-op if ID doesn't exist — delete is safe to call with any ID
-  database.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-  recordDelete(database, "sessions", id);
+  return withSyncTransaction(database, () => {
+    // No-op if ID doesn't exist — delete is safe to call with any ID
+    database.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    recordDelete(database, "sessions", id);
+  });
 }
 
 export function getSessionById(id: string): Session | null {
@@ -1145,13 +1161,15 @@ export function getSessionById(id: string): Session | null {
 
 export function updateSessionDuration(id: string, actualDurationSeconds: number): Session {
   const database = getDb();
-  database
-    .prepare("UPDATE sessions SET actual_duration_seconds = ? WHERE id = ?")
-    .run(actualDurationSeconds, id);
-  recordUpsert(database, "sessions", id, { actual_duration_seconds: actualDurationSeconds });
-  const updated = getSessionById(id);
-  if (!updated) throw new Error(`Session not found after update: ${id}`);
-  return updated;
+  return withSyncTransaction(database, () => {
+    database
+      .prepare("UPDATE sessions SET actual_duration_seconds = ? WHERE id = ?")
+      .run(actualDurationSeconds, id);
+    recordUpsert(database, "sessions", id, { actual_duration_seconds: actualDurationSeconds });
+    const updated = getSessionById(id);
+    if (!updated) throw new Error(`Session not found after update: ${id}`);
+    return updated;
+  });
 }
 
 export function updateWorklogStatus(
@@ -1160,17 +1178,19 @@ export function updateWorklogStatus(
   worklogId?: string,
 ): void {
   const database = getDb();
-  if (worklogId !== undefined) {
-    database
-      .prepare("UPDATE sessions SET worklog_status = ?, worklog_id = ? WHERE id = ?")
-      .run(status, worklogId, sessionId);
-    recordUpsert(database, "sessions", sessionId, { worklog_status: status, worklog_id: worklogId });
-  } else {
-    database
-      .prepare("UPDATE sessions SET worklog_status = ? WHERE id = ?")
-      .run(status, sessionId);
-    recordUpsert(database, "sessions", sessionId, { worklog_status: status });
-  }
+  return withSyncTransaction(database, () => {
+    if (worklogId !== undefined) {
+      database
+        .prepare("UPDATE sessions SET worklog_status = ?, worklog_id = ? WHERE id = ?")
+        .run(status, worklogId, sessionId);
+      recordUpsert(database, "sessions", sessionId, { worklog_status: status, worklog_id: worklogId });
+    } else {
+      database
+        .prepare("UPDATE sessions SET worklog_status = ? WHERE id = ?")
+        .run(status, sessionId);
+      recordUpsert(database, "sessions", sessionId, { worklog_status: status });
+    }
+  });
 }
 
 export function getSettings(): TimerSettings {
@@ -1234,18 +1254,20 @@ function validateTagColor(color: unknown): string {
 
 export function createTag(input: CreateTagInput): Tag {
   const database = getDb();
-  const name = validateTagName(input.name);
-  const color = validateTagColor(input.color);
-  const createdAt = new Date().toISOString();
-  const uuid = newUuid();
-  database
-    .prepare("INSERT INTO tags (name, color, created_at, uuid) VALUES (?, ?, ?, ?)")
-    .run(name, color, createdAt, uuid);
-  recordUpsert(database, "tags", uuid, { name, color, created_at: createdAt });
-  const row = database
-    .prepare("SELECT id, name, color, created_at FROM tags WHERE name = ? COLLATE NOCASE")
-    .get(name) as TagRow;
-  return rowToTag(row);
+  return withSyncTransaction(database, () => {
+    const name = validateTagName(input.name);
+    const color = validateTagColor(input.color);
+    const createdAt = new Date().toISOString();
+    const uuid = newUuid();
+    database
+      .prepare("INSERT INTO tags (name, color, created_at, uuid) VALUES (?, ?, ?, ?)")
+      .run(name, color, createdAt, uuid);
+    recordUpsert(database, "tags", uuid, { name, color, created_at: createdAt });
+    const row = database
+      .prepare("SELECT id, name, color, created_at FROM tags WHERE name = ? COLLATE NOCASE")
+      .get(name) as TagRow;
+    return rowToTag(row);
+  });
 }
 
 export function listTags(): Tag[] {
@@ -1258,42 +1280,50 @@ export function listTags(): Tag[] {
 
 export function updateTag(input: UpdateTagInput): Tag {
   const database = getDb();
-  const name = validateTagName(input.name);
-  const color = validateTagColor(input.color);
-  const result = database
-    .prepare("UPDATE tags SET name = ?, color = ? WHERE id = ?")
-    .run(name, color, input.id);
-  if (result.changes === 0) {
-    throw new Error(`Tag with id ${input.id} not found`);
-  }
-  recordUpsert(database, "tags", ensureUuid(database, "tags", input.id), { name, color });
-  const row = database
-    .prepare("SELECT id, name, color, created_at FROM tags WHERE id = ?")
-    .get(input.id) as TagRow;
-  return rowToTag(row);
+  return withSyncTransaction(database, () => {
+    const name = validateTagName(input.name);
+    const color = validateTagColor(input.color);
+    const result = database
+      .prepare("UPDATE tags SET name = ?, color = ? WHERE id = ?")
+      .run(name, color, input.id);
+    if (result.changes === 0) {
+      throw new Error(`Tag with id ${input.id} not found`);
+    }
+    recordUpsert(database, "tags", ensureUuid(database, "tags", input.id), { name, color });
+    const row = database
+      .prepare("SELECT id, name, color, created_at FROM tags WHERE id = ?")
+      .get(input.id) as TagRow;
+    return rowToTag(row);
+  });
 }
 
 export function deleteTag(id: number): void {
   const database = getDb();
-  const uuid = ensureUuid(database, "tags", id);
-  database.prepare("DELETE FROM tags WHERE id = ?").run(id);
-  recordDelete(database, "tags", uuid);
+  return withSyncTransaction(database, () => {
+    const uuid = ensureUuid(database, "tags", id);
+    database.prepare("DELETE FROM tags WHERE id = ?").run(id);
+    recordDelete(database, "tags", uuid);
+  });
 }
 
 export function assignTag(input: AssignTagInput): void {
   const database = getDb();
-  database
-    .prepare("INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?, ?)")
-    .run(input.sessionId, input.tagId);
-  recordLink(database, "session_tags", "link", input.sessionId, ensureUuid(database, "tags", input.tagId));
+  return withSyncTransaction(database, () => {
+    database
+      .prepare("INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?, ?)")
+      .run(input.sessionId, input.tagId);
+    recordLink(database, "session_tags", "link", input.sessionId, ensureUuid(database, "tags", input.tagId));
+  });
 }
 
 export function unassignTag(input: AssignTagInput): void {
   const database = getDb();
-  database
-    .prepare("DELETE FROM session_tags WHERE session_id = ? AND tag_id = ?")
-    .run(input.sessionId, input.tagId);
-  recordLink(database, "session_tags", "unlink", input.sessionId, ensureUuid(database, "tags", input.tagId));
+  return withSyncTransaction(database, () => {
+    database
+      .prepare("DELETE FROM session_tags WHERE session_id = ? AND tag_id = ?")
+      .run(input.sessionId, input.tagId);
+    recordLink(database, "session_tags", "unlink", input.sessionId, ensureUuid(database, "tags", input.tagId));
+  });
 }
 
 export function listTagsForSession(sessionId: string): Tag[] {
@@ -1910,101 +1940,105 @@ export function findTodoStateByLabel(label: string): TodoState | null {
 
 export function createTodoState(input: CreateTodoStateInput): TodoState {
   const database = getDb();
-  const label = validateStateLabel(input.label);
-  const color = input.color === undefined ? "#7aa2f7" : validateStateColor(input.color);
+  return withSyncTransaction(database, () => {
+    const label = validateStateLabel(input.label);
+    const color = input.color === undefined ? "#7aa2f7" : validateStateColor(input.color);
 
-  const existing = database
-    .prepare("SELECT id FROM todo_states WHERE label = ? COLLATE NOCASE")
-    .get(label) as { id: number } | undefined;
-  if (existing) throw new Error(`A state named "${label}" already exists`);
+    const existing = database
+      .prepare("SELECT id FROM todo_states WHERE label = ? COLLATE NOCASE")
+      .get(label) as { id: number } | undefined;
+    if (existing) throw new Error(`A state named "${label}" already exists`);
 
-  const { next } = database
-    .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_states")
-    .get() as { next: number };
+    const { next } = database
+      .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_states")
+      .get() as { next: number };
 
-  const createdAt = new Date().toISOString();
-  const uuid = newUuid();
-  database
-    .prepare(
-      "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at, uuid) VALUES (?, ?, ?, 0, 0, ?, ?)",
-    )
-    .run(label, color, next, createdAt, uuid);
+    const createdAt = new Date().toISOString();
+    const uuid = newUuid();
+    database
+      .prepare(
+        "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at, uuid) VALUES (?, ?, ?, 0, 0, ?, ?)",
+      )
+      .run(label, color, next, createdAt, uuid);
 
-  // last_insert_rowid() must be read before recordUpsert runs any SQL of its own (it writes to
-  // settings/sync_field_clocks on this same connection) -- it is connection-global and would
-  // otherwise reflect recordUpsert's own insert instead of this row's.
-  const row = database
-    .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = last_insert_rowid()`)
-    .get() as TodoStateRow;
-  // is_completed/is_default publish as 0/1, not raw JS booleans: better-sqlite3 refuses to bind a
-  // boolean, and a peer applying this entry binds change.value straight into an UPDATE (see
-  // merge-engine.ts's applyFieldsLww) -- merge-engine.ts's toBindValue coerces an already-written
-  // boolean back to 0/1 at apply time so old entries still merge, but a newly created state should
-  // not add another one to the shared folder.
-  recordUpsert(database, "todo_states", uuid, { label, color, is_completed: 0, is_default: 0, created_at: createdAt });
-  return rowToTodoState(row);
+    // last_insert_rowid() must be read before recordUpsert runs any SQL of its own (it writes to
+    // settings/sync_field_clocks on this same connection) -- it is connection-global and would
+    // otherwise reflect recordUpsert's own insert instead of this row's.
+    const row = database
+      .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = last_insert_rowid()`)
+      .get() as TodoStateRow;
+    // is_completed/is_default publish as 0/1, not raw JS booleans: better-sqlite3 refuses to bind a
+    // boolean, and a peer applying this entry binds change.value straight into an UPDATE (see
+    // merge-engine.ts's applyFieldsLww) -- merge-engine.ts's toBindValue coerces an already-written
+    // boolean back to 0/1 at apply time so old entries still merge, but a newly created state should
+    // not add another one to the shared folder.
+    recordUpsert(database, "todo_states", uuid, { label, color, is_completed: 0, is_default: 0, created_at: createdAt });
+    return rowToTodoState(row);
+  });
 }
 
 export function updateTodoState(input: UpdateTodoStateInput): TodoState {
   const database = getDb();
+  return withSyncTransaction(database, () => {
 
-  const existing = database
-    .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = ?`)
-    .get(input.id) as TodoStateRow | undefined;
-  if (!existing) throw new Error(`State with id ${input.id} not found`);
+    const existing = database
+      .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = ?`)
+      .get(input.id) as TodoStateRow | undefined;
+    if (!existing) throw new Error(`State with id ${input.id} not found`);
 
-  const label = input.label === undefined ? existing.label : validateStateLabel(input.label);
-  const color = input.color === undefined ? existing.color : validateStateColor(input.color);
+    const label = input.label === undefined ? existing.label : validateStateLabel(input.label);
+    const color = input.color === undefined ? existing.color : validateStateColor(input.color);
 
-  if (label.toLowerCase() !== existing.label.toLowerCase()) {
-    const clash = database
-      .prepare("SELECT id FROM todo_states WHERE label = ? COLLATE NOCASE AND id != ?")
-      .get(label, input.id) as { id: number } | undefined;
-    if (clash) throw new Error(`A state named "${label}" already exists`);
-  }
+    if (label.toLowerCase() !== existing.label.toLowerCase()) {
+      const clash = database
+        .prepare("SELECT id FROM todo_states WHERE label = ? COLLATE NOCASE AND id != ?")
+        .get(label, input.id) as { id: number } | undefined;
+      if (clash) throw new Error(`A state named "${label}" already exists`);
+    }
 
-  const isCompleted = input.isCompleted === undefined ? existing.is_completed === 1 : input.isCompleted;
-  const isDefault = input.isDefault === undefined ? existing.is_default === 1 : input.isDefault;
+    const isCompleted = input.isCompleted === undefined ? existing.is_completed === 1 : input.isCompleted;
+    const isDefault = input.isDefault === undefined ? existing.is_default === 1 : input.isDefault;
 
-  // At least one state must mean "completed", or todo_complete has nowhere to go.
-  if (!isCompleted && existing.is_completed === 1) {
-    const { count } = database
-      .prepare("SELECT COUNT(*) AS count FROM todo_states WHERE is_completed = 1")
-      .get() as { count: number };
-    if (count <= 1) throw new Error("At least one state must be marked as completed");
-  }
-  if (!isDefault && existing.is_default === 1) {
-    throw new Error("Pick another state as the default rather than clearing this one");
-  }
+    // At least one state must mean "completed", or todo_complete has nowhere to go.
+    if (!isCompleted && existing.is_completed === 1) {
+      const { count } = database
+        .prepare("SELECT COUNT(*) AS count FROM todo_states WHERE is_completed = 1")
+        .get() as { count: number };
+      if (count <= 1) throw new Error("At least one state must be marked as completed");
+    }
+    if (!isDefault && existing.is_default === 1) {
+      throw new Error("Pick another state as the default rather than clearing this one");
+    }
 
-  const apply = database.transaction(() => {
-    // Default and completed are single-winner flags.
-    if (isDefault) database.prepare("UPDATE todo_states SET is_default = 0 WHERE id != ?").run(input.id);
-    if (isCompleted) database.prepare("UPDATE todo_states SET is_completed = 0 WHERE id != ?").run(input.id);
+    const apply = database.transaction(() => {
+      // Default and completed are single-winner flags.
+      if (isDefault) database.prepare("UPDATE todo_states SET is_default = 0 WHERE id != ?").run(input.id);
+      if (isCompleted) database.prepare("UPDATE todo_states SET is_completed = 0 WHERE id != ?").run(input.id);
 
-    database
-      .prepare("UPDATE todo_states SET label = ?, color = ?, is_completed = ?, is_default = ? WHERE id = ?")
-      .run(label, color, isCompleted ? 1 : 0, isDefault ? 1 : 0, input.id);
+      database
+        .prepare("UPDATE todo_states SET label = ?, color = ?, is_completed = ?, is_default = ? WHERE id = ?")
+        .run(label, color, isCompleted ? 1 : 0, isDefault ? 1 : 0, input.id);
+    });
+    apply();
+
+    // Only fields this call actually touched go to the oplog -- see the comment in updateTodo's
+    // own recordUpsert call for why re-publishing an untouched field is a real correctness bug,
+    // not a cosmetic one.
+    // Same reason as createTodoState's recordUpsert call just above in this file: publish 0/1, not
+    // a raw JS boolean, so a fresh oplog entry never repeats the bug toBindValue (row-codec.ts) now
+    // has to work around for entries already on disk.
+    const changedStateFields: Record<string, string | number> = {};
+    if (input.label !== undefined) changedStateFields["label"] = label;
+    if (input.color !== undefined) changedStateFields["color"] = color;
+    if (input.isCompleted !== undefined) changedStateFields["is_completed"] = isCompleted ? 1 : 0;
+    if (input.isDefault !== undefined) changedStateFields["is_default"] = isDefault ? 1 : 0;
+    recordUpsert(database, "todo_states", ensureUuid(database, "todo_states", input.id), changedStateFields);
+
+    const row = database
+      .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = ?`)
+      .get(input.id) as TodoStateRow;
+    return rowToTodoState(row);
   });
-  apply();
-
-  // Only fields this call actually touched go to the oplog -- see the comment in updateTodo's
-  // own recordUpsert call for why re-publishing an untouched field is a real correctness bug,
-  // not a cosmetic one.
-  // Same reason as createTodoState's recordUpsert call just above in this file: publish 0/1, not
-  // a raw JS boolean, so a fresh oplog entry never repeats the bug toBindValue (row-codec.ts) now
-  // has to work around for entries already on disk.
-  const changedStateFields: Record<string, string | number> = {};
-  if (input.label !== undefined) changedStateFields["label"] = label;
-  if (input.color !== undefined) changedStateFields["color"] = color;
-  if (input.isCompleted !== undefined) changedStateFields["is_completed"] = isCompleted ? 1 : 0;
-  if (input.isDefault !== undefined) changedStateFields["is_default"] = isDefault ? 1 : 0;
-  recordUpsert(database, "todo_states", ensureUuid(database, "todo_states", input.id), changedStateFields);
-
-  const row = database
-    .prepare(`SELECT ${TODO_STATE_COLUMNS} FROM todo_states WHERE id = ?`)
-    .get(input.id) as TodoStateRow;
-  return rowToTodoState(row);
 }
 
 /**
@@ -2014,66 +2048,70 @@ export function updateTodoState(input: UpdateTodoStateInput): TodoState {
  */
 export function deleteTodoState(id: number, reassignToId: number): number {
   const database = getDb();
+  return withSyncTransaction(database, () => {
 
-  const target = database.prepare("SELECT id, is_default, is_completed FROM todo_states WHERE id = ?").get(id) as
-    | { id: number; is_default: number; is_completed: number }
-    | undefined;
-  if (!target) throw new Error(`State with id ${id} not found`);
-  if (id === reassignToId) throw new Error("Cannot reassign todos to the state being deleted");
+    const target = database.prepare("SELECT id, is_default, is_completed FROM todo_states WHERE id = ?").get(id) as
+      | { id: number; is_default: number; is_completed: number }
+      | undefined;
+    if (!target) throw new Error(`State with id ${id} not found`);
+    if (id === reassignToId) throw new Error("Cannot reassign todos to the state being deleted");
 
-  const replacement = database.prepare("SELECT id FROM todo_states WHERE id = ?").get(reassignToId) as
-    | { id: number }
-    | undefined;
-  if (!replacement) throw new Error(`State with id ${reassignToId} not found`);
+    const replacement = database.prepare("SELECT id FROM todo_states WHERE id = ?").get(reassignToId) as
+      | { id: number }
+      | undefined;
+    if (!replacement) throw new Error(`State with id ${reassignToId} not found`);
 
-  if (target.is_default === 1) throw new Error("Pick another default state before deleting this one");
-  if (target.is_completed === 1) throw new Error("Pick another completed state before deleting this one");
+    if (target.is_default === 1) throw new Error("Pick another default state before deleting this one");
+    if (target.is_completed === 1) throw new Error("Pick another completed state before deleting this one");
 
-  const { count } = database
-    .prepare("SELECT COUNT(*) AS count FROM todos WHERE state_id = ?")
-    .get(id) as { count: number };
+    const { count } = database
+      .prepare("SELECT COUNT(*) AS count FROM todos WHERE state_id = ?")
+      .get(id) as { count: number };
 
-  const uuid = ensureUuid(database, "todo_states", id);
+    const uuid = ensureUuid(database, "todo_states", id);
 
-  const apply = database.transaction(() => {
-    database.prepare("UPDATE todos SET state_id = ? WHERE state_id = ?").run(reassignToId, id);
-    database.prepare("DELETE FROM todo_states WHERE id = ?").run(id);
+    const apply = database.transaction(() => {
+      database.prepare("UPDATE todos SET state_id = ? WHERE state_id = ?").run(reassignToId, id);
+      database.prepare("DELETE FROM todo_states WHERE id = ?").run(id);
 
-    // Keep positions contiguous so reordering stays predictable.
-    const remaining = database
-      .prepare("SELECT id FROM todo_states ORDER BY position ASC")
-      .all() as Array<{ id: number }>;
-    const setPosition = database.prepare("UPDATE todo_states SET position = ? WHERE id = ?");
-    remaining.forEach((row, index) => setPosition.run(index, row.id));
+      // Keep positions contiguous so reordering stays predictable.
+      const remaining = database
+        .prepare("SELECT id FROM todo_states ORDER BY position ASC")
+        .all() as Array<{ id: number }>;
+      const setPosition = database.prepare("UPDATE todo_states SET position = ? WHERE id = ?");
+      remaining.forEach((row, index) => setPosition.run(index, row.id));
+    });
+    apply();
+
+    recordDelete(database, "todo_states", uuid);
+
+    return count;
   });
-  apply();
-
-  recordDelete(database, "todo_states", uuid);
-
-  return count;
 }
 
 /** Rewrites positions to match the given order. Ids not listed keep their relative order at the end. */
 export function reorderTodoStates(orderedIds: number[]): TodoState[] {
   const database = getDb();
-  const all = database.prepare("SELECT id FROM todo_states ORDER BY position ASC").all() as Array<{ id: number }>;
-  const known = new Set(all.map((r) => r.id));
+  return withSyncTransaction(database, () => {
+    const all = database.prepare("SELECT id FROM todo_states ORDER BY position ASC").all() as Array<{ id: number }>;
+    const known = new Set(all.map((r) => r.id));
 
-  for (const id of orderedIds) {
-    if (!known.has(id)) throw new Error(`State with id ${id} not found`);
-  }
+    for (const id of orderedIds) {
+      if (!known.has(id)) throw new Error(`State with id ${id} not found`);
+    }
 
-  const seen = new Set(orderedIds);
-  const finalOrder = [...orderedIds, ...all.map((r) => r.id).filter((id) => !seen.has(id))];
+    const seen = new Set(orderedIds);
+    const finalOrder = [...orderedIds, ...all.map((r) => r.id).filter((id) => !seen.has(id))];
 
-  const apply = database.transaction(() => {
-    const setPosition = database.prepare("UPDATE todo_states SET position = ? WHERE id = ?");
-    finalOrder.forEach((id, index) => setPosition.run(index, id));
+    const apply = database.transaction(() => {
+      const setPosition = database.prepare("UPDATE todo_states SET position = ? WHERE id = ?");
+      finalOrder.forEach((id, index) => setPosition.run(index, id));
+    });
+    apply();
+    recordReorder(database, "todo_states", finalOrder);
+
+    return listTodoStates();
   });
-  apply();
-  recordReorder(database, "todo_states", finalOrder);
-
-  return listTodoStates();
 }
 
 // --- Todo Project Functions ---
@@ -2138,60 +2176,64 @@ export function findTodoProjectByName(name: string): TodoProject | null {
 
 export function createTodoProject(input: CreateTodoProjectInput): TodoProject {
   const database = getDb();
-  const name = validateProjectName(input.name);
-  const color = input.color === undefined ? DEFAULT_TODO_COLOR : validatePaletteColor(input.color, "project");
+  return withSyncTransaction(database, () => {
+    const name = validateProjectName(input.name);
+    const color = input.color === undefined ? DEFAULT_TODO_COLOR : validatePaletteColor(input.color, "project");
 
-  const existing = database
-    .prepare("SELECT id FROM todo_projects WHERE name = ? COLLATE NOCASE")
-    .get(name) as { id: number } | undefined;
-  if (existing) throw new Error(`A project named "${name}" already exists`);
+    const existing = database
+      .prepare("SELECT id FROM todo_projects WHERE name = ? COLLATE NOCASE")
+      .get(name) as { id: number } | undefined;
+    if (existing) throw new Error(`A project named "${name}" already exists`);
 
-  const { next } = database
-    .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_projects")
-    .get() as { next: number };
+    const { next } = database
+      .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_projects")
+      .get() as { next: number };
 
-  const createdAt = new Date().toISOString();
-  const uuid = newUuid();
-  database
-    .prepare("INSERT INTO todo_projects (name, color, position, created_at, uuid) VALUES (?, ?, ?, ?, ?)")
-    .run(name, color, next, createdAt, uuid);
+    const createdAt = new Date().toISOString();
+    const uuid = newUuid();
+    database
+      .prepare("INSERT INTO todo_projects (name, color, position, created_at, uuid) VALUES (?, ?, ?, ?, ?)")
+      .run(name, color, next, createdAt, uuid);
 
-  // See the comment in createTodoState: last_insert_rowid() must be read before recordUpsert.
-  const row = database
-    .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = last_insert_rowid()`)
-    .get() as TodoProjectRow;
-  recordUpsert(database, "todo_projects", uuid, { name, color, created_at: createdAt });
-  return rowToTodoProject(row);
+    // See the comment in createTodoState: last_insert_rowid() must be read before recordUpsert.
+    const row = database
+      .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = last_insert_rowid()`)
+      .get() as TodoProjectRow;
+    recordUpsert(database, "todo_projects", uuid, { name, color, created_at: createdAt });
+    return rowToTodoProject(row);
+  });
 }
 
 export function updateTodoProject(input: UpdateTodoProjectInput): TodoProject {
   const database = getDb();
+  return withSyncTransaction(database, () => {
 
-  const existing = database
-    .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = ?`)
-    .get(input.id) as TodoProjectRow | undefined;
-  if (!existing) throw new Error(`Project with id ${input.id} not found`);
+    const existing = database
+      .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = ?`)
+      .get(input.id) as TodoProjectRow | undefined;
+    if (!existing) throw new Error(`Project with id ${input.id} not found`);
 
-  const name = input.name === undefined ? existing.name : validateProjectName(input.name);
-  const color = input.color === undefined ? existing.color : validatePaletteColor(input.color, "project");
+    const name = input.name === undefined ? existing.name : validateProjectName(input.name);
+    const color = input.color === undefined ? existing.color : validatePaletteColor(input.color, "project");
 
-  if (name.toLowerCase() !== existing.name.toLowerCase()) {
-    const clash = database
-      .prepare("SELECT id FROM todo_projects WHERE name = ? COLLATE NOCASE AND id != ?")
-      .get(name, input.id) as { id: number } | undefined;
-    if (clash) throw new Error(`A project named "${name}" already exists`);
-  }
+    if (name.toLowerCase() !== existing.name.toLowerCase()) {
+      const clash = database
+        .prepare("SELECT id FROM todo_projects WHERE name = ? COLLATE NOCASE AND id != ?")
+        .get(name, input.id) as { id: number } | undefined;
+      if (clash) throw new Error(`A project named "${name}" already exists`);
+    }
 
-  database.prepare("UPDATE todo_projects SET name = ?, color = ? WHERE id = ?").run(name, color, input.id);
-  const changedProjectFields: Record<string, string> = {};
-  if (input.name !== undefined) changedProjectFields["name"] = name;
-  if (input.color !== undefined) changedProjectFields["color"] = color;
-  recordUpsert(database, "todo_projects", ensureUuid(database, "todo_projects", input.id), changedProjectFields);
+    database.prepare("UPDATE todo_projects SET name = ?, color = ? WHERE id = ?").run(name, color, input.id);
+    const changedProjectFields: Record<string, string> = {};
+    if (input.name !== undefined) changedProjectFields["name"] = name;
+    if (input.color !== undefined) changedProjectFields["color"] = color;
+    recordUpsert(database, "todo_projects", ensureUuid(database, "todo_projects", input.id), changedProjectFields);
 
-  const row = database
-    .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = ?`)
-    .get(input.id) as TodoProjectRow;
-  return rowToTodoProject(row);
+    const row = database
+      .prepare(`SELECT ${TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = ?`)
+      .get(input.id) as TodoProjectRow;
+    return rowToTodoProject(row);
+  });
 }
 
 /**
@@ -2202,57 +2244,61 @@ export function updateTodoProject(input: UpdateTodoProjectInput): TodoProject {
  */
 export function deleteTodoProject(id: number): number {
   const database = getDb();
+  return withSyncTransaction(database, () => {
 
-  const target = database.prepare("SELECT id FROM todo_projects WHERE id = ?").get(id) as { id: number } | undefined;
-  if (!target) throw new Error(`Project with id ${id} not found`);
+    const target = database.prepare("SELECT id FROM todo_projects WHERE id = ?").get(id) as { id: number } | undefined;
+    if (!target) throw new Error(`Project with id ${id} not found`);
 
-  const { count } = database
-    .prepare("SELECT COUNT(*) AS count FROM todos WHERE project_id = ?")
-    .get(id) as { count: number };
+    const { count } = database
+      .prepare("SELECT COUNT(*) AS count FROM todos WHERE project_id = ?")
+      .get(id) as { count: number };
 
-  const uuid = ensureUuid(database, "todo_projects", id);
+    const uuid = ensureUuid(database, "todo_projects", id);
 
-  const apply = database.transaction(() => {
-    // Explicit rather than relying on ON DELETE SET NULL: an upgraded database added the column
-    // by ALTER TABLE, and the pragma is not guaranteed to have been on when those rows were written.
-    database.prepare("UPDATE todos SET project_id = NULL WHERE project_id = ?").run(id);
-    database.prepare("DELETE FROM todo_projects WHERE id = ?").run(id);
+    const apply = database.transaction(() => {
+      // Explicit rather than relying on ON DELETE SET NULL: an upgraded database added the column
+      // by ALTER TABLE, and the pragma is not guaranteed to have been on when those rows were written.
+      database.prepare("UPDATE todos SET project_id = NULL WHERE project_id = ?").run(id);
+      database.prepare("DELETE FROM todo_projects WHERE id = ?").run(id);
 
-    // Keep positions contiguous so reordering stays predictable.
-    const remaining = database
-      .prepare("SELECT id FROM todo_projects ORDER BY position ASC")
-      .all() as Array<{ id: number }>;
-    const setPosition = database.prepare("UPDATE todo_projects SET position = ? WHERE id = ?");
-    remaining.forEach((row, index) => setPosition.run(index, row.id));
+      // Keep positions contiguous so reordering stays predictable.
+      const remaining = database
+        .prepare("SELECT id FROM todo_projects ORDER BY position ASC")
+        .all() as Array<{ id: number }>;
+      const setPosition = database.prepare("UPDATE todo_projects SET position = ? WHERE id = ?");
+      remaining.forEach((row, index) => setPosition.run(index, row.id));
+    });
+    apply();
+
+    recordDelete(database, "todo_projects", uuid);
+
+    return count;
   });
-  apply();
-
-  recordDelete(database, "todo_projects", uuid);
-
-  return count;
 }
 
 /** Rewrites positions to match the given order. Ids not listed keep their relative order at the end. */
 export function reorderTodoProjects(orderedIds: number[]): TodoProject[] {
   const database = getDb();
-  const all = database.prepare("SELECT id FROM todo_projects ORDER BY position ASC").all() as Array<{ id: number }>;
-  const known = new Set(all.map((r) => r.id));
+  return withSyncTransaction(database, () => {
+    const all = database.prepare("SELECT id FROM todo_projects ORDER BY position ASC").all() as Array<{ id: number }>;
+    const known = new Set(all.map((r) => r.id));
 
-  for (const id of orderedIds) {
-    if (!known.has(id)) throw new Error(`Project with id ${id} not found`);
-  }
+    for (const id of orderedIds) {
+      if (!known.has(id)) throw new Error(`Project with id ${id} not found`);
+    }
 
-  const seen = new Set(orderedIds);
-  const finalOrder = [...orderedIds, ...all.map((r) => r.id).filter((id) => !seen.has(id))];
+    const seen = new Set(orderedIds);
+    const finalOrder = [...orderedIds, ...all.map((r) => r.id).filter((id) => !seen.has(id))];
 
-  const apply = database.transaction(() => {
-    const setPosition = database.prepare("UPDATE todo_projects SET position = ? WHERE id = ?");
-    finalOrder.forEach((id, index) => setPosition.run(index, id));
+    const apply = database.transaction(() => {
+      const setPosition = database.prepare("UPDATE todo_projects SET position = ? WHERE id = ?");
+      finalOrder.forEach((id, index) => setPosition.run(index, id));
+    });
+    apply();
+    recordReorder(database, "todo_projects", finalOrder);
+
+    return listTodoProjects();
   });
-  apply();
-  recordReorder(database, "todo_projects", finalOrder);
-
-  return listTodoProjects();
 }
 
 // --- Todo Label Functions ---
@@ -2313,80 +2359,86 @@ export function findTodoLabelByName(name: string): TodoLabel | null {
  */
 export function createTodoLabel(input: CreateTodoLabelInput): TodoLabel {
   const database = getDb();
-  const name = validateLabelName(input.name);
-  const color = input.color === undefined ? DEFAULT_TODO_COLOR : validatePaletteColor(input.color, "label");
+  return withSyncTransaction(database, () => {
+    const name = validateLabelName(input.name);
+    const color = input.color === undefined ? DEFAULT_TODO_COLOR : validatePaletteColor(input.color, "label");
 
-  const existing = database
-    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE name = ? COLLATE NOCASE`)
-    .get(name) as TodoLabelRow | undefined;
-  if (existing) return rowToTodoLabel(existing);
+    const existing = database
+      .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE name = ? COLLATE NOCASE`)
+      .get(name) as TodoLabelRow | undefined;
+    if (existing) return rowToTodoLabel(existing);
 
-  const createdAt = new Date().toISOString();
-  const uuid = newUuid();
-  database
-    .prepare("INSERT INTO todo_labels (name, color, created_at, uuid) VALUES (?, ?, ?, ?)")
-    .run(name, color, createdAt, uuid);
+    const createdAt = new Date().toISOString();
+    const uuid = newUuid();
+    database
+      .prepare("INSERT INTO todo_labels (name, color, created_at, uuid) VALUES (?, ?, ?, ?)")
+      .run(name, color, createdAt, uuid);
 
-  // See the comment in createTodoState: last_insert_rowid() must be read before recordUpsert.
-  const row = database
-    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = last_insert_rowid()`)
-    .get() as TodoLabelRow;
-  recordUpsert(database, "todo_labels", uuid, { name, color, created_at: createdAt });
-  return rowToTodoLabel(row);
+    // See the comment in createTodoState: last_insert_rowid() must be read before recordUpsert.
+    const row = database
+      .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = last_insert_rowid()`)
+      .get() as TodoLabelRow;
+    recordUpsert(database, "todo_labels", uuid, { name, color, created_at: createdAt });
+    return rowToTodoLabel(row);
+  });
 }
 
 export function updateTodoLabel(input: UpdateTodoLabelInput): TodoLabel {
   const database = getDb();
+  return withSyncTransaction(database, () => {
 
-  const existing = database
-    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = ?`)
-    .get(input.id) as TodoLabelRow | undefined;
-  if (!existing) throw new Error(`Label with id ${input.id} not found`);
+    const existing = database
+      .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = ?`)
+      .get(input.id) as TodoLabelRow | undefined;
+    if (!existing) throw new Error(`Label with id ${input.id} not found`);
 
-  const name = input.name === undefined ? existing.name : validateLabelName(input.name);
-  const color = input.color === undefined ? existing.color : validatePaletteColor(input.color, "label");
+    const name = input.name === undefined ? existing.name : validateLabelName(input.name);
+    const color = input.color === undefined ? existing.color : validatePaletteColor(input.color, "label");
 
-  if (name.toLowerCase() !== existing.name.toLowerCase()) {
-    const clash = database
-      .prepare("SELECT id FROM todo_labels WHERE name = ? COLLATE NOCASE AND id != ?")
-      .get(name, input.id) as { id: number } | undefined;
-    if (clash) throw new Error(`A label named "${name}" already exists`);
-  }
+    if (name.toLowerCase() !== existing.name.toLowerCase()) {
+      const clash = database
+        .prepare("SELECT id FROM todo_labels WHERE name = ? COLLATE NOCASE AND id != ?")
+        .get(name, input.id) as { id: number } | undefined;
+      if (clash) throw new Error(`A label named "${name}" already exists`);
+    }
 
-  database.prepare("UPDATE todo_labels SET name = ?, color = ? WHERE id = ?").run(name, color, input.id);
-  const changedLabelFields: Record<string, string> = {};
-  if (input.name !== undefined) changedLabelFields["name"] = name;
-  if (input.color !== undefined) changedLabelFields["color"] = color;
-  recordUpsert(database, "todo_labels", ensureUuid(database, "todo_labels", input.id), changedLabelFields);
+    database.prepare("UPDATE todo_labels SET name = ?, color = ? WHERE id = ?").run(name, color, input.id);
+    const changedLabelFields: Record<string, string> = {};
+    if (input.name !== undefined) changedLabelFields["name"] = name;
+    if (input.color !== undefined) changedLabelFields["color"] = color;
+    recordUpsert(database, "todo_labels", ensureUuid(database, "todo_labels", input.id), changedLabelFields);
 
-  const row = database
-    .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = ?`)
-    .get(input.id) as TodoLabelRow;
-  return rowToTodoLabel(row);
+    const row = database
+      .prepare(`SELECT ${TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = ?`)
+      .get(input.id) as TodoLabelRow;
+    return rowToTodoLabel(row);
+  });
 }
 
 /** Detaches the label from every todo, then deletes it. Returns how many todos lost it. */
 export function deleteTodoLabel(id: number): number {
   const database = getDb();
+  return withSyncTransaction(database, () => {
 
-  const target = database.prepare("SELECT id FROM todo_labels WHERE id = ?").get(id) as { id: number } | undefined;
-  if (!target) throw new Error(`Label with id ${id} not found`);
+    const target = database.prepare("SELECT id FROM todo_labels WHERE id = ?").get(id) as { id: number } | undefined;
+    if (!target) throw new Error(`Label with id ${id} not found`);
 
-  const { count } = database
-    .prepare("SELECT COUNT(*) AS count FROM todo_label_links WHERE label_id = ?")
-    .get(id) as { count: number };
+    const { count } = database
+      .prepare("SELECT COUNT(*) AS count FROM todo_label_links WHERE label_id = ?")
+      .get(id) as { count: number };
 
-  const uuid = ensureUuid(database, "todo_labels", id);
+    const uuid = ensureUuid(database, "todo_labels", id);
 
-  const apply = database.transaction(() => {
-    database.prepare("DELETE FROM todo_label_links WHERE label_id = ?").run(id);
-    database.prepare("DELETE FROM todo_labels WHERE id = ?").run(id);
+    const apply = database.transaction(() => {
+      database.prepare("DELETE FROM todo_label_links WHERE label_id = ?").run(id);
+      database.prepare("DELETE FROM todo_labels WHERE id = ?").run(id);
+    });
+    apply();
+
+    recordDelete(database, "todo_labels", uuid);
+
+    return count;
   });
-  apply();
-
-  recordDelete(database, "todo_labels", uuid);
-
-  return count;
 }
 
 /**
@@ -2726,126 +2778,128 @@ function isCompletedState(database: DbHandle, stateId: number): boolean {
 
 export function createTodo(input: CreateTodoInput): Todo {
   const database = getDb();
-  const title = validateTodoTitle(input.title);
-  const notes = validateTodoNotes(input.notes);
-  const projectId = resolveProjectId(database, input.projectId);
-  const milestone = validateTodoTextField(input.milestone, "milestone");
-  const priority = validateTodoPriority(input.priority);
-  const startDate = validateTodoDate(input.startDate, "startDate");
-  const dueDate = validateTodoDate(input.dueDate, "dueDate");
-  assertDateOrder(startDate, dueDate);
+  return withSyncTransaction(database, () => {
+    const title = validateTodoTitle(input.title);
+    const notes = validateTodoNotes(input.notes);
+    const projectId = resolveProjectId(database, input.projectId);
+    const milestone = validateTodoTextField(input.milestone, "milestone");
+    const priority = validateTodoPriority(input.priority);
+    const startDate = validateTodoDate(input.startDate, "startDate");
+    const dueDate = validateTodoDate(input.dueDate, "dueDate");
+    assertDateOrder(startDate, dueDate);
 
-  const source: TodoSource = VALID_TODO_SOURCES.has(input.source as TodoSource)
-    ? (input.source as TodoSource)
-    : "user";
-  // A source label only makes sense for AI-written todos.
-  const sourceLabel = source === "ai" ? validateTodoSourceLabel(input.sourceLabel) : null;
+    const source: TodoSource = VALID_TODO_SOURCES.has(input.source as TodoSource)
+      ? (input.source as TodoSource)
+      : "user";
+    // A source label only makes sense for AI-written todos.
+    const sourceLabel = source === "ai" ? validateTodoSourceLabel(input.sourceLabel) : null;
 
-  const stateId = resolveStateId(database, input.stateId);
-  const completedAt = isCompletedState(database, stateId) ? new Date().toISOString() : null;
-  const parentId = input.parentId === undefined || input.parentId === null
-    ? null
-    : resolveParentId(database, null, input.parentId);
+    const stateId = resolveStateId(database, input.stateId);
+    const completedAt = isCompletedState(database, stateId) ? new Date().toISOString() : null;
+    const parentId = input.parentId === undefined || input.parentId === null
+      ? null
+      : resolveParentId(database, null, input.parentId);
 
-  const createdAt = new Date().toISOString();
-  const uuid = newUuid();
+    const createdAt = new Date().toISOString();
+    const uuid = newUuid();
 
-  // The insert and the label links go in together: a todo that briefly exists without the
-  // labels it was created with would be visible to a concurrent read on the same connection.
-  const write = database.transaction(() => {
-    // B-4: validated before anything below writes to the oplog -- see assertLabelIdsExist's doc
-    // comment for why a bad label id must never be discovered only after recordUpsert has run.
-    if (input.labelIds !== undefined) assertLabelIdsExist(database, input.labelIds);
+    // The insert and the label links go in together: a todo that briefly exists without the
+    // labels it was created with would be visible to a concurrent read on the same connection.
+    const write = database.transaction(() => {
+      // B-4: validated before anything below writes to the oplog -- see assertLabelIdsExist's doc
+      // comment for why a bad label id must never be discovered only after recordUpsert has run.
+      if (input.labelIds !== undefined) assertLabelIdsExist(database, input.labelIds);
 
-    // A device that has turned sync on hands out its own permanent, coordination-free block of
-    // ids (FR-004, FR-005); otherwise AUTOINCREMENT assigns the id exactly as it always has.
-    const explicitId = allocateTodoIdIfSyncEnabled(database);
+      // A device that has turned sync on hands out its own permanent, coordination-free block of
+      // ids (FR-004, FR-005); otherwise AUTOINCREMENT assigns the id exactly as it always has.
+      const explicitId = allocateTodoIdIfSyncEnabled(database);
 
-    if (explicitId !== null) {
-      database
-        .prepare(
-          `INSERT INTO todos (id, claimed_id, title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at, uuid)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          explicitId,
-          explicitId,
-          title,
-          notes,
-          stateId,
-          projectId,
-          milestone,
-          priority,
-          startDate,
-          dueDate,
-          source,
-          sourceLabel,
-          parentId,
-          createdAt,
-          completedAt,
-          uuid,
-        );
-    } else {
-      database
-        .prepare(
-          `INSERT INTO todos (title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at, uuid)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          title,
-          notes,
-          stateId,
-          projectId,
-          milestone,
-          priority,
-          startDate,
-          dueDate,
-          source,
-          sourceLabel,
-          parentId,
-          createdAt,
-          completedAt,
-          uuid,
-        );
-    }
+      if (explicitId !== null) {
+        database
+          .prepare(
+            `INSERT INTO todos (id, claimed_id, title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at, uuid)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            explicitId,
+            explicitId,
+            title,
+            notes,
+            stateId,
+            projectId,
+            milestone,
+            priority,
+            startDate,
+            dueDate,
+            source,
+            sourceLabel,
+            parentId,
+            createdAt,
+            completedAt,
+            uuid,
+          );
+      } else {
+        database
+          .prepare(
+            `INSERT INTO todos (title, notes, state_id, project_id, milestone, priority, start_date, due_date, source, source_label, parent_id, created_at, completed_at, uuid)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            title,
+            notes,
+            stateId,
+            projectId,
+            milestone,
+            priority,
+            startDate,
+            dueDate,
+            source,
+            sourceLabel,
+            parentId,
+            createdAt,
+            completedAt,
+            uuid,
+          );
+      }
 
-    // last_insert_rowid() rather than result.lastInsertRowid: the same statement works
-    // under better-sqlite3 and the sql.js test shim, which does not return that field.
-    const { id } = database.prepare("SELECT last_insert_rowid() AS id").get() as { id: number };
-    // The AUTOINCREMENT branch above could not know its number in advance; both branches end up
-    // claiming the number they were actually given.
-    database.prepare("UPDATE todos SET claimed_id = ? WHERE id = ? AND claimed_id IS NULL").run(id, id);
+      // last_insert_rowid() rather than result.lastInsertRowid: the same statement works
+      // under better-sqlite3 and the sql.js test shim, which does not return that field.
+      const { id } = database.prepare("SELECT last_insert_rowid() AS id").get() as { id: number };
+      // The AUTOINCREMENT branch above could not know its number in advance; both branches end up
+      // claiming the number they were actually given.
+      database.prepare("UPDATE todos SET claimed_id = ? WHERE id = ? AND claimed_id IS NULL").run(id, id);
 
-    recordUpsert(database, "todos", uuid, {
-      // Unlike every other synced table, a todo's number IS globally meaningful: it is the small,
-      // user-visible handle people reference a todo by, in notes and through the MCP tools. What
-      // travels is the *claim* -- the number this device issued -- never the resolved id. Two
-      // machines working apart will claim the same number, and each machine derives the same
-      // final assignment from the full set of claims (merge-engine.ts's `reconcileTodoIds`)
-      // rather than negotiating one, which is what makes them converge.
-      claimed_id: id,
-      title,
-      notes,
-      milestone,
-      priority,
-      start_date: startDate,
-      due_date: dueDate,
-      source,
-      source_label: sourceLabel,
-      created_at: createdAt,
-      completed_at: completedAt,
-      state_uuid: ensureUuid(database, "todo_states", stateId),
-      project_uuid: projectId === null ? null : ensureUuid(database, "todo_projects", projectId),
-      parent_uuid: parentId === null ? null : ensureUuid(database, "todos", parentId),
+      recordUpsert(database, "todos", uuid, {
+        // Unlike every other synced table, a todo's number IS globally meaningful: it is the small,
+        // user-visible handle people reference a todo by, in notes and through the MCP tools. What
+        // travels is the *claim* -- the number this device issued -- never the resolved id. Two
+        // machines working apart will claim the same number, and each machine derives the same
+        // final assignment from the full set of claims (merge-engine.ts's `reconcileTodoIds`)
+        // rather than negotiating one, which is what makes them converge.
+        claimed_id: id,
+        title,
+        notes,
+        milestone,
+        priority,
+        start_date: startDate,
+        due_date: dueDate,
+        source,
+        source_label: sourceLabel,
+        created_at: createdAt,
+        completed_at: completedAt,
+        state_uuid: ensureUuid(database, "todo_states", stateId),
+        project_uuid: projectId === null ? null : ensureUuid(database, "todo_projects", projectId),
+        parent_uuid: parentId === null ? null : ensureUuid(database, "todos", parentId),
+      });
+
+      if (input.labelIds !== undefined) replaceTodoLabels(database, id, uuid, input.labelIds);
+      return id;
     });
+    const id = write();
 
-    if (input.labelIds !== undefined) replaceTodoLabels(database, id, uuid, input.labelIds);
-    return id;
+    const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(id) as TodoRow;
+    return withLabelsForOne(database, row);
   });
-  const id = write();
-
-  const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(id) as TodoRow;
-  return withLabelsForOne(database, row);
 }
 
 /**
@@ -2930,84 +2984,86 @@ export function countTodos(input: ListTodosInput = {}): number {
 
 export function updateTodo(input: UpdateTodoInput): Todo {
   const database = getDb();
+  return withSyncTransaction(database, () => {
 
-  const existing = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow | undefined;
-  if (!existing) throw new Error(`Todo with id ${input.id} not found`);
+    const existing = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow | undefined;
+    if (!existing) throw new Error(`Todo with id ${input.id} not found`);
 
-  const title = input.title === undefined ? existing.title : validateTodoTitle(input.title);
-  const notes = input.notes === undefined ? existing.notes : validateTodoNotes(input.notes);
-  // Three-way: absent keeps the current project, null clears it, an id moves the todo.
-  const projectId = input.projectId === undefined ? existing.project_id : resolveProjectId(database, input.projectId);
-  const milestone = input.milestone === undefined
-    ? existing.milestone
-    : validateTodoTextField(input.milestone, "milestone");
-  const priority = input.priority === undefined ? (existing.priority ?? 0) : validateTodoPriority(input.priority);
-  const startDate = input.startDate === undefined
-    ? existing.start_date
-    : validateTodoDate(input.startDate, "startDate");
-  const dueDate = input.dueDate === undefined ? existing.due_date : validateTodoDate(input.dueDate, "dueDate");
-  assertDateOrder(startDate, dueDate);
+    const title = input.title === undefined ? existing.title : validateTodoTitle(input.title);
+    const notes = input.notes === undefined ? existing.notes : validateTodoNotes(input.notes);
+    // Three-way: absent keeps the current project, null clears it, an id moves the todo.
+    const projectId = input.projectId === undefined ? existing.project_id : resolveProjectId(database, input.projectId);
+    const milestone = input.milestone === undefined
+      ? existing.milestone
+      : validateTodoTextField(input.milestone, "milestone");
+    const priority = input.priority === undefined ? (existing.priority ?? 0) : validateTodoPriority(input.priority);
+    const startDate = input.startDate === undefined
+      ? existing.start_date
+      : validateTodoDate(input.startDate, "startDate");
+    const dueDate = input.dueDate === undefined ? existing.due_date : validateTodoDate(input.dueDate, "dueDate");
+    assertDateOrder(startDate, dueDate);
 
-  const stateId = input.stateId === undefined ? existing.state_id : resolveStateId(database, input.stateId);
+    const stateId = input.stateId === undefined ? existing.state_id : resolveStateId(database, input.stateId);
 
-  // Three-way: absent leaves the link alone, null lifts the todo to the top level.
-  let parentId: number | null;
-  if (input.parentId === undefined) parentId = existing.parent_id;
-  else if (input.parentId === null) parentId = null;
-  else parentId = resolveParentId(database, input.id, input.parentId);
+    // Three-way: absent leaves the link alone, null lifts the todo to the top level.
+    let parentId: number | null;
+    if (input.parentId === undefined) parentId = existing.parent_id;
+    else if (input.parentId === null) parentId = null;
+    else parentId = resolveParentId(database, input.id, input.parentId);
 
-  const wasCompleted = existing.state_is_completed === 1;
-  const nowCompleted = isCompletedState(database, stateId);
+    const wasCompleted = existing.state_is_completed === 1;
+    const nowCompleted = isCompletedState(database, stateId);
 
-  let completedAt = existing.completed_at;
-  if (nowCompleted && !wasCompleted) completedAt = new Date().toISOString();
-  else if (!nowCompleted) completedAt = null;
-  // Editing a todo that is already completed keeps its original completion time.
+    let completedAt = existing.completed_at;
+    if (nowCompleted && !wasCompleted) completedAt = new Date().toISOString();
+    else if (!nowCompleted) completedAt = null;
+    // Editing a todo that is already completed keeps its original completion time.
 
-  const write = database.transaction(() => {
-    // B-4: validated before recordUpsert runs below -- see assertLabelIdsExist's doc comment.
-    if (input.labelIds !== undefined) assertLabelIdsExist(database, input.labelIds);
+    const write = database.transaction(() => {
+      // B-4: validated before recordUpsert runs below -- see assertLabelIdsExist's doc comment.
+      if (input.labelIds !== undefined) assertLabelIdsExist(database, input.labelIds);
 
-    database
-      .prepare(
-        `UPDATE todos SET title = ?, notes = ?, state_id = ?, project_id = ?, milestone = ?, priority = ?,
-                        start_date = ?, due_date = ?, parent_id = ?, completed_at = ?
-       WHERE id = ?`,
-      )
-      .run(title, notes, stateId, projectId, milestone, priority, startDate, dueDate, parentId, completedAt, input.id);
+      database
+        .prepare(
+          `UPDATE todos SET title = ?, notes = ?, state_id = ?, project_id = ?, milestone = ?, priority = ?,
+                          start_date = ?, due_date = ?, parent_id = ?, completed_at = ?
+         WHERE id = ?`,
+        )
+        .run(title, notes, stateId, projectId, milestone, priority, startDate, dueDate, parentId, completedAt, input.id);
 
-    const todoUuid = ensureUuid(database, "todos", input.id);
-    // Only the fields this specific call actually touched go to the oplog -- publishing an
-    // unchanged field's current value would carry *this* call's fresh HLC, which can outrank a
-    // genuine concurrent edit to that same field made on another device that this call never
-    // saw, silently reverting it. This is why `updateTodo`'s own "absent means leave alone"
-    // convention must be mirrored exactly here, not flattened into a full-row snapshot.
-    const changedFields: Record<string, string | number | boolean | null> = { id: input.id };
-    if (input.title !== undefined) changedFields["title"] = title;
-    if (input.notes !== undefined) changedFields["notes"] = notes;
-    if (input.milestone !== undefined) changedFields["milestone"] = milestone;
-    if (input.priority !== undefined) changedFields["priority"] = priority;
-    if (input.startDate !== undefined) changedFields["start_date"] = startDate;
-    if (input.dueDate !== undefined) changedFields["due_date"] = dueDate;
-    if (input.stateId !== undefined) {
-      changedFields["state_uuid"] = ensureUuid(database, "todo_states", stateId);
-      changedFields["completed_at"] = completedAt;
-    }
-    if (input.projectId !== undefined) {
-      changedFields["project_uuid"] = projectId === null ? null : ensureUuid(database, "todo_projects", projectId);
-    }
-    if (input.parentId !== undefined) {
-      changedFields["parent_uuid"] = parentId === null ? null : ensureUuid(database, "todos", parentId);
-    }
-    recordUpsert(database, "todos", todoUuid, changedFields);
+      const todoUuid = ensureUuid(database, "todos", input.id);
+      // Only the fields this specific call actually touched go to the oplog -- publishing an
+      // unchanged field's current value would carry *this* call's fresh HLC, which can outrank a
+      // genuine concurrent edit to that same field made on another device that this call never
+      // saw, silently reverting it. This is why `updateTodo`'s own "absent means leave alone"
+      // convention must be mirrored exactly here, not flattened into a full-row snapshot.
+      const changedFields: Record<string, string | number | boolean | null> = { id: input.id };
+      if (input.title !== undefined) changedFields["title"] = title;
+      if (input.notes !== undefined) changedFields["notes"] = notes;
+      if (input.milestone !== undefined) changedFields["milestone"] = milestone;
+      if (input.priority !== undefined) changedFields["priority"] = priority;
+      if (input.startDate !== undefined) changedFields["start_date"] = startDate;
+      if (input.dueDate !== undefined) changedFields["due_date"] = dueDate;
+      if (input.stateId !== undefined) {
+        changedFields["state_uuid"] = ensureUuid(database, "todo_states", stateId);
+        changedFields["completed_at"] = completedAt;
+      }
+      if (input.projectId !== undefined) {
+        changedFields["project_uuid"] = projectId === null ? null : ensureUuid(database, "todo_projects", projectId);
+      }
+      if (input.parentId !== undefined) {
+        changedFields["parent_uuid"] = parentId === null ? null : ensureUuid(database, "todos", parentId);
+      }
+      recordUpsert(database, "todos", todoUuid, changedFields);
 
-    // Absent leaves the label set alone; an empty array is a deliberate "remove them all".
-    if (input.labelIds !== undefined) replaceTodoLabels(database, input.id, todoUuid, input.labelIds);
+      // Absent leaves the label set alone; an empty array is a deliberate "remove them all".
+      if (input.labelIds !== undefined) replaceTodoLabels(database, input.id, todoUuid, input.labelIds);
+    });
+    write();
+
+    const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow;
+    return withLabelsForOne(database, row);
   });
-  write();
-
-  const row = database.prepare(`${TODO_SELECT} WHERE t.id = ?`).get(input.id) as TodoRow;
-  return withLabelsForOne(database, row);
 }
 
 /**
@@ -3019,22 +3075,24 @@ export function updateTodo(input: UpdateTodoInput): Todo {
  */
 export function deleteTodo(id: number): string[] {
   const database = getDb();
-  let shas: string[] = [];
-  const uuid = ensureUuid(database, "todos", id);
-  const remove = database.transaction(() => {
-    // Read before the delete rather than trusting ON DELETE CASCADE to have fired: the
-    // caller needs these to garbage-collect blobs, and a cascade leaves nothing to read.
-    shas = database
-      .prepare("SELECT sha256 FROM todo_attachments WHERE todo_id = ?")
-      .all(id)
-      .map((r) => (r as { sha256: string }).sha256);
-    database.prepare("DELETE FROM todo_attachments WHERE todo_id = ?").run(id);
-    database.prepare("UPDATE todos SET parent_id = NULL WHERE parent_id = ?").run(id);
-    database.prepare("DELETE FROM todos WHERE id = ?").run(id);
+  return withSyncTransaction(database, () => {
+    let shas: string[] = [];
+    const uuid = ensureUuid(database, "todos", id);
+    const remove = database.transaction(() => {
+      // Read before the delete rather than trusting ON DELETE CASCADE to have fired: the
+      // caller needs these to garbage-collect blobs, and a cascade leaves nothing to read.
+      shas = database
+        .prepare("SELECT sha256 FROM todo_attachments WHERE todo_id = ?")
+        .all(id)
+        .map((r) => (r as { sha256: string }).sha256);
+      database.prepare("DELETE FROM todo_attachments WHERE todo_id = ?").run(id);
+      database.prepare("UPDATE todos SET parent_id = NULL WHERE parent_id = ?").run(id);
+      database.prepare("DELETE FROM todos WHERE id = ?").run(id);
+    });
+    remove();
+    recordDelete(database, "todos", uuid);
+    return shas;
   });
-  remove();
-  recordDelete(database, "todos", uuid);
-  return shas;
 }
 
 /** What `clearCompletedTodos` swept: the row count, and the blobs those rows referenced. */
@@ -3050,54 +3108,56 @@ export interface ClearCompletedTodosResult {
 /** Removes every todo sitting in a completed state. Returns the count and the swept shas. */
 export function clearCompletedTodos(): ClearCompletedTodosResult {
   const database = getDb();
-  // Counted before the delete rather than read from result.changes: the sql.js
-  // test shim does not populate that field, and the app is a single writer.
-  const { count } = database
-    .prepare("SELECT COUNT(*) AS count FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1")
-    .get() as { count: number };
-  let deletedShas: string[] = [];
-  // Resolved before the rows go: recordDelete needs each todo's uuid, and a deleted row has none.
-  const clearedIds = (database
-    .prepare(
-      "SELECT t.id AS id FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1",
-    )
-    .all() as Array<{ id: number }>).map((r) => r.id);
-  const clearedUuids = clearedIds.map((id) => ensureUuid(database, "todos", id));
-  const clear = database.transaction(() => {
-    // Same reasoning as deleteTodo: read the shas before the rows go, not after a cascade.
-    deletedShas = database
+  return withSyncTransaction(database, () => {
+    // Counted before the delete rather than read from result.changes: the sql.js
+    // test shim does not populate that field, and the app is a single writer.
+    const { count } = database
+      .prepare("SELECT COUNT(*) AS count FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1")
+      .get() as { count: number };
+    let deletedShas: string[] = [];
+    // Resolved before the rows go: recordDelete needs each todo's uuid, and a deleted row has none.
+    const clearedIds = (database
       .prepare(
-        `SELECT DISTINCT a.sha256 AS sha256
-         FROM todo_attachments a
-         INNER JOIN todos t ON t.id = a.todo_id
-         INNER JOIN todo_states s ON s.id = t.state_id
-         WHERE s.is_completed = 1`,
+        "SELECT t.id AS id FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1",
       )
-      .all()
-      .map((r) => (r as { sha256: string }).sha256);
-    database.exec(`
-      DELETE FROM todo_attachments
-      WHERE todo_id IN (
-        SELECT t.id FROM todos t
-        INNER JOIN todo_states s ON s.id = t.state_id
-        WHERE s.is_completed = 1
-      )`);
-    // Children of a cleared todo survive at the top level, the same as a single delete.
-    database.exec(`
-      UPDATE todos SET parent_id = NULL
-      WHERE parent_id IN (
-        SELECT t.id FROM todos t
-        INNER JOIN todo_states s ON s.id = t.state_id
-        WHERE s.is_completed = 1
-      )`);
-    database.exec(
-      "DELETE FROM todos WHERE state_id IN (SELECT id FROM todo_states WHERE is_completed = 1)",
-    );
+      .all() as Array<{ id: number }>).map((r) => r.id);
+    const clearedUuids = clearedIds.map((id) => ensureUuid(database, "todos", id));
+    const clear = database.transaction(() => {
+      // Same reasoning as deleteTodo: read the shas before the rows go, not after a cascade.
+      deletedShas = database
+        .prepare(
+          `SELECT DISTINCT a.sha256 AS sha256
+           FROM todo_attachments a
+           INNER JOIN todos t ON t.id = a.todo_id
+           INNER JOIN todo_states s ON s.id = t.state_id
+           WHERE s.is_completed = 1`,
+        )
+        .all()
+        .map((r) => (r as { sha256: string }).sha256);
+      database.exec(`
+        DELETE FROM todo_attachments
+        WHERE todo_id IN (
+          SELECT t.id FROM todos t
+          INNER JOIN todo_states s ON s.id = t.state_id
+          WHERE s.is_completed = 1
+        )`);
+      // Children of a cleared todo survive at the top level, the same as a single delete.
+      database.exec(`
+        UPDATE todos SET parent_id = NULL
+        WHERE parent_id IN (
+          SELECT t.id FROM todos t
+          INNER JOIN todo_states s ON s.id = t.state_id
+          WHERE s.is_completed = 1
+        )`);
+      database.exec(
+        "DELETE FROM todos WHERE state_id IN (SELECT id FROM todo_states WHERE is_completed = 1)",
+      );
+    });
+    clear();
+    // The same tombstone per todo that deleteTodo publishes, so other machines drop the rows too.
+    for (const uuid of clearedUuids) recordDelete(database, "todos", uuid);
+    return { count, deletedShas };
   });
-  clear();
-  // The same tombstone per todo that deleteTodo publishes, so other machines drop the rows too.
-  for (const uuid of clearedUuids) recordDelete(database, "todos", uuid);
-  return { count, deletedShas };
 }
 
 // --- Todo attachments -------------------------------------------------------
@@ -3156,50 +3216,52 @@ export interface CreateTodoAttachmentInput {
  */
 export function createTodoAttachment(input: CreateTodoAttachmentInput): TodoAttachment {
   const database = getDb();
+  return withSyncTransaction(database, () => {
 
-  const todoExists = database.prepare("SELECT id FROM todos WHERE id = ?").get(input.todoId) as
-    | { id: number }
-    | undefined;
-  if (!todoExists) {
-    throw new Error(`Todo ${input.todoId} not found`);
-  }
+    const todoExists = database.prepare("SELECT id FROM todos WHERE id = ?").get(input.todoId) as
+      | { id: number }
+      | undefined;
+    if (!todoExists) {
+      throw new Error(`Todo ${input.todoId} not found`);
+    }
 
-  const existing = database
-    .prepare(`${ATTACHMENT_SELECT} WHERE todo_id = ? AND sha256 = ?`)
-    .get(input.todoId, input.sha256) as TodoAttachmentRow | undefined;
-  if (existing) return rowToTodoAttachment(existing);
+    const existing = database
+      .prepare(`${ATTACHMENT_SELECT} WHERE todo_id = ? AND sha256 = ?`)
+      .get(input.todoId, input.sha256) as TodoAttachmentRow | undefined;
+    if (existing) return rowToTodoAttachment(existing);
 
-  const kind = input.kind ?? attachmentKindForExt(extFromFileName(input.fileName));
-  database
-    .prepare(
-      `INSERT INTO todo_attachments (todo_id, sha256, file_name, mime_type, size_bytes, kind, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      input.todoId,
-      input.sha256,
-      input.fileName,
-      input.mimeType,
-      input.sizeBytes,
+    const kind = input.kind ?? attachmentKindForExt(extFromFileName(input.fileName));
+    database
+      .prepare(
+        `INSERT INTO todo_attachments (todo_id, sha256, file_name, mime_type, size_bytes, kind, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.todoId,
+        input.sha256,
+        input.fileName,
+        input.mimeType,
+        input.sizeBytes,
+        kind,
+        new Date().toISOString(),
+      );
+
+    // last_insert_rowid() rather than result.lastInsertRowid: the sql.js test shim does not
+    // populate that field. Must be read before recordUpsert runs any SQL of its own -- see the
+    // comment in createTodoState.
+    const row = database
+      .prepare(`${ATTACHMENT_SELECT} WHERE id = last_insert_rowid()`)
+      .get() as TodoAttachmentRow;
+
+    recordUpsert(database, "todo_attachments", attachmentRowKey(ensureUuid(database, "todos", input.todoId), input.sha256), {
+      file_name: input.fileName,
+      mime_type: input.mimeType,
+      size_bytes: input.sizeBytes,
       kind,
-      new Date().toISOString(),
-    );
+    });
 
-  // last_insert_rowid() rather than result.lastInsertRowid: the sql.js test shim does not
-  // populate that field. Must be read before recordUpsert runs any SQL of its own -- see the
-  // comment in createTodoState.
-  const row = database
-    .prepare(`${ATTACHMENT_SELECT} WHERE id = last_insert_rowid()`)
-    .get() as TodoAttachmentRow;
-
-  recordUpsert(database, "todo_attachments", attachmentRowKey(ensureUuid(database, "todos", input.todoId), input.sha256), {
-    file_name: input.fileName,
-    mime_type: input.mimeType,
-    size_bytes: input.sizeBytes,
-    kind,
+    return rowToTodoAttachment(row);
   });
-
-  return rowToTodoAttachment(row);
 }
 
 /** Every attachment on one todo, oldest first. */
@@ -3222,15 +3284,17 @@ export function getTodoAttachment(id: number): TodoAttachment | null {
 /** Deletes one attachment row and hands back what it deleted, so the caller can collect the blob. */
 export function deleteTodoAttachment(id: number): TodoAttachment | null {
   const database = getDb();
-  const existing = getTodoAttachment(id);
-  if (!existing) return null;
-  database.prepare("DELETE FROM todo_attachments WHERE id = ?").run(id);
-  recordDelete(
-    database,
-    "todo_attachments",
-    attachmentRowKey(ensureUuid(database, "todos", existing.todoId), existing.sha256),
-  );
-  return existing;
+  return withSyncTransaction(database, () => {
+    const existing = getTodoAttachment(id);
+    if (!existing) return null;
+    database.prepare("DELETE FROM todo_attachments WHERE id = ?").run(id);
+    recordDelete(
+      database,
+      "todo_attachments",
+      attachmentRowKey(ensureUuid(database, "todos", existing.todoId), existing.sha256),
+    );
+    return existing;
+  });
 }
 
 /**

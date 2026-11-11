@@ -97,6 +97,7 @@ class Database {
   // active". Every write inside a `transaction()` call therefore defers persistence until that
   // wrapper's own single post-commit/post-rollback `persist()` call, via this flag.
   private _inTransaction = false;
+  private _savepointDepth = 0;
 
   constructor(dbPath: string) {
     this._path = dbPath;
@@ -142,6 +143,23 @@ class Database {
 
   transaction<T>(fn: (...args: unknown[]) => T): (...args: unknown[]) => T {
     return (...args: unknown[]): T => {
+      if (this._inTransaction) {
+        // Nested call: better-sqlite3 turns it into a savepoint, so an inner failure rolls back
+        // only the inner work and the error still reaches the outer transaction.
+        const name = `sp_${this._savepointDepth++}`;
+        this._db.run(`SAVEPOINT ${name}`);
+        try {
+          const result = fn(...args);
+          this._db.run(`RELEASE ${name}`);
+          return result;
+        } catch (err) {
+          this._db.run(`ROLLBACK TO ${name}`);
+          this._db.run(`RELEASE ${name}`);
+          throw err;
+        } finally {
+          this._savepointDepth--;
+        }
+      }
       this._db.run("BEGIN");
       this._inTransaction = true;
       try {

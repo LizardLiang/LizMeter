@@ -30,7 +30,7 @@ import {
   writeSnapshotIfDue,
 } from "./snapshot.ts";
 import { scanForStrayFiles } from "./stray-files.ts";
-import { isSyncEnabled, setSyncEnabled } from "./sync-writer.ts";
+import { cancelOutboxRetry, flushOutbox, isSyncEnabled, setSyncEnabled } from "./sync-writer.ts";
 import { startWatching, type SyncWatcher } from "./watcher.ts";
 import type { SyncDeviceInfo, SyncStatus } from "../../../src/shared/types.ts";
 
@@ -158,6 +158,8 @@ export function startSyncManager(): void {
   const database = getDb();
   if (!isSyncEnabled(database)) return;
 
+  // Lines queued by a previous run (a crash, an unreachable folder) go out before any merge.
+  flushOutbox(database);
   runMergePassSafely();
   watcher = startWatching(getDataDir(), runMergePassSafely);
 }
@@ -165,6 +167,16 @@ export function startSyncManager(): void {
 export function stopSyncManager(): void {
   watcher?.stop();
   watcher = null;
+  cancelOutboxRetry();
+}
+
+/** Last chance to publish queued lines. Called on `will-quit`, before the database closes. */
+export function flushOutboxOnQuit(): void {
+  try {
+    flushOutbox(getDb());
+  } catch {
+    // The database is already closed (a data-folder move closes it before the quit): nothing is queued.
+  }
 }
 
 // SyncDeviceInfo / SyncStatus are declared once, in src/shared/types.ts -- this main-process

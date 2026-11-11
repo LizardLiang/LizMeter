@@ -20,6 +20,7 @@ import { getOrAssignDeviceNumber } from "./device-identity.ts";
 import { tick, type Hlc } from "./hlc.ts";
 import { applyOplogEntries } from "./merge-engine.ts";
 import { addSyncNotice } from "./notices.ts";
+import { flushOutbox } from "./sync-writer.ts";
 import {
   attachmentRowKey,
   buildDeleteEntry,
@@ -214,6 +215,8 @@ export function writeSnapshotIfDue(
   const last = readSetting(database, LAST_SNAPSHOT_AT_KEY);
   if (last !== null && now - Date.parse(last) < 24 * 60 * 60 * 1000) return false;
 
+  // Queued lines reach the file before the trim rewrites it.
+  flushOutbox(database);
   const entries = buildSnapshotEntries(database, now);
   const snapshot = { v: CURRENT_OPLOG_VERSION, deviceId, createdAt: new Date(now).toISOString(), entries };
 

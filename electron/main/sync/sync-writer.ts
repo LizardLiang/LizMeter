@@ -11,15 +11,19 @@
 
 import type Database from "better-sqlite3";
 import crypto from "node:crypto";
+import fs from "node:fs";
 import { getDataDir } from "../data-location.ts";
 import { allocateNextTodoId, getDeviceId, getOrAssignDeviceNumber } from "./device-identity.ts";
 import { tick } from "./hlc.ts";
 import { generateOrderedKeys } from "./lexorank.ts";
+import { clearPublishPendingNotice, setPublishPendingNotice } from "./notices.ts";
 import {
-  appendOplogEntry,
   buildDeleteEntry,
   buildLinkEntry,
   buildUpsertEntry,
+  getOplogFilePath,
+  getSyncDevicesDir,
+  type OplogEntry,
   type OplogFieldValue,
   type OplogUpsertEntry,
   type SyncedLinkTable,
@@ -71,12 +75,116 @@ export function ensureUuid(database: DbHandle, table: OplogUpsertEntry["table"],
   return uuid;
 }
 
+/**
+ * Queues one oplog line in the local `sync_outbox` table. The insert joins the caller's open
+ * transaction, so the line exists if and only if the row change it describes committed.
+ * {@link flushOutbox} appends queued lines to the shared oplog file after the commit.
+ */
+function enqueueOplogEntry(database: DbHandle, entry: OplogEntry): void {
+  database
+    .prepare("INSERT INTO sync_outbox (line, created_at) VALUES (?, ?)")
+    .run(JSON.stringify(entry), new Date().toISOString());
+}
+
+/** How long a failed publish waits before the next attempt while lines are still queued. */
+export const OUTBOX_RETRY_MS = 30_000;
+
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+
+function stopOutboxRetry(): void {
+  if (retryTimer !== null) clearTimeout(retryTimer);
+  retryTimer = null;
+}
+
+function scheduleOutboxRetry(database: DbHandle): void {
+  if (retryTimer !== null) return;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    if (database.open) flushOutbox(database);
+  }, OUTBOX_RETRY_MS);
+  retryTimer.unref?.();
+}
+
+/** Cancels a pending retry. Called when the sync manager stops. */
+export function cancelOutboxRetry(): void {
+  stopOutboxRetry();
+}
+
+/**
+ * Appends every queued line to this device's oplog file in one write, then removes the queue rows.
+ * Never throws: a failed append keeps the rows, raises one "publish pending" notice with the
+ * count, and schedules a retry. A crash between the append and the delete re-sends the same
+ * lines later, which peers ignore by `opId`.
+ */
+export function flushOutbox(database: DbHandle): void {
+  try {
+    const rows = database.prepare("SELECT seq, line FROM sync_outbox ORDER BY seq").all() as Array<
+      { seq: number; line: string }
+    >;
+    if (rows.length === 0) {
+      stopOutboxRetry();
+      clearPublishPendingNotice(database);
+      return;
+    }
+
+    try {
+      const dataDir = getDataDir();
+      fs.mkdirSync(getSyncDevicesDir(dataDir), { recursive: true });
+      const filePath = getOplogFilePath(dataDir, getDeviceId());
+      let text = rows.map((r) => `${r.line}\n`).join("");
+      if (endsWithPartialLine(filePath)) text = `\n${text}`;
+      fs.appendFileSync(filePath, text, "utf8");
+    } catch (err) {
+      setPublishPendingNotice(database, rows.length, err instanceof Error ? err.message : String(err));
+      scheduleOutboxRetry(database);
+      return;
+    }
+
+    database.prepare("DELETE FROM sync_outbox WHERE seq <= ?").run(rows[rows.length - 1]!.seq);
+    stopOutboxRetry();
+    clearPublishPendingNotice(database);
+  } catch (err) {
+    console.warn("[sync] outbox flush failed:", err);
+  }
+}
+
+/** True when the file is non-empty and its last byte is not a newline (a torn last line). */
+function endsWithPartialLine(filePath: string): boolean {
+  let fd: number;
+  try {
+    fd = fs.openSync(filePath, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const size = fs.fstatSync(fd).size;
+    if (size === 0) return false;
+    const last = Buffer.alloc(1);
+    fs.readSync(fd, last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+/**
+ * Runs `fn` in a transaction, so every record* call inside commits or rolls back with the row
+ * change, then flushes the outbox once the outermost transaction has committed. Nests safely:
+ * inside an open transaction it becomes a savepoint and the outer caller flushes.
+ */
+export function withSyncTransaction<T>(database: DbHandle, fn: () => T): T {
+  const nested = database.inTransaction;
+  const result = database.transaction(fn)();
+  if (!nested) flushOutbox(database);
+  return result;
+}
+
 function currentHlc(database: DbHandle) {
   const deviceNumber = getOrAssignDeviceNumber(database);
   return tick(database, deviceNumber);
 }
 
-/** Appends an upsert entry naming only the fields that actually changed. No-op when sync is off. */
+/** Queues an upsert entry naming only the fields that actually changed. No-op when sync is off. */
 export function recordUpsert(
   database: DbHandle,
   table: OplogUpsertEntry["table"],
@@ -91,7 +199,7 @@ export function recordUpsert(
   for (const [key, value] of Object.entries(fields)) {
     fieldChanges[key] = { value, hlc };
   }
-  appendOplogEntry(getDataDir(), getDeviceId(), buildUpsertEntry(hlc, table, rowUuid, fieldChanges));
+  enqueueOplogEntry(database, buildUpsertEntry(hlc, table, rowUuid, fieldChanges));
 
   // A local write competes with a remote one for the same field just as much as two remote
   // writes do, so it needs the same high-water mark the merge engine reads (see
@@ -114,11 +222,11 @@ export function recordUpsert(
   }
 }
 
-/** Appends a tombstone, and records it locally so this device's own delete always-wins too. No-op when sync is off. */
+/** Queues a tombstone, and records it locally so this device's own delete always-wins too. No-op when sync is off. */
 export function recordDelete(database: DbHandle, table: OplogUpsertEntry["table"], rowUuid: string): void {
   if (!isSyncEnabled(database)) return;
   const hlc = currentHlc(database);
-  appendOplogEntry(getDataDir(), getDeviceId(), buildDeleteEntry(hlc, table, rowUuid));
+  enqueueOplogEntry(database, buildDeleteEntry(hlc, table, rowUuid));
 
   database
     .prepare(
@@ -134,7 +242,7 @@ export function recordDelete(database: DbHandle, table: OplogUpsertEntry["table"
   database.prepare("DELETE FROM sync_field_clocks WHERE table_name = ? AND row_uuid = ?").run(table, rowUuid);
 }
 
-/** Appends a link/unlink entry for a join table. No-op when sync is off. */
+/** Queues a link/unlink entry for a join table. No-op when sync is off. */
 export function recordLink(
   database: DbHandle,
   table: SyncedLinkTable,
@@ -144,7 +252,7 @@ export function recordLink(
 ): void {
   if (!isSyncEnabled(database)) return;
   const hlc = currentHlc(database);
-  appendOplogEntry(getDataDir(), getDeviceId(), buildLinkEntry(hlc, table, op, fromUuid, toUuid));
+  enqueueOplogEntry(database, buildLinkEntry(hlc, table, op, fromUuid, toUuid));
 }
 
 /**
