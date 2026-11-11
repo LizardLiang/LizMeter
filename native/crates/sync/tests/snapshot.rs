@@ -374,3 +374,32 @@ fn the_backup_is_marked_freshly_synced_so_restoring_it_does_not_re_trigger_the_r
     let age = now() - chrono::DateTime::parse_from_rfc3339(&value).unwrap().timestamp_millis();
     assert!(age < ONE_DAY_MS);
 }
+
+#[test]
+fn the_trim_keeps_every_line_it_cannot_judge_byte_for_byte() {
+    let h = Harness::new();
+    h.a.db.create_todo(&new("good")).unwrap();
+    let path = h.oplog_path(&h.a);
+    let good = read_oplog_entries(&path).unwrap().entries[0].clone();
+    let at = |ms: i64| {
+        let mut v = good.to_value();
+        v["hlc"]["physicalMs"] = serde_json::json!(ms);
+        v
+    };
+    let old = at(T0 - RETENTION_MS - ONE_DAY_MS).to_string();
+    // A Node-written lone surrogate escape serde_json alone refuses, recent.
+    let surrogate = at(T0).to_string().replacen("good", r"a\ud83d", 1);
+    assert!(surrogate.contains(r"\ud83d"));
+    // A newer schema version and a torn line, both recent or unparsable, with CRLF and spacing kept.
+    let future = at(T0).to_string().replacen("\"v\":1", "\"v\":2", 1);
+    let torn = r#"{"v":1,"opId":"x","hlc":{"physicalMs":"#;
+    let recent = format!("  {}\r", at(T0));
+    let body = [old.as_str(), surrogate.as_str(), future.as_str(), recent.as_str(), torn].join("\n") + "\n";
+    fs::write(&path, &body).unwrap();
+
+    write_snapshot(&h, &h.a, T0);
+
+    let after = fs::read_to_string(&path).unwrap();
+    let want = [surrogate.as_str(), future.as_str(), recent.as_str(), torn].join("\n") + "\n";
+    assert_eq!(after, want, "only the aged line is gone; nothing else is re-serialized");
+}

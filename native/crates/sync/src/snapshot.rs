@@ -13,8 +13,8 @@ use crate::merge_engine::apply_oplog_entries;
 use crate::notices::add_sync_notice;
 use crate::oplog::{
     attachment_row_key, build_delete_entry, build_link_entry, build_upsert_entry, get_snapshot_file_path,
-    get_sync_devices_dir, is_plausible_entry, read_oplog_entries, FieldChange, FieldMap, LinkKind, OplogEntry,
-    CURRENT_OPLOG_VERSION, OPLOG_SUFFIX, SNAPSHOT_SUFFIX,
+    get_sync_devices_dir, is_plausible_entry, parse_line, read_oplog_entries, FieldChange, FieldMap, LinkKind, OplogEntry,
+    CURRENT_OPLOG_VERSION, OPLOG_SUFFIX, SNAPSHOT_SUFFIX, ParsedLine,
 };
 use crate::row_codec::{all_columns_for, encode_row_fields, query_rows, RowMap};
 use crate::{in_transaction, read_setting, write_setting, Result, SyncError};
@@ -210,25 +210,50 @@ fn prune_old_tombstones(conn: &Connection, now: i64) -> Result<()> {
     Ok(())
 }
 
-/// Rewrites this device's own oplog file to entries newer than the retention window (FR-018).
+/// Rewrites this device's own oplog file without the entries older than the retention window
+/// (FR-018). Works on the raw lines and never re-serializes: a line this build cannot parse (a
+/// Node-written escape, a newer schema version, a torn write) is kept byte for byte.
 fn trim_own_oplog(data_dir: &Path, device_id: &str, now: i64) -> Result<()> {
     let path = get_sync_devices_dir(data_dir).join(format!("{device_id}{OPLOG_SUFFIX}"));
     if !path.exists() {
         return Ok(());
     }
-    let read = read_oplog_entries(&path)?;
+    let bytes = read_file_guarded(&path)?;
     let cutoff = now - RETENTION_MS;
-    let kept: Vec<&OplogEntry> = read.entries.iter().filter(|e| e.hlc().physical_ms >= cutoff).collect();
-    if kept.len() == read.entries.len() {
+    let mut kept: Vec<&[u8]> = Vec::new();
+    let mut dropped = false;
+    for raw in bytes.split(|b| *b == b'\n') {
+        let line = String::from_utf8_lossy(raw);
+        let trimmed = lizmeter_db::util::js_trim(&line);
+        if trimmed.is_empty() {
+            continue;
+        }
+        if let ParsedLine::Entry(entry) = parse_line(trimmed) {
+            if entry.hlc().physical_ms < cutoff {
+                dropped = true;
+                continue;
+            }
+        }
+        kept.push(raw);
+    }
+    if !dropped {
         return Ok(()); // nothing to trim
     }
-    let lines = kept.iter().map(|e| e.to_line()).collect::<Vec<_>>().join("\n");
-    atomic_write_file(&path, &if kept.is_empty() { String::new() } else { format!("{lines}\n") })
+    let mut out = Vec::new();
+    for line in kept {
+        out.extend_from_slice(line);
+        out.push(b'\n');
+    }
+    atomic_write_bytes(&path, &out)
 }
 
 /// Writes through a temp file in the same directory plus a rename, so a crash mid-write leaves the
 /// file as either the old complete contents or the new complete contents, never a partial write.
 fn atomic_write_file(path: &Path, data: &str) -> Result<()> {
+    atomic_write_bytes(path, data.as_bytes())
+}
+
+fn atomic_write_bytes(path: &Path, data: &[u8]) -> Result<()> {
     let ms = crate::hlc::now_ms();
     let temp = PathBuf::from(format!("{}.tmp-{}-{ms}", path.display(), std::process::id()));
     std::fs::write(&temp, data)?;
@@ -250,7 +275,7 @@ fn read_snapshot_file(path: &Path) -> Result<Option<SnapshotFile>> {
         return Ok(None);
     }
     let bytes = read_file_guarded(path)?;
-    let Ok(parsed) = serde_json::from_slice::<Value>(&bytes) else {
+    let Ok(parsed) = crate::oplog::parse_json_lenient_bytes(&bytes) else {
         return Ok(None);
     };
     let Some(raw_entries) = parsed.get("entries").and_then(Value::as_array) else {
