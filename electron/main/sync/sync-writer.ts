@@ -169,13 +169,13 @@ function endsWithPartialLine(filePath: string): boolean {
 
 /**
  * Runs `fn` in a transaction, so every record* call inside commits or rolls back with the row
- * change, then flushes the outbox once the outermost transaction has committed. Nests safely:
+ * change, then flushes the outbox once the outermost transaction has committed (sync on only). Nests safely:
  * inside an open transaction it becomes a savepoint and the outer caller flushes.
  */
 export function withSyncTransaction<T>(database: DbHandle, fn: () => T): T {
   const nested = database.inTransaction;
   const result = database.transaction(fn)();
-  if (!nested) flushOutbox(database);
+  if (!nested && isSyncEnabled(database)) flushOutbox(database);
   return result;
 }
 

@@ -175,7 +175,7 @@ export function flushOutboxOnQuit(): void {
   try {
     flushOutbox(getDb());
   } catch {
-    // The database is already closed (a data-folder move closes it before the quit): nothing is queued.
+    // The database is already closed (a data-folder move closes it before the quit).
   }
 }
 

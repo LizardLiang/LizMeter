@@ -235,3 +235,36 @@ describe("7f: a torn last line is healed", () => {
     expect(harness.as(harness.deviceB, () => listTags().map((t) => t.name))).toEqual(["after-tear"]);
   });
 });
+
+describe("flush timing", () => {
+  it("holds lines until the outermost transaction commits", () => {
+    harness.as(harness.deviceA, () => {
+      harness.deviceA.db.transaction(() => {
+        createTag({ name: "inner", color: "#7aa2f7" });
+        expect(oplogLines(harness.deviceA)).toEqual([]);
+      })();
+      flushOutbox(harness.deviceA.db);
+    });
+    expect(oplogLines(harness.deviceA).length).toBeGreaterThan(0);
+  });
+
+  it("retries by itself after 30 seconds and keeps a dismissed notice dismissed", () => {
+    vi.useFakeTimers();
+    try {
+      const blocker = blockSharedFolder();
+      harness.as(harness.deviceA, () => createTag({ name: "later", color: "#7aa2f7" }));
+      const [notice] = pendingNotices(harness.deviceA);
+      harness.deviceA.db.prepare("UPDATE sync_notices SET dismissed = 1 WHERE id = ?").run(notice!.id);
+
+      vi.advanceTimersByTime(30_000);
+      expect(listSyncNotices(harness.deviceA.db).filter((n) => n.kind === "publish-pending")).toEqual([]);
+
+      unblockSharedFolder(blocker);
+      harness.as(harness.deviceA, () => vi.advanceTimersByTime(30_000));
+      expect(outboxCount(harness.deviceA)).toBe(0);
+      expect(oplogLines(harness.deviceA).length).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

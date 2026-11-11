@@ -98,6 +98,7 @@ class Database {
   // wrapper's own single post-commit/post-rollback `persist()` call, via this flag.
   private _inTransaction = false;
   private _savepointDepth = 0;
+  private _closed = false;
 
   constructor(dbPath: string) {
     this._path = dbPath;
@@ -186,7 +187,16 @@ class Database {
     };
   }
 
+  get inTransaction(): boolean {
+    return this._inTransaction;
+  }
+
+  get open(): boolean {
+    return !this._closed;
+  }
+
   close(): void {
+    this._closed = true;
     this.persist();
     this._db.close();
   }
