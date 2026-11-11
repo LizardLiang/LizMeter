@@ -5,8 +5,8 @@ edition.workspace = true
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
-lizmeter-core = { version = "0.0.1", path = "../core" }
-lizmeter-db = { version = "0.0.1", path = "../db" }
+lizmeter-core = { version = "2.0.0", path = "../core" }
+lizmeter-db = { version = "2.0.0", path = "../db" }
 notify = "8"
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 serde = { version = "1.0.229", features = ["derive"] }

@@ -3294,7 +3294,7 @@ checksum = "47d9d19d1d6efa0109d2f65ff4c85cddd50bd572e5a00127ab10987290bcefae"
 
 [[package]]
 name = "lizmeter-app"
-version = "0.0.1"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "gpui",
@@ -3313,7 +3313,7 @@ dependencies = [
 
 [[package]]
 name = "lizmeter-core"
-version = "0.0.1"
+version = "2.0.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -3321,7 +3321,7 @@ dependencies = [
 
 [[package]]
 name = "lizmeter-db"
-version = "0.0.1"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "lizmeter-core",
@@ -3335,7 +3335,7 @@ dependencies = [
 
 [[package]]
 name = "lizmeter-music"
-version = "0.0.1"
+version = "2.0.0"
 dependencies = [
  "cpal",
  "lizmeter-core",
@@ -3352,7 +3352,7 @@ dependencies = [
 
 [[package]]
 name = "lizmeter-services"
-version = "0.0.1"
+version = "2.0.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -3373,7 +3373,7 @@ dependencies = [
 
 [[package]]
 name = "lizmeter-sync"
-version = "0.0.1"
+version = "2.0.0"
 dependencies = [
  "chrono",
  "lizmeter-core",
@@ -3389,7 +3389,7 @@ dependencies = [
 
 [[package]]
 name = "lizmeter-ui"
-version = "0.0.1"
+version = "2.0.0"
 dependencies = [
  "gpui",
  "image",

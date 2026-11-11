@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 LizMeter is moving from Electron to a native Rust app drawn with DirectX 11 (gpui, vendored with a backdrop-blur patch). The native app lives in `native/` and is the app to extend. The Electron app described under "Legacy: Electron app" stays in the repo until both machines run native.
 
+Versions: the native app is LizMeter v2 (2.x). The Electron line ends at 1.x. The version lives in `native/Cargo.toml` (`[workspace.package]`) and `native/Packager.toml`; `crates/app/tests/installer_config.rs` fails when they differ.
+
 Commands, run from `native/` (MSVC toolchain, see `rust-toolchain.toml`):
 
 ```

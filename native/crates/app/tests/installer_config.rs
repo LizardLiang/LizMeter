@@ -76,6 +76,15 @@ fn installs_per_user_as_lizmeter() {
     assert!(CONFIG.contains("main = true"));
 }
 
+/// The installer's DisplayVersion and the program's own version are one number. The native app is LizMeter v2:
+/// the Electron line ends at 1.x.
+#[test]
+fn the_installer_and_the_program_share_one_v2_version() {
+    let program = env!("CARGO_PKG_VERSION");
+    assert!(CONFIG.contains(&format!("\nversion = \"{program}\"\n")), "Packager.toml version must equal the workspace version {program}");
+    assert_eq!(program.split('.').next(), Some("2"), "the native app is v2");
+}
+
 #[test]
 fn the_uninstaller_never_offers_to_delete_app_data() {
     // `appdata-paths` makes the uninstaller offer to remove those folders.
