@@ -3056,6 +3056,13 @@ export function clearCompletedTodos(): ClearCompletedTodosResult {
     .prepare("SELECT COUNT(*) AS count FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1")
     .get() as { count: number };
   let deletedShas: string[] = [];
+  // Resolved before the rows go: recordDelete needs each todo's uuid, and a deleted row has none.
+  const clearedIds = (database
+    .prepare(
+      "SELECT t.id AS id FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1",
+    )
+    .all() as Array<{ id: number }>).map((r) => r.id);
+  const clearedUuids = clearedIds.map((id) => ensureUuid(database, "todos", id));
   const clear = database.transaction(() => {
     // Same reasoning as deleteTodo: read the shas before the rows go, not after a cascade.
     deletedShas = database
@@ -3088,6 +3095,8 @@ export function clearCompletedTodos(): ClearCompletedTodosResult {
     );
   });
   clear();
+  // The same tombstone per todo that deleteTodo publishes, so other machines drop the rows too.
+  for (const uuid of clearedUuids) recordDelete(database, "todos", uuid);
   return { count, deletedShas };
 }
 
