@@ -102,13 +102,19 @@ impl TokenStore {
 
     fn write_atomic(&self, path: &Path, bytes: &[u8]) -> Result<(), String> {
         std::fs::create_dir_all(&self.dir).map_err(|e| format!("Could not create the token folder: {e}"))?;
-        let tmp = path.with_extension("tmp");
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = path.with_extension(format!("tmp-{}-{unique}", std::process::id()));
         std::fs::write(&tmp, bytes).map_err(|e| format!("Could not write the token file: {e}"))?;
-        std::fs::rename(&tmp, path).map_err(|e| format!("Could not write the token file: {e}"))
+        std::fs::rename(&tmp, path).map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            format!("Could not write the token file: {e}")
+        })
     }
 
     pub fn save(&self, p: Provider, token: &str) -> Result<(), String> {
         let sealed = dpapi::protect(token.as_bytes())?;
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         self.write_atomic(&self.path(p), &sealed)
     }
 
@@ -125,6 +131,7 @@ impl TokenStore {
     }
 
     pub fn delete(&self, p: Provider) {
+        let _guard = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let _ = std::fs::remove_file(self.path(p));
     }
 
@@ -175,6 +182,36 @@ mod tests {
         std::fs::write(dir.path().join("native-tokens").join("jira.dpapi"), dpapi::protect_plain(b"x").unwrap()).unwrap();
         assert!(!store.has(Provider::Jira), "a blob that does not open is not a configured token");
         assert!(store.load(Provider::Jira).is_none());
+    }
+
+    #[test]
+    fn concurrent_saves_for_one_provider_never_leave_a_broken_token() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(TokenStore::new(dir.path()));
+        let workers: Vec<_> = (0..8)
+            .map(|n| {
+                let store = store.clone();
+                std::thread::spawn(move || {
+                    for i in 0..10 {
+                        store.save(Provider::Github, &format!("ghp_FAKE_{n}_{i}")).expect("save");
+                        if i % 5 == 4 {
+                            store.delete(Provider::Github);
+                        }
+                    }
+                })
+            })
+            .collect();
+        for w in workers {
+            w.join().unwrap();
+        }
+        store.save(Provider::Github, "ghp_FAKE_last").unwrap();
+        assert_eq!(store.load(Provider::Github).unwrap().expose(), "ghp_FAKE_last");
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path().join("native-tokens"))
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().contains(".tmp"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
     }
 
     #[test]

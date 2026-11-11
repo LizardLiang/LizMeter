@@ -56,21 +56,38 @@ pub(crate) fn in_transaction<T>(conn: &rusqlite::Connection, f: impl FnOnce() ->
     let nested = !conn.is_autocommit();
     let savepoint = "lizmeter_sync_sp";
     conn.execute_batch(if nested { "SAVEPOINT lizmeter_sync_sp" } else { "BEGIN" })?;
-    match f() {
+    let undo = if nested { format!("ROLLBACK TO {savepoint}; RELEASE {savepoint}") } else { "ROLLBACK".to_string() };
+    // A panic inside `f` unwinds through here: the guard rolls back, so the connection never stays in BEGIN.
+    let mut guard = RollbackOnDrop { conn, undo: &undo, armed: true };
+    let result = f();
+    guard.armed = false;
+    match result {
         Ok(value) => {
             let end = if nested { format!("RELEASE {savepoint}") } else { "COMMIT".to_string() };
             if let Err(e) = conn.execute_batch(&end) {
                 // A deferred foreign key violation fails COMMIT and leaves the transaction open.
-                let undo = if nested { format!("ROLLBACK TO {savepoint}; RELEASE {savepoint}") } else { "ROLLBACK".to_string() };
                 let _ = conn.execute_batch(&undo);
                 return Err(e.into());
             }
             Ok(value)
         }
         Err(e) => {
-            let undo = if nested { format!("ROLLBACK TO {savepoint}; RELEASE {savepoint}") } else { "ROLLBACK".to_string() };
             let _ = conn.execute_batch(&undo);
             Err(e)
+        }
+    }
+}
+
+struct RollbackOnDrop<'a> {
+    conn: &'a rusqlite::Connection,
+    undo: &'a str,
+    armed: bool,
+}
+
+impl Drop for RollbackOnDrop<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            let _ = self.conn.execute_batch(self.undo);
         }
     }
 }
@@ -100,6 +117,20 @@ mod tests {
         assert!(r.is_err());
         assert_eq!(rows(&c), 0);
         assert!(c.is_autocommit());
+    }
+
+    #[test]
+    fn a_panic_inside_the_transaction_rolls_it_back() {
+        let c = conn();
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _: crate::Result<()> = in_transaction(&c, || {
+                c.execute("INSERT INTO t VALUES (1)", [])?;
+                panic!("boom");
+            });
+        }));
+        assert!(outcome.is_err());
+        assert!(c.is_autocommit(), "the connection is not left inside BEGIN");
+        assert_eq!(rows(&c), 0);
     }
 
     #[test]

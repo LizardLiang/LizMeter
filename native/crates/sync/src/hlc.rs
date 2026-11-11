@@ -45,7 +45,7 @@ pub fn tick(conn: &Connection, device_number: i64) -> Result<Hlc> {
 pub fn tick_at(conn: &Connection, device_number: i64, now: i64) -> Result<Hlc> {
     let (last_physical, last_counter) = read_state(conn)?;
     let physical_ms = now.max(last_physical);
-    let counter = if physical_ms == last_physical { last_counter + 1 } else { 0 };
+    let counter = if physical_ms == last_physical { last_counter.saturating_add(1) } else { 0 };
     write_state(conn, physical_ms, counter)?;
     Ok(Hlc { physical_ms, counter, device_number })
 }
@@ -63,18 +63,18 @@ pub fn receive(conn: &Connection, device_number: i64, remote: Hlc) -> Result<Rec
 }
 
 pub fn receive_at(conn: &Connection, device_number: i64, remote: Hlc, now: i64) -> Result<ReceiveResult> {
-    let clamped = remote.physical_ms - now > MAX_CLOCK_DRIFT_MS;
-    let effective_remote_ms = if clamped { now + MAX_CLOCK_DRIFT_MS } else { remote.physical_ms };
+    let clamped = remote.physical_ms.saturating_sub(now) > MAX_CLOCK_DRIFT_MS;
+    let effective_remote_ms = if clamped { now.saturating_add(MAX_CLOCK_DRIFT_MS) } else { remote.physical_ms };
 
     let (last_physical, last_counter) = read_state(conn)?;
     let physical_ms = last_physical.max(effective_remote_ms).max(now);
 
     let counter = if physical_ms == last_physical && physical_ms == effective_remote_ms {
-        last_counter.max(remote.counter) + 1
+        last_counter.max(remote.counter).saturating_add(1)
     } else if physical_ms == last_physical {
-        last_counter + 1
+        last_counter.saturating_add(1)
     } else if physical_ms == effective_remote_ms {
-        remote.counter + 1
+        remote.counter.saturating_add(1)
     } else {
         0
     };

@@ -354,3 +354,15 @@ fn a_meaningless_watermark_value_is_ignored() {
     advance_todo_id_watermark(db.conn(), 0).unwrap();
     assert_eq!(allocate_next_todo_id(db.conn()).unwrap(), 1);
 }
+
+#[test]
+fn peer_clock_values_at_the_integer_limits_never_overflow() {
+    let db = db();
+    tick_at(db.conn(), 0, 1000).unwrap();
+    let r = receive_at(db.conn(), 0, h(i64::MAX, i64::MAX, 1), -5).unwrap();
+    assert!(r.clamped);
+    let again = receive_at(db.conn(), 0, h(i64::MIN, i64::MAX, 1), i64::MAX).unwrap();
+    assert!(!again.clamped);
+    let third = tick_at(db.conn(), 0, 0).unwrap();
+    assert!(third.counter >= 0);
+}
