@@ -1,6 +1,6 @@
 ---
 scope: native/Packager.toml, native/crates/services/src/soak.rs, native/crates/app/src/soak_cli.rs
-updated: 2026-11-10
+updated: 2026-11-11
 source: ares (2026-11-09-native-rust-directx-full-port, phase 12)
 language: zh-TW
 ---
@@ -12,7 +12,7 @@ language: zh-TW
 ## 先看這裡：順序與規則
 
 ```
-備份 ─▶ soak（複本上跑數天）─▶ 乾淨？ ─否─▶ 回報問題，不換裝
+兩台都安裝 Electron 1.14.4 ─▶ 備份 ─▶ soak（複本上跑數天）─▶ 乾淨？ ─否─▶ 回報問題，不換裝
                                   │
                                  是
                                   ▼
@@ -22,6 +22,7 @@ language: zh-TW
 
 必守規則：
 
+0. **soak 之前，兩台電腦都先安裝 Electron 1.14.4（不是 1.14.3）。** 1.14.4 加入本機寄件匣 `sync_outbox`（見第 8 節）。較舊的 Electron 版不認識它：原生版當機時留在寄件匣的變更，舊版不會發布。安裝方式見第 1 節第 5 步。
 1. 一次只讓一個程式寫同一個資料夾。換裝前先關閉 Electron 版與原生版。
 2. soak 絕不使用真正的 OneDrive 同步資料夾（`C:\Users\lizard_liang\OneDrive\Apps\sync`）。程式會拒絕。
 3. 安裝程式不會刪除 `%APPDATA%\lizmeter`。你仍然要先備份。
@@ -59,7 +60,13 @@ Test-Path "$env:USERPROFILE\lizmeter-backup-$stamp\lizmeter.db"
 (Get-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\d7c9c3d8-3982-5ac5-a5ff-124a887808d8").DisplayVersion
 ```
 
-   本機 `release\` 資料夾有 `LizMeter Setup 1.14.1.exe`。1.14.2 與更新版本沒有現成安裝檔：在 master 執行 `bun run dist` 產生，複製到 `$env:USERPROFILE\lizmeter-installers\`。master 另有尚未發行的修正 `faec32c`、`6c8ee6c`（ffmpeg checksum）；1.14.3 會包含它們。
+   **要安裝的版本是 1.14.4。** 安裝檔已建好：
+
+```powershell
+Get-Item "C:\Users\lizard_liang\personal\PersonalTool\LizMeter-syncfix\release\LizMeter Setup 1.14.4.exe"
+```
+
+   把它複製到 `$env:USERPROFILE\lizmeter-installers\`，兩台電腦各安裝一次（soak 之前）。若檔案不在，在 master 的 worktree `LizMeter-syncfix` 執行 `bun run dist` 重建。1.14.4 包含 ffmpeg checksum 修正（`faec32c`、`6c8ee6c`）、同步寄件匣，以及「Clear N done」的刪除同步修正。尚未推送、尚未打 tag。安裝 1.14.4 時，先關閉 LizMeter。
 
 ## 2. 開始 soak（在複本上跑原生版）
 
@@ -166,7 +173,7 @@ cargo packager --release -c Packager.toml
 
 1. 關閉原生版。
 2. 解除安裝原生版：設定 → 應用程式 → LizMeter（路徑 `%LOCALAPPDATA%\LizMeter`）。解除安裝不刪除 `%APPDATA%\lizmeter`。
-3. 安裝 Electron 版（1.14.2；見第 1 節第 5 步的安裝檔位置）。
+3. 安裝 Electron 版：**1.14.4 或更新**（見第 1 節第 5 步的安裝檔位置）。不要退回 1.14.3 或更舊的版本：它們不認識 `sync_outbox`，原生版留在寄件匣、還沒發布的變更會一直卡住，直到原生版或 1.14.4 以上再執行一次。退回前，如果設定頁出現「N change(s) waiting to publish」，先讓資料夾恢復連線、等通知消失，再關閉原生版。
 4. 啟動，確認資料都在。
 5. 只有在資料真的壞掉時，才還原備份：先關閉所有 LizMeter，把 `%APPDATA%\lizmeter` 改名為 `lizmeter-broken`，再把 `$env:USERPROFILE\lizmeter-backup-<時間>` 複製回 `%APPDATA%\lizmeter`。不要直接覆蓋。
 6. 兩台都退回之後，才可以刪除 soak 資料夾：`Remove-Item -Recurse "$env:APPDATA\lizmeter-soak", "$env:APPDATA\lizmeter-soak-sync"`
@@ -181,7 +188,7 @@ cargo packager --release -c Packager.toml
 | 真正的 ffmpeg 下載 | 需要網路 | 全新的 soak 設定頁觸發 ffmpeg 下載；原生版已有 manifest 備援 |
 | 即時指標與鍵盤檢查 | 不能用 SendKeys 或前景輸入自動化 | 用滑鼠與鍵盤操作：拖曳排序、中文輸入法（IME）、全域快捷鍵、widget 拖曳 |
 | 真實 OneDrive 同步（兩台之間） | soak 刻意不碰真實資料夾 | 第 4 節第 6 步與第 5 節第 2 步 |
-| 已安裝版本的確認 | 登錄檔顯示 DisplayVersion 為 1.14.0，與預期的 1.14.2 不同 | 第 1 節第 5 步的指令；以實際值為準 |
+| 已安裝版本的確認 | 登錄檔顯示 DisplayVersion 為 1.14.0，與預期不同（現在預期的是 1.14.4） | 第 1 節第 5 步的指令；以實際值為準 |
 
 ## 疑難排解
 
@@ -191,3 +198,34 @@ cargo packager --release -c Packager.toml
 | `No soak profile at ...` | 還沒做 `--soak-setup` | 先做第 2 節第 2 步 |
 | `... already holds files` | soak 資料夾已存在，setup 不覆蓋 | 第 2 節第 2 步的 `Remove-Item` 後重做 |
 | 啟動時說資料夾被另一個 LizMeter 使用 | 另一個原生版或 Electron 版正在寫同一個資料夾 | 關閉它；soak 資料夾不受 Electron 版影響 |
+
+## 8. 新行為：「N change(s) waiting to publish」通知與找不到資料夾的對話框
+
+### 同步寄件匣（Electron 1.14.4 與原生版都有）
+
+寫入同步資料表的變更，會先存進本機資料庫的 `sync_outbox` 表，等資料庫寫入成功後，才附加到 OneDrive 同步資料夾裡你自己的 oplog 檔。好處：寫入失敗不會留下假的公開紀錄，資料夾暫時連不上時，你的編輯也不會失敗。
+
+- 同步資料夾連不上（OneDrive 離線、資料夾被移走、磁碟已滿）時：編輯照常儲存。設定 → 同步的通知清單出現 **「N change(s) waiting to publish」**（N 是等待中的筆數）。
+- 你要做的事：讓資料夾恢復連線（等 OneDrive 回來，或確認資料夾路徑存在）。程式每 30 秒自動重試，成功後通知自動消失，變更依原順序發布。不用手動操作。
+- 通知還在時，另一台電腦看不到這些變更。通知還在時關閉程式，程式會在結束前再試一次（只在同步開啟時）。
+- 資料夾已恢復但通知超過幾分鐘仍在：關閉程式，保留 `%APPDATA%\lizmeter`，回報問題。可用下列指令檢查合併錯誤：
+
+```powershell
+& "$env:LOCALAPPDATA\LizMeter\lizmeter.exe" --soak-check --check-dir "$env:APPDATA\lizmeter" | Out-String
+```
+
+  `merge-failed` 與 `oplog-entry-skipped` 都要是 `0`。
+- 寄件匣沒有上限，只在資料夾連不上時才會增長。
+- 同步關閉的電腦不會發布寄件匣的內容，也不會在結束或移動資料夾時發布。重新開啟同步後才會發布。
+
+### 找不到資料夾的對話框（原生版）
+
+啟動時，如果設定的自訂資料資料夾不存在（例如 OneDrive 還沒掛載），原生版不會建立空資料庫，而是顯示和 Electron 版相同文字的對話框，有三個選項：
+
+| 選項 | 作用 |
+|---|---|
+| Retry | 再檢查一次資料夾。OneDrive 已經回來時選這個 |
+| Use Default Folder | 改用預設資料夾（`%APPDATA%\lizmeter`）。同步會與原資料夾分開，除非你確定，否則不要選 |
+| Quit | 結束程式，什麼都不改。關閉視窗或按 Esc 也等於結束 |
+
+不確定時選 Retry，或 Quit 後等 OneDrive 就緒再開。
