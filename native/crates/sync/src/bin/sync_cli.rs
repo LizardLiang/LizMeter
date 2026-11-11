@@ -9,6 +9,7 @@
 //!   setup           --db F --user-data U --shared S --role originate|adopt
 //!   merge           --db F --user-data U --shared S      one merge pass, prints {applied,...}
 //!   edit            --db F --user-data U --shared S --seed N --ops K
+//!   clear-scenario  --db F --user-data U --shared S --tag T   two done todos (one with a child), one open, then "Clear done"
 //!   dump            --db F --out O --mode fixture|mixed
 //!   snapshot-entries --db F --out O
 //!   write-snapshot  --db F --user-data U --shared S
@@ -97,6 +98,7 @@ fn run(command: &str, args: &Args) -> Res<()> {
             Ok(())
         }
         "edit" => edit(args),
+        "clear-scenario" => clear_scenario(args),
         "dump" => {
             let db = open_db(args)?;
             let mixed = args.get("mode")? == "mixed";
@@ -127,6 +129,26 @@ fn run(command: &str, args: &Args) -> Res<()> {
         }
         other => Err(format!("unknown command {other}").into()),
     }
+}
+
+/// Mirrors `tsClearScenario` in `native/tools/sync-equivalence/clear-completed.ts`.
+fn clear_scenario(args: &Args) -> Res<()> {
+    let db = open_db(args)?;
+    let tag = args.get("tag")?;
+    let make = |title: String, parent_id: Option<i64>| -> Res<i64> {
+        Ok(db.create_todo(&CreateTodoInput { title, parent_id, ..Default::default() })?.id)
+    };
+    let done1 = make(format!("{tag}-done-1"), None)?;
+    let done2 = make(format!("{tag}-done-2"), None)?;
+    make(format!("{tag}-open"), None)?;
+    make(format!("{tag}-child"), Some(done1))?;
+    let done_state = db.list_todo_states()?.into_iter().find(|st| st.is_completed).ok_or("no completed state")?.id;
+    for id in [done1, done2] {
+        db.update_todo(&UpdateTodoInput { id, state_id: Some(done_state), ..Default::default() })?;
+    }
+    let cleared = db.clear_completed_todos()?;
+    println!("{}", json!({ "cleared": cleared.count }));
+    Ok(())
 }
 
 fn setup(args: &Args) -> Res<()> {

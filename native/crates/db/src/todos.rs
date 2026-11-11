@@ -690,6 +690,16 @@ impl Database {
             [],
             |r| r.get(0),
         )?;
+        // Resolved before the rows go: the delete record needs each todo's uuid.
+        let cleared_ids: Vec<i64> = {
+            let mut stmt = conn.prepare(
+                "SELECT t.id FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1",
+            )?;
+            let v = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<Vec<i64>>>()?;
+            v
+        };
+        let cleared_uuids =
+            cleared_ids.iter().map(|id| ensure_uuid(conn, "todos", *id)).collect::<Result<Vec<String>>>()?;
         let tx = conn.unchecked_transaction()?;
         let deleted_shas: Vec<String> = {
             let mut stmt = tx.prepare(
@@ -712,6 +722,10 @@ impl Database {
         )?;
         tx.execute_batch("DELETE FROM todos WHERE state_id IN (SELECT id FROM todo_states WHERE is_completed = 1)")?;
         tx.commit()?;
+        // The same record per todo that delete_todo publishes, so other machines drop the rows too.
+        for uuid in &cleared_uuids {
+            self.sync().record_delete(conn, "todos", uuid)?;
+        }
         Ok(ClearCompletedTodosResult { count, deleted_shas })
     }
 
