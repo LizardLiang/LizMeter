@@ -13,7 +13,7 @@ cd .. && node native/tools/sync-equivalence/run.mjs [--tmp <dir>] [--keep] [--fu
 ```
 
 - Needs a Node-ABI better-sqlite3 at `<OS temp>/node_modules/better-sqlite3`. The repo copy is built
-  for Electron. `scripts/verify-real-better-sqlite3.mjs` depends on the same copy.
+  for Electron.
 - Every path is under `--tmp` (default: a new folder in the OS temp directory). The script refuses a
   `--tmp` that looks like `%APPDATA%` or OneDrive and never reads `%APPDATA%/lizmeter` or the real sync
   folder.

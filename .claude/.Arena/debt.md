@@ -254,7 +254,7 @@ collapsed.
 - **UTF-16 limits.** Title, notes and label caps use `js_len`/`js_truncate` (UTF-16 units, as in JS). Truncating inside a surrogate pair drops the whole pair; JS keeps a lone surrogate.
 - **Attachment URL resolver** (`resolveAttachmentPath`, traversal guard) is not ported yet: Phase 5 with the `app-media` scheme.
 - **Numbers the typed API narrows.** `SaveSessionInput` durations are `i64`; the TS accepted any JS number (a float planned duration would have been stored as REAL). Fractional input now fails at deserialisation.
-- **Schema dump tool runs under node, not bun.** `native/tools/schema-dump/dump.mjs` bundles with esbuild and runs the real better-sqlite3 (the repo copy is built for Electron's ABI; the bundled run resolves another copy). Same approach as `scripts/verify-real-better-sqlite3.mjs`.
+- **Schema dump tool runs under node, not bun.** `native/tools/schema-dump/dump.mjs` bundles with esbuild and runs the real better-sqlite3 (the repo copy is built for Electron's ABI; the bundled run resolves another copy).
 - **Unknown `source` on todo create** (`"robot"`) fails deserialisation; TS fell back to `"user"`. The pipe layer (Phase 10) must map unknown values to `user` before building `CreateTodoInput`.
 - **`Database::open` refuses a `sync.enabled` database** until the Phase 4 sync hook is passed to `open_with_sync`; opening a synced dev DB natively before then fails by design.
 
@@ -266,7 +266,7 @@ collapsed.
 - **Tombstone clocks differ between two devices that delete the same row.** A merged delete uses `INSERT OR REPLACE`, so each device ends up holding the other's tombstone HLC. Harmless today (`isTombstoned` ignores the clock; snapshots embed it). Same in both engines.
 - **`collectAttachmentBlobs` is a no-op during a merge.** TS guards on `isSyncEnabled`; a merge only runs with sync on. The Rust merge engine therefore never deletes blobs. Accepted local disk growth while sync is on (TS debt B-3, unchanged).
 - **Rust drops entries TS would crash on.** An upsert or delete naming a link table, a link entry naming a row table (kept as a no-op in TS), or a missing `rowUuid`/`fields` counts as a skipped line in Rust (notice `oplog-entry-skipped`). TS passes the plausibility gate and throws later, which halts every merge pass (`merge-failed`). Peers never write such lines; the difference only matters for a hand-edited oplog.
-- **Harness needs a Node-ABI better-sqlite3 in `<OS temp>/node_modules`.** Same prerequisite as `scripts/verify-real-better-sqlite3.mjs`; the repo copy targets Electron.
+- **Harness needs a Node-ABI better-sqlite3 in `<OS temp>/node_modules`.** The repo copy targets Electron.
 - **Reach-check findings carried over from TS (parity, not fixed in phase 4):** stale device with no snapshot skips the oplog merge; `rebuild_from_snapshot` wipe and replay are separate transactions, so a failed replay leaves a wiped DB and each retry backs up the wiped DB; adopt raises the "offline for 90 days" notice; a peer renaming a row onto another row's name (`UNIQUE` NOCASE) fails every merge pass (`merge-failed`); an entry that can never apply (link to a deleted todo) is retried every pass and re-triggers the UI refresh; snapshot/oplog temp files (`*.tmp-<pid>-<ms>`) in the shared folder can raise a stray-file notice on a peer; `lastSnapshotAt` in the future suppresses snapshots. Fix in both engines together.
 
 ## Native port, phase 6a (2026-11-09)

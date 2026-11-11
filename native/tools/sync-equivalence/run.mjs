@@ -45,7 +45,7 @@ fs.rmSync(path.join(tmpRoot, "fixtures"), { recursive: true, force: true });
 fs.rmSync(path.join(tmpRoot, "mixed"), { recursive: true, force: true });
 
 // --- load the TypeScript engine ---
-// The bundle lives directly under the OS temp folder, like scripts/verify-real-better-sqlite3.mjs: the
+// The bundle lives directly under the OS temp folder: the
 // repo's better-sqlite3 is built for Electron's ABI, so node must find a Node-ABI copy at
 // <temp>/node_modules/better-sqlite3 (install it with `bun add better-sqlite3` run inside the temp folder).
 const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), "lizmeter-sync-equiv-bundle-"));

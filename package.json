@@ -16,7 +16,6 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "verify:real-db": "node scripts/verify-real-better-sqlite3.mjs",
     "test:e2e": "playwright test",
     "prepare": "husky",
     "dist": "vite build && electron-builder",

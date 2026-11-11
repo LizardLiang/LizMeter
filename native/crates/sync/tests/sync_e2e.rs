@@ -599,7 +599,7 @@ fn an_id_move_that_orphans_a_child_is_rejected_unless_deferred_together() {
 
 #[test]
 fn a_swap_of_two_claimed_numbers_completes_through_the_negative_phase() {
-    // Port of the real-driver check in scripts/real-better-sqlite3-harness.ts.
+    // Port of the real-driver check of the removed Electron harness (scripts/real-better-sqlite3-harness.ts).
     let db = Database::open_in_memory().unwrap();
     let c = db.conn();
     c.execute(
