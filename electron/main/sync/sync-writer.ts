@@ -127,14 +127,18 @@ export function flushOutbox(database: DbHandle): void {
       return;
     }
 
+    let filePath: string | null = null;
+    let lengthBefore = 0;
     try {
       const dataDir = getDataDir();
       fs.mkdirSync(getSyncDevicesDir(dataDir), { recursive: true });
-      const filePath = getOplogFilePath(dataDir, getDeviceId());
+      filePath = getOplogFilePath(dataDir, getDeviceId());
+      lengthBefore = fileLength(filePath);
       let text = rows.map((r) => `${r.line}\n`).join("");
       if (endsWithPartialLine(filePath)) text = `\n${text}`;
       fs.appendFileSync(filePath, text, "utf8");
     } catch (err) {
+      if (filePath !== null) undoPartialAppend(filePath, lengthBefore);
       setPublishPendingNotice(database, rows.length, err instanceof Error ? err.message : String(err));
       scheduleOutboxRetry(database);
       return;
@@ -146,6 +150,28 @@ export function flushOutbox(database: DbHandle): void {
   } catch (err) {
     console.warn("[sync] outbox flush failed:", err);
   }
+}
+
+function fileLength(filePath: string): number {
+  try {
+    return fs.statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+}
+
+/** Cuts the file back to its length before a failed append, so no torn fragment stays mid-file. */
+function undoPartialAppend(filePath: string, lengthBefore: number): void {
+  try {
+    if (fileLength(filePath) > lengthBefore) fs.truncateSync(filePath, lengthBefore);
+  } catch (err) {
+    console.warn("[sync] could not cut a failed append from the oplog:", err);
+  }
+}
+
+/** Flushes the outbox only while sync is on: a device that turned sync off publishes nothing. */
+export function flushOutboxIfSyncEnabled(database: DbHandle): void {
+  if (isSyncEnabled(database)) flushOutbox(database);
 }
 
 /** True when the file is non-empty and its last byte is not a newline (a torn last line). */
