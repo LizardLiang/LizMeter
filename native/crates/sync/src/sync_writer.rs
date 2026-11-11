@@ -109,7 +109,11 @@ impl SyncWriter {
     ) -> std::io::Result<()> {
         std::fs::create_dir_all(get_sync_devices_dir(&self.data_dir))?;
         let path = get_oplog_file_path(&self.data_dir, &self.device_id);
-        let length_before = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let length_before = match std::fs::metadata(&path) {
+            Ok(m) => Some(m.len()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(0),
+            Err(_) => None,
+        };
         let mut text: String = rows.iter().map(|(_, line)| format!("{line}\n")).collect();
         if ends_with_partial_line(&path) {
             text.insert(0, '\n');
@@ -208,8 +212,9 @@ impl SyncWriter {
     }
 }
 
-/// Cuts the file back to `length_before` after a failed append.
-fn undo_partial_append(path: &Path, length_before: u64) {
+/// Cuts the file back to `length_before` after a failed append. An unknown length cuts nothing.
+fn undo_partial_append(path: &Path, length_before: Option<u64>) {
+    let Some(length_before) = length_before else { return };
     let cut = std::fs::OpenOptions::new().write(true).open(path).and_then(|f| {
         if f.metadata()?.len() > length_before {
             f.set_len(length_before)?;
@@ -275,5 +280,23 @@ impl SyncHook for SyncWriter {
         if is_sync_enabled(conn).unwrap_or(false) {
             SyncWriter::flush_outbox(self, conn);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::undo_partial_append;
+
+    #[test]
+    fn an_unknown_length_cuts_nothing_and_a_known_length_cuts_the_tail() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.oplog.jsonl");
+        std::fs::write(&path, "history\ntorn").unwrap();
+
+        undo_partial_append(&path, None);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "history\ntorn");
+
+        undo_partial_append(&path, Some(8));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "history\n");
     }
 }
