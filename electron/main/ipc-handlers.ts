@@ -56,7 +56,7 @@ import {
   requiresUnsyncedDbConfirmation,
   writePendingSyncAction,
 } from "./sync/sync-manager.ts";
-import { flushOutbox, isSyncEnabled } from "./sync/sync-writer.ts";
+import { flushOutboxIfSyncEnabled, isSyncEnabled } from "./sync/sync-writer.ts";
 import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widget-window.ts";
 import { getMainWindow } from "./index.ts";
 import {
@@ -721,7 +721,7 @@ export function registerIpcHandlers(): void {
       }
 
       // Queued oplog lines go to the current folder's file before the folder changes, when it is reachable.
-      flushOutbox(getDb());
+      flushOutboxIfSyncEnabled(getDb());
 
       // Copying an open SQLite file can capture a half-written page, so fold the WAL back into
       // the main file and drop the connection before anything is read -- relocateDbToPrivateStorage

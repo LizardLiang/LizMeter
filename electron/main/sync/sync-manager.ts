@@ -30,7 +30,7 @@ import {
   writeSnapshotIfDue,
 } from "./snapshot.ts";
 import { scanForStrayFiles } from "./stray-files.ts";
-import { cancelOutboxRetry, flushOutbox, isSyncEnabled, setSyncEnabled } from "./sync-writer.ts";
+import { cancelOutboxRetry, flushOutbox, flushOutboxIfSyncEnabled, isSyncEnabled, setSyncEnabled } from "./sync-writer.ts";
 import { startWatching, type SyncWatcher } from "./watcher.ts";
 import type { SyncDeviceInfo, SyncStatus } from "../../../src/shared/types.ts";
 
@@ -173,7 +173,7 @@ export function stopSyncManager(): void {
 /** Last chance to publish queued lines. Called on `will-quit`, before the database closes. */
 export function flushOutboxOnQuit(): void {
   try {
-    flushOutbox(getDb());
+    flushOutboxIfSyncEnabled(getDb());
   } catch {
     // The database is already closed (a data-folder move closes it before the quit).
   }

@@ -30,6 +30,7 @@ import { createTwoDeviceHarness, type HarnessDevice, type TwoDeviceHarness } fro
 import { enableSyncOnExistingMachine } from "../migration.ts";
 import { listSyncNotices } from "../notices.ts";
 import { getOplogFilePath } from "../oplog.ts";
+import { flushOutboxOnQuit } from "../sync-manager.ts";
 import { flushOutbox, setSyncEnabled } from "../sync-writer.ts";
 
 let harness: TwoDeviceHarness;
@@ -233,6 +234,56 @@ describe("7f: a torn last line is healed", () => {
 
     harness.sync(harness.deviceB);
     expect(harness.as(harness.deviceB, () => listTags().map((t) => t.name))).toEqual(["after-tear"]);
+  });
+});
+
+describe("12a: a device with sync off publishes nothing at quit", () => {
+  it("keeps the queued lines out of the shared file", () => {
+    const blocker = blockSharedFolder();
+    harness.as(harness.deviceA, () => createTag({ name: "queued", color: "#7aa2f7" }));
+    expect(outboxCount(harness.deviceA)).toBeGreaterThan(0);
+
+    setSyncEnabled(harness.deviceA.db, false);
+    unblockSharedFolder(blocker);
+    harness.as(harness.deviceA, () => flushOutboxOnQuit());
+
+    expect(oplogLines(harness.deviceA)).toEqual([]);
+    expect(outboxCount(harness.deviceA)).toBeGreaterThan(0);
+  });
+
+  it("still publishes at quit while sync is on", () => {
+    const blocker = blockSharedFolder();
+    harness.as(harness.deviceA, () => createTag({ name: "queued", color: "#7aa2f7" }));
+    unblockSharedFolder(blocker);
+    harness.as(harness.deviceA, () => flushOutboxOnQuit());
+
+    expect(outboxCount(harness.deviceA)).toBe(0);
+    expect(oplogLines(harness.deviceA).length).toBeGreaterThan(0);
+  });
+});
+
+describe("12b: a failed append is undone before the retry", () => {
+  it("cuts the torn fragment off the file, then publishes every line whole", () => {
+    harness.as(harness.deviceA, () => createTag({ name: "before", color: "#7aa2f7" }));
+    const intact = fs.readFileSync(oplogPath(harness.deviceA), "utf8");
+
+    const realAppend = fs.appendFileSync.bind(fs);
+    const spy = vi.spyOn(fs, "appendFileSync").mockImplementationOnce((file, data, options) => {
+      realAppend(file, String(data).slice(0, 20), options as never);
+      throw new Error("disk full");
+    });
+    try {
+      harness.as(harness.deviceA, () => createTag({ name: "torn", color: "#7aa2f7" }));
+    } finally {
+      spy.mockRestore();
+    }
+    expect(fs.readFileSync(oplogPath(harness.deviceA), "utf8")).toBe(intact);
+    expect(outboxCount(harness.deviceA)).toBeGreaterThan(0);
+
+    harness.as(harness.deviceA, () => flushOutbox(harness.deviceA.db));
+    for (const line of oplogLines(harness.deviceA)) expect(() => JSON.parse(line)).not.toThrow();
+    harness.sync(harness.deviceB);
+    expect(harness.as(harness.deviceB, () => listTags().map((t) => t.name)).sort()).toEqual(["before", "torn"]);
   });
 });
 
