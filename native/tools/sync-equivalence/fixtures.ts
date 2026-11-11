@@ -198,6 +198,62 @@ function snapshotOrder(): Scenario {
   };
 }
 
+// --- text edge cases: what a Node peer writes for non-ASCII text, and how its lines are framed ---
+
+/** A 5000-unit title cut through an emoji: JSON.stringify writes the lone high surrogate as an escape. */
+export const CUT_TITLE = ("a".repeat(4999) + "\u{1F600}").slice(0, 5000);
+
+function textEdge(): Scenario {
+  const h = (ms: number, c: number, d: number): Hlc => hlc(BASE + ms, c, d);
+  const iso = (ms: number): string => new Date(BASE + ms).toISOString();
+  const T = (n: number): string => `text-todo-${n}`;
+  const BOM = "﻿";
+  const BACKSLASH = String.fromCharCode(92);
+
+  const d2: string[] = [
+    // The first line of a file carries a byte order mark: both engines trim it away (JS trim and U+FEFF).
+    BOM + upsert("tx-1", h(1, 0, 2), "todos", T(1), { title: "BOM first line", claimed_id: 1, created_at: iso(1) }),
+    upsert("tx-2", h(2, 0, 2), "todos", T(2), { title: "日本語 café ñ العربية", claimed_id: 2, created_at: iso(2) }),
+    upsert("tx-3", h(3, 0, 2), "todos", T(3), { title: "\u{1F345} focus \u{1F468}‍\u{1F469}‍\u{1F467}", notes: "emoji pair kept", claimed_id: 3, created_at: iso(3) }),
+    // A lone high surrogate (the cut title) and a lone low surrogate: Node writes each as an escape.
+    upsert("tx-4", h(4, 0, 2), "todos", T(4), { title: CUT_TITLE, claimed_id: 4, created_at: iso(4) }),
+    upsert("tx-5", h(5, 0, 2), "todos", T(5), { title: "\uDC00 low first", notes: "tail \uD83D", claimed_id: 5, created_at: iso(5) }),
+    // A backslash followed by text that looks like an escape is text, not a surrogate.
+    upsert("tx-6", h(6, 0, 2), "todos", T(6), { title: `${BACKSLASH}ud83d stays text`, claimed_id: 6, created_at: iso(6) }),
+    // CRLF framing, NBSP padding and an unescaped U+2028 inside a value.
+    upsert("tx-7", h(7, 0, 2), "todos", T(7), { title: "CRLF line", claimed_id: 7, created_at: iso(7) }) + "\r",
+    "  " + upsert("tx-8", h(8, 0, 2), "todos", T(8), { title: "padded by NBSP", claimed_id: 8, created_at: iso(8) }) + " \t",
+    upsert("tx-9", h(9, 0, 2), "todos", T(9), { title: "line" + String.fromCharCode(0x2028) + "separator", claimed_id: 9, created_at: iso(9) }),
+    upsert("tx-10", h(10, 0, 2), "tags", "tag-text", { name: "\u{1F516} tag é", color: "#7aa2f7", created_at: iso(10) }),
+  ];
+  const d3: string[] = [
+    upsert("tx-11", h(11, 0, 3), "todos", T(2), { notes: "later note \u{1F680}" }),
+    upsert("tx-12", h(12, 0, 3), "todos", T(3), { title: "\uD83D cut again" }),
+  ];
+  return { name: "text-edge", phase1: { [file(D2)]: d2 }, phase2: { [file(D3)]: d3 } };
+}
+
+/**
+ * The lines of a device's own oplog before its snapshot trims it: two aged entries (older than the
+ * 90-day window) and recent ones in the shapes both engines read the same way.
+ */
+export function trimLines(now: number): { aged: string[]; recent: string[] } {
+  const DAY = 86_400_000;
+  const old = (n: number): Hlc => hlc(now - 200 * DAY + n, 0, 7);
+  const fresh = (n: number): Hlc => hlc(now - DAY + n, 0, 7);
+  const when = (ms: number): string => new Date(ms).toISOString();
+  const aged = [
+    upsert("tr-old-1", old(1), "tags", "trim-tag-old", { name: "old tag", color: "#7aa2f7", created_at: when(now - 200 * DAY) }),
+    del("tr-old-2", old(2), "tags", "trim-tag-gone"),
+  ];
+  const recent = [
+    upsert("tr-new-1", fresh(1), "tags", "trim-tag-new", { name: "new tag \u{1F345}", color: "#9ece6a", created_at: when(now - DAY) }),
+    upsert("tr-new-2", fresh(2), "tags", "trim-tag-cut", { name: CUT_TITLE.slice(4990), color: "#bb9af7", created_at: when(now - DAY) }),
+    upsert("tr-new-3", fresh(3), "tags", "trim-tag-crlf", { name: "crlf", color: "#e0af68", created_at: when(now - DAY) }) + "\r",
+  ];
+  return { aged, recent };
+}
+
 // --- seeded fuzz: random but valid-looking entries, heavy on collisions and ties ---
 
 function mulberry32(seed: number): () => number {
@@ -311,5 +367,5 @@ function fuzz(seed: number, entriesPerFile: number): Scenario {
 }
 
 export function makeScenarios(fuzzSeeds: number[] = [1, 2, 3, 4, 5, 6], entriesPerFile = 120): Scenario[] {
-  return [basics(), snapshotOrder(), ...fuzzSeeds.map((s) => fuzz(s, entriesPerFile))];
+  return [basics(), snapshotOrder(), textEdge(), ...fuzzSeeds.map((s) => fuzz(s, entriesPerFile))];
 }

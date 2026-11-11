@@ -105,6 +105,10 @@ function same(label, left, right) {
   if (a && typeof a === "object" && !Array.isArray(a)) {
     for (const key of new Set([...Object.keys(a), ...Object.keys(b ?? {})])) {
       if (JSON.stringify(a[key]) === JSON.stringify(b?.[key])) continue;
+      if (!Array.isArray(a[key]) || !Array.isArray(b?.[key])) {
+        report.push(`  ${key}: TS ${JSON.stringify(a[key])} / Rust ${JSON.stringify(b?.[key])}`);
+        continue;
+      }
       const ra = new Set((a[key] ?? []).map((r) => JSON.stringify(r)));
       const rb = new Set((b?.[key] ?? []).map((r) => JSON.stringify(r)));
       report.push(`  table ${key}:`);
@@ -242,7 +246,71 @@ ts.tsClose();
 }
 ts.tsClose();
 
-console.log(`PASS sync equivalence: ${scenarios.length} fixture scenarios (${fixtureRows} dumped rows), 1 mixed two-device run`);
+// --- (c) own-oplog trim: the snapshot drops this device's entries older than the retention window ---
+// Both engines must keep the same entries (read back through JSON.parse, so a CRLF or a lone surrogate
+// escape is compared as the entry it carries). The Rust engine also keeps a line it cannot parse byte for
+// byte (a newer schema version, a torn write); the TypeScript engine re-serializes the lines it parses and
+// drops the rest, so those two lines go to the Rust file only.
+{
+  const root = path.join(tmpRoot, "trim");
+  const t = device(root, "ts");
+  const r = device(root, "rs");
+  t.shared = path.join(root, "shared-ts");
+  r.shared = path.join(root, "shared-rs");
+  ts.tsSetup(t, "originate");
+  rs("setup", r, ["--role", "originate"]);
+
+  const { aged, recent } = ts.trimLines(Date.now());
+  const futureLine = JSON.stringify({ v: 2, opId: "tr-future", hlc: { physicalMs: Date.now(), counter: 0, deviceNumber: 7 }, table: "tags", op: "delete", rowUuid: "x" });
+  const torn = '{"v":1,"opId":"tr-torn","hlc":{"physicalMs":';
+  const own = (d) => path.join(d.shared, "sync", "devices", `${readJson(path.join(d.userData, "device-identity.json")).deviceId}.oplog.jsonl`);
+  const lines = [...aged, ...recent];
+  fs.writeFileSync(own(t), lines.join("\n") + "\n", "utf8");
+  fs.writeFileSync(own(r), [...lines, futureLine, torn].join("\n") + "\n", "utf8");
+
+  assert.equal(ts.tsWriteSnapshot(t), true, "TS wrote a snapshot");
+  assert.equal(rs("write-snapshot", r).wrote, true, "Rust wrote a snapshot");
+
+  const entries = (file) =>
+    fs.readFileSync(file, "utf8").split("\n").map((l) => l.trim()).filter((l) => l !== "").flatMap((l) => {
+      try {
+        return [JSON.parse(l)];
+      } catch {
+        return [];
+      }
+    });
+  const kept = (file) => entries(file).filter((e) => e.opId !== "tr-future");
+  same("own oplog after the trim: the entries both engines keep", kept(own(t)), kept(own(r)));
+  assert.deepEqual(kept(own(r)).map((e) => e.opId).sort(), recent.map((_, i) => `tr-new-${i + 1}`), "only the aged entries are gone");
+
+  const rawRust = fs.readFileSync(own(r), "utf8");
+  assert.ok(rawRust.includes(futureLine + "\n"), "Rust keeps a newer-version line byte for byte");
+  assert.ok(rawRust.includes(torn + "\n"), "Rust keeps a torn line byte for byte");
+  assert.ok(rawRust.includes(recent[2]), "Rust keeps the CRLF line byte for byte");
+  console.log(`PASS own-oplog trim: both engines keep ${recent.length} recent entries; Rust keeps its unparsable lines verbatim`);
+}
+ts.tsClose();
+
+// --- (d) a missing shared folder: the merge is a no-op on both engines and neither creates the folder ---
+{
+  const root = path.join(tmpRoot, "missing");
+  const t = device(root, "ts");
+  const r = device(root, "rs");
+  t.shared = path.join(root, "gone-ts", "shared");
+  r.shared = path.join(root, "gone-rs", "shared");
+  ts.tsInit(t);
+  rs("init", r);
+  const a = ts.tsMerge(t);
+  const b = rs("merge", r) ?? { applied: 0, skipped: 0, notices: 0 };
+  assert.equal(a.ok, true, `TS merge on a missing folder: ${a.error}`);
+  same("merge result on a missing shared folder", { applied: a.applied, skipped: a.skipped, notices: a.notices }, b);
+  assert.equal(b.applied, 0);
+  assert.equal(fs.existsSync(path.join(root, "gone-rs", "shared", "sync")), false, "Rust created no sync folder in a missing shared folder");
+  console.log("PASS missing shared folder: both merges are no-ops");
+}
+ts.tsClose();
+
+console.log(`PASS sync equivalence: ${scenarios.length} fixture scenarios (${fixtureRows} dumped rows), 1 mixed two-device run, own-oplog trim, missing folder`);
 console.log(`temp folder: ${tmpRoot}`);
 fs.rmSync(bundleDir, { recursive: true, force: true });
 if (!argv.includes("--keep")) fs.rmSync(tmpRoot, { recursive: true, force: true });
