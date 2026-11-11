@@ -1,8 +1,8 @@
 ---
 created: 2026-08-29T23:27:44+08:00
-updated: 2026-08-29T23:27:44+08:00
+updated: 2026-11-11T13:37:33+08:00
 author: athena
-git_hash: 4d36aec
+git_hash: 9d09507
 capability: todo-sync
 ---
 
@@ -136,3 +136,66 @@ The system SHALL refuse an MCP write that names a todo id whose identity no long
 
 - **WHEN** a caller lists todos and updates one by id with no reassignment in between
 - **THEN** the write succeeds
+
+### Requirement: Oplog lines publish only after commit
+
+The system SHALL write a synced change's oplog line to the device's oplog file only after the SQL transaction that made the change has committed.
+
+#### Scenario: A write fails after its record call
+
+- **WHEN** a todo create records its upsert and a later step in the same transaction fails
+- **THEN** the transaction rolls back and no line for that todo reaches the oplog file
+
+### Requirement: Every committed change is published
+
+The system SHALL keep each committed change's oplog line in a local outbox until it has been appended to the oplog file, and SHALL retry after commit, at startup, every 30 seconds while lines are pending, before trimming its own oplog, and on quit.
+
+#### Scenario: Shared folder unreachable
+
+- **WHEN** the user edits a todo while the sync folder cannot be written
+- **THEN** the edit is saved locally, the line stays pending, and it is appended in order once the folder can be written again
+
+### Requirement: A repeated publish is harmless
+
+The system SHALL tolerate the same oplog line appearing twice in a device's file, applying it once on every peer.
+
+#### Scenario: Crash between append and outbox cleanup
+
+- **WHEN** the app stops after appending pending lines but before removing them from the outbox
+- **THEN** the next start appends them again and each peer applies every opId only once
+
+### Requirement: Deletes publish with the delete
+
+The system SHALL record a delete's tombstone in the same transaction as the row delete.
+
+#### Scenario: Crash right after a delete
+
+- **WHEN** the app stops right after a todo delete commits
+- **THEN** the tombstone line is published at the next start and peers delete the todo
+
+### Requirement: First sync publish resumes after a crash
+
+The system SHALL turn sync on and queue the publish of existing rows in one transaction.
+
+#### Scenario: Crash while enabling sync
+
+- **WHEN** the app stops while publishing existing rows for the first time
+- **THEN** either sync is still off with nothing queued, or every row is published at the next start
+
+### Requirement: Publish failure keeps the local edit
+
+The system SHALL NOT fail a local write because its oplog line could not be appended, and SHALL show one sync notice with the count of pending changes until they are published.
+
+#### Scenario: Notice clears after recovery
+
+- **WHEN** pending lines are appended successfully
+- **THEN** the pending-publish notice disappears
+
+### Requirement: Outbox is local and identical in both engines
+
+The system SHALL store pending lines in a local-only table `sync_outbox` with the same schema in the Electron and native engines, never publishing that table itself.
+
+#### Scenario: Schema equality
+
+- **WHEN** a fresh and an upgraded database are dumped by both engines
+- **THEN** both contain the same `sync_outbox` definition and the snapshot contains no outbox rows
