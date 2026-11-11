@@ -8,6 +8,7 @@
 use lizmeter_db::data_location::{same_path, DataLocation, ATTACHMENTS_DIR_NAME, DB_FILE_NAME};
 use lizmeter_sync::oplog::{get_sync_devices_dir, OPLOG_SUFFIX};
 use sha2::{Digest, Sha256};
+use crate::os::guard::{find_electron_process, ElectronMatcher, SingleWriterGuard};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -18,10 +19,10 @@ pub const SOAK_SYNC_DIR_NAME: &str = "lizmeter-soak-sync";
 /// Pipe the soak app serves, so a running Electron or native app keeps the default pipe.
 pub const SOAK_PIPE_PATH: &str = "\\\\.\\pipe\\lizmeter-soak";
 
-/// Files of the per-user folder a soak copy keeps. Tokens, the lock files, the music cache and
-/// avatars stay behind: the soak profile carries its own.
-const COPIED_FILES: [&str; 5] =
-    [DB_FILE_NAME, "lizmeter.db-wal", "lizmeter.db-shm", "device-identity.json", "sync-adopted.json"];
+/// Files of the per-user folder a soak copy keeps besides the database. Tokens, the lock files, the
+/// music cache and avatars stay behind: the soak profile carries its own. The database itself is
+/// copied with `VACUUM INTO`, never file by file.
+const COPIED_FILES: [&str; 2] = ["device-identity.json", "sync-adopted.json"];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SoakPaths {
@@ -185,15 +186,15 @@ pub fn setup(source: &Path, soak: &Path, sync: &Path, roots: &[PathBuf]) -> Resu
     if dir_has_entries(soak) {
         return Err(SoakError::SoakNotEmpty(soak.to_path_buf()));
     }
+    let _held = hold_source(source, &source_sync)?;
     fs::create_dir_all(soak)?;
     fs::create_dir_all(sync)?;
 
-    let db_dir = source_db.parent().map(Path::to_path_buf).unwrap_or_else(|| source.to_path_buf());
     let mut copied = Vec::new();
+    vacuum_into(&source_db, &soak.join(DB_FILE_NAME))?;
+    copied.push(DB_FILE_NAME.to_string());
     for name in COPIED_FILES {
-        // The database files come from where the source keeps them, the identity files from the profile.
-        let dir: &Path = if name.starts_with("lizmeter.db") { &db_dir } else { source };
-        let from = dir.join(name);
+        let from = source.join(name);
         if from.is_file() {
             fs::copy(&from, soak.join(name))?;
             copied.push(name.to_string());
@@ -209,6 +210,40 @@ pub fn setup(source: &Path, soak: &Path, sync: &Path, roots: &[PathBuf]) -> Resu
     let device_identity_kept = soak.join("device-identity.json").is_file();
     let baseline = check(soak).ok().map(|r| (r.todo_count, r.ids_digest));
     Ok(SetupReport { soak: soak.to_path_buf(), sync: sync.to_path_buf(), copied, attachments_copied, device_identity_kept, baseline })
+}
+
+/// Refuses while a LizMeter writes the source: the native single-writer mutex on the per-user folder
+/// and on the data folder, and a running Electron LizMeter when the source is `%APPDATA%\lizmeter`.
+/// The returned guards keep a native app from starting while the copy runs. No file is written
+/// into the source.
+fn hold_source(source: &Path, data_dir: &Path) -> Result<Vec<SingleWriterGuard>, SoakError> {
+    let busy = |what: String| {
+        SoakError::Other(format!("{what} Close every LizMeter, then run setup again. The soak copy was not made."))
+    };
+    let mut held = Vec::new();
+    let mut dirs = vec![source];
+    if !same_path(data_dir, source) {
+        dirs.push(data_dir);
+    }
+    for dir in dirs {
+        held.push(SingleWriterGuard::acquire_mutex_only(dir).map_err(|e| busy(e.to_string()))?);
+    }
+    let electron_dir = std::env::var_os("APPDATA").map(|a| PathBuf::from(a).join("lizmeter"));
+    if electron_dir.is_some_and(|d| same_path(&d, source)) {
+        if let Some((pid, exe)) = find_electron_process(&ElectronMatcher::default()) {
+            return Err(busy(format!("The Electron LizMeter is running (process {pid}, {}).", exe.display())));
+        }
+    }
+    Ok(held)
+}
+
+/// Writes a consistent copy of the database at `to` from a read-only connection: the pages and the
+/// WAL are read together by SQLite, so the copy never pairs a database file with a WAL of another moment.
+fn vacuum_into(from: &Path, to: &Path) -> Result<(), SoakError> {
+    let fail = |e: String| SoakError::Other(format!("Could not copy the database ({e}). Close every LizMeter and run setup again."));
+    let conn = rusqlite::Connection::open_with_flags(from, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| fail(e.to_string()))?;
+    conn.execute("VACUUM INTO ?1", [to.to_string_lossy().as_ref()]).map_err(|e| fail(e.to_string()))?;
+    Ok(())
 }
 
 /// Opens the copied database read-only and runs SQLite's quick check. A copy taken while an app
@@ -379,6 +414,37 @@ mod tests {
         assert!(rep.is_clean());
         assert_eq!(rep.other_notices, vec![("stray-file".to_string(), 1)]);
         assert_eq!(rep.ids_digest.len(), 16);
+    }
+
+    #[test]
+    fn setup_copies_the_database_through_sqlite_not_file_by_file() {
+        let t = tempfile::tempdir().unwrap();
+        let p = paths_under(t.path());
+        fake_profile(&p.source, None);
+        // A connection that stays open keeps un-checkpointed commits in the source's -wal.
+        let open = lizmeter_db::Database::open(p.source.join(DB_FILE_NAME)).unwrap();
+        open.conn().execute("INSERT INTO todos (title, created_at) VALUES ('three', 't')", []).unwrap();
+        let before = fs::read(p.source.join(DB_FILE_NAME)).unwrap();
+
+        // The open connection is not a LizMeter guard holder, so setup proceeds.
+        let report = setup(&p.source, &p.soak, &p.sync, &[]).unwrap();
+        assert_eq!(report.baseline.as_ref().map(|b| b.0), Some(3), "the WAL commit is in the copy");
+        assert!(!p.soak.join("lizmeter.db-wal").exists() && !p.soak.join("lizmeter.db-shm").exists());
+        assert!(!report.copied.iter().any(|f| f.ends_with("-wal") || f.ends_with("-shm")));
+        assert_eq!(fs::read(p.source.join(DB_FILE_NAME)).unwrap(), before, "the source database file is untouched");
+    }
+
+    #[test]
+    fn setup_refuses_while_a_native_app_holds_the_source() {
+        let t = tempfile::tempdir().unwrap();
+        let p = paths_under(t.path());
+        fake_profile(&p.source, None);
+        let guard = SingleWriterGuard::acquire_mutex_only(&p.source).unwrap();
+        let e = setup(&p.source, &p.soak, &p.sync, &[]).unwrap_err();
+        assert!(e.to_string().contains("already running"), "{e}");
+        assert!(!p.soak.exists(), "nothing was written");
+        drop(guard);
+        setup(&p.source, &p.soak, &p.sync, &[]).unwrap();
     }
 
     #[test]
