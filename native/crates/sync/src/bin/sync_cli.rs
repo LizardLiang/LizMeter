@@ -10,6 +10,7 @@
 //!   merge           --db F --user-data U --shared S      one merge pass, prints {applied,...}
 //!   edit            --db F --user-data U --shared S --seed N --ops K
 //!   clear-scenario  --db F --user-data U --shared S --tag T   two done todos (one with a child), one open, then "Clear done"
+//!   outbox-scenario --db F --user-data U --shared S --name N   one outbox scenario, prints the shared JSON shape
 //!   dump            --db F --out O --mode fixture|mixed
 //!   snapshot-entries --db F --out O
 //!   write-snapshot  --db F --user-data U --shared S
@@ -99,6 +100,7 @@ fn run(command: &str, args: &Args) -> Res<()> {
         }
         "edit" => edit(args),
         "clear-scenario" => clear_scenario(args),
+        "outbox-scenario" => outbox_scenario(args),
         "dump" => {
             let db = open_db(args)?;
             let mixed = args.get("mode")? == "mixed";
@@ -148,6 +150,156 @@ fn clear_scenario(args: &Args) -> Res<()> {
     }
     let cleared = db.clear_completed_todos()?;
     println!("{}", json!({ "cleared": cleared.count }));
+    Ok(())
+}
+
+fn init_sync_device(db: &Database) -> Res<()> {
+    db.conn().execute(
+        "UPDATE todo_states SET uuid = 'seed-state-' || id, created_at = '2026-01-01T00:00:00.000Z'",
+        [],
+    )?;
+    db.conn().execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('sync.deviceNumber', '941')", [])?;
+    set_sync_enabled(db.conn(), true)?;
+    Ok(())
+}
+
+fn scalar(db: &Database, sql: &str) -> Res<i64> {
+    Ok(db.conn().query_row(sql, [], |r| r.get(0))?)
+}
+
+fn sorted_strings(mut v: Vec<String>) -> Vec<String> {
+    v.sort();
+    v
+}
+
+fn checkpoint(db: &Database) -> Res<Value> {
+    let mut stmt = db.conn().prepare("SELECT message FROM sync_notices WHERE kind = 'publish-pending'")?;
+    let notices: Vec<String> = stmt.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+    Ok(json!({
+        "outbox": scalar(db, "SELECT COUNT(*) FROM sync_outbox")?,
+        "notices": notices,
+        "tags": sorted_strings(db.list_tags()?.into_iter().map(|t| t.name).collect()),
+        "todos": sorted_strings(db.list_todos(&ListTodosInput::default())?.into_iter().map(|t| t.title).collect()),
+    }))
+}
+
+fn own_oplog(args: &Args, writer: &SyncWriter) -> Res<Vec<String>> {
+    let file = lizmeter_sync::oplog::get_oplog_file_path(&args.path("shared")?, writer.device_id());
+    Ok(match std::fs::read_to_string(file) {
+        Ok(text) => text.split('\n').filter(|l| !l.is_empty()).map(String::from).collect(),
+        Err(_) => vec![],
+    })
+}
+
+fn block_shared(args: &Args) -> Res<PathBuf> {
+    let blocker = args.path("shared")?.join("sync");
+    let _ = std::fs::remove_dir_all(&blocker);
+    std::fs::write(&blocker, "not a folder")?;
+    Ok(blocker)
+}
+
+/// A fresh sync-enabled device in a different database merges the shared folder twice.
+fn peer_view(args: &Args) -> Res<Value> {
+    let shared = args.path("shared")?;
+    let mut peer_db = args.path("db")?.into_os_string();
+    peer_db.push(".peer");
+    let mut peer_user = args.path("user-data")?.into_os_string();
+    peer_user.push("-peer");
+    let peer_user = PathBuf::from(peer_user);
+    std::fs::create_dir_all(&peer_user)?;
+    let writer = SyncWriter::new(&shared, &peer_user)?;
+    let db = Database::open_with_sync(PathBuf::from(peer_db), Box::new(writer.clone()))?;
+    init_sync_device(&db)?;
+    let first = run_merge_pass(db.conn(), &shared, writer.device_id())?;
+    let second = run_merge_pass(db.conn(), &shared, writer.device_id())?;
+    Ok(json!({
+        "firstApplied": first.applied,
+        "secondApplied": second.applied,
+        "appliedOps": scalar(&db, "SELECT COUNT(*) FROM sync_applied_ops")?,
+        "tags": sorted_strings(db.list_tags()?.into_iter().map(|t| t.name).collect()),
+        "todos": sorted_strings(db.list_todos(&ListTodosInput::default())?.into_iter().map(|t| t.title).collect()),
+    }))
+}
+
+/// Mirrors `tsOutboxScenario` in `native/tools/sync-equivalence/outbox.ts`.
+fn outbox_scenario(args: &Args) -> Res<()> {
+    let shared = args.path("shared")?;
+    let writer = SyncWriter::new(&shared, &args.path("user-data")?)?;
+    let db = Database::open_with_sync(args.path("db")?, Box::new(writer.clone()))?;
+    let tag = |name: &str| CreateTagInput { name: name.into(), color: "#7aa2f7".into() };
+    let todo = |title: &str| CreateTodoInput { title: title.into(), ..Default::default() };
+
+    let result = match args.get("name")? {
+        "enable-sync-resume" => {
+            db.create_todo(&todo("one"))?;
+            db.create_todo(&todo("two"))?;
+            db.create_tag(&tag("tag-one"))?;
+            let blocker = block_shared(args)?;
+            enable_sync_on_existing_machine(db.conn(), None, &shared, &writer)?;
+            let enabled: Option<String> = db
+                .conn()
+                .query_row("SELECT value FROM settings WHERE key = 'sync.enabled'", [], |r| r.get(0))
+                .ok();
+            let mut blocked = checkpoint(&db)?;
+            blocked["enabled"] = json!(enabled);
+            std::fs::remove_file(blocker)?;
+            db.flush_outbox();
+            json!({ "blocked": blocked, "recovered": checkpoint(&db)?, "oplog": own_oplog(args, &writer)?, "peer": peer_view(args)? })
+        }
+        "write-fails-after-record" => {
+            init_sync_device(&db)?;
+            db.conn().execute_batch(
+                "CREATE TRIGGER fail_clock BEFORE INSERT ON sync_field_clocks BEGIN SELECT RAISE(ABORT, 'boom'); END",
+            )?;
+            let failed = db.create_tag(&tag("ghost")).is_err();
+            let after_failure = checkpoint(&db)?;
+            let oplog_after_failure = own_oplog(args, &writer)?;
+            db.conn().execute_batch("DROP TRIGGER fail_clock")?;
+            db.create_tag(&tag("kept"))?;
+            json!({
+                "failed": failed,
+                "afterFailure": after_failure,
+                "oplogAfterFailure": oplog_after_failure,
+                "final": checkpoint(&db)?,
+                "oplog": own_oplog(args, &writer)?,
+                "peer": peer_view(args)?,
+            })
+        }
+        "unreachable-then-recovers" => {
+            init_sync_device(&db)?;
+            let blocker = block_shared(args)?;
+            db.create_todo(&todo("first"))?;
+            db.create_tag(&tag("t"))?;
+            db.create_todo(&todo("second"))?;
+            let blocked = checkpoint(&db)?;
+            let oplog_while_blocked = shared.join("sync").join("devices").exists();
+            std::fs::remove_file(blocker)?;
+            db.flush_outbox();
+            json!({
+                "blocked": blocked,
+                "oplogWhileBlocked": oplog_while_blocked,
+                "recovered": checkpoint(&db)?,
+                "oplog": own_oplog(args, &writer)?,
+                "peer": peer_view(args)?,
+            })
+        }
+        "duplicate-flush" => {
+            init_sync_device(&db)?;
+            db.create_tag(&tag("deep"))?;
+            db.create_todo(&todo("x"))?;
+            let once = own_oplog(args, &writer)?;
+            for line in &once {
+                db.conn().execute(
+                    "INSERT INTO sync_outbox (line, created_at) VALUES (?, ?)",
+                    rusqlite::params![line, "2026-01-01T00:00:00.000Z"],
+                )?;
+            }
+            db.flush_outbox();
+            json!({ "onceLength": once.len(), "final": checkpoint(&db)?, "oplog": own_oplog(args, &writer)?, "peer": peer_view(args)? })
+        }
+        other => return Err(format!("unknown outbox scenario {other}").into()),
+    };
+    println!("{result}");
     Ok(())
 }
 

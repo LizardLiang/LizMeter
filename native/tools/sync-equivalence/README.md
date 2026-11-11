@@ -29,6 +29,16 @@ cd .. && node native/tools/sync-equivalence/run.mjs [--tmp <dir>] [--keep] [--fu
 | (c) own-oplog trim | a device's own oplog holding aged and recent entries (emoji, a cut title, a CRLF line) | after `write-snapshot`, both engines keep the same entries. The Rust file also keeps a newer-version line and a torn line byte for byte (the TypeScript engine drops lines it cannot parse) |
 | (d) missing shared folder | both engines merge against a shared folder that does not exist | a merge of 0 entries on both, and Rust creates no folder |
 
+## Outbox scenarios
+
+`outbox.mjs` runs four scenarios on each engine, on its own device and shared folder, and compares the
+result: write-fails-after-record, unreachable-then-recovers, duplicate-flush, enable-sync-resume. Run it
+the same way as `run.mjs` (`node native/tools/sync-equivalence/outbox.mjs`). Per scenario it compares the
+device's oplog file (opId, hlc, uuids and timestamps masked), the outbox count and the publish-pending
+notice text at every checkpoint, the tag and todo titles, and what a fresh peer device applies when it
+merges the folder twice. The TypeScript side is `outbox.ts`; the Rust side is `outbox-scenario` in
+`sync_cli.rs`.
+
 ## What is left out, and why
 
 - Device-local ids and `position`: only uuids and `sync_order` are shared. Foreign keys are compared as uuids.
