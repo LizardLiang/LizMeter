@@ -22,7 +22,7 @@ mod startup;
 pub mod worklog_merge;
 
 pub use error::{Result, ServiceError};
-pub use startup::StartupReport;
+pub use startup::{ensure_data_dir_available, DataDirChoice, StartupReport};
 
 use claude_tracker::{ClaudeTracker, PollOutput, ScanResult};
 use error::fail;

@@ -407,13 +407,64 @@ fn open_services(data_dir: Option<PathBuf>) -> Arc<Services> {
     use lizmeter_services::os::WindowsHost;
     let dir = data_dir.unwrap_or_else(DataLocation::default_user_data_dir);
     let _ = std::fs::create_dir_all(&dir);
-    match Services::open_guarded(DataLocation::new(dir), Arc::new(WindowsHost::default()), default_projects_root()) {
+    let location = DataLocation::new(dir);
+    // A custom data folder that has gone away (unplugged drive, signed-out cloud folder) is the
+    // user's call: opening it would create an empty database there.
+    match lizmeter_services::ensure_data_dir_available(&location, &mut ask_missing_data_dir) {
+        Ok(true) => {}
+        Ok(false) => std::process::exit(0),
+        Err(e) => {
+            show_fatal(&e.to_string());
+            std::process::exit(1);
+        }
+    }
+    match Services::open_guarded(location, Arc::new(WindowsHost::default()), default_projects_root()) {
         Ok((svc, _report)) => svc,
         Err(e) => {
             show_fatal(&e.to_string());
             std::process::exit(1);
         }
     }
+}
+
+/// The "Data Folder Not Found" prompt. A Win32 Cancel / Try Again / Continue box: Try Again retries,
+/// Continue goes back to the default folder, Cancel quits.
+#[cfg(target_os = "windows")]
+fn ask_missing_data_dir(status: &lizmeter_core::DataLocationInfo) -> lizmeter_services::DataDirChoice {
+    use lizmeter_services::DataDirChoice;
+    use windows::core::PCWSTR;
+    use windows::Win32::UI::WindowsAndMessaging::{
+        IDCONTINUE, IDTRYAGAIN, MB_CANCELTRYCONTINUE, MB_DEFBUTTON1, MB_ICONWARNING, MB_SETFOREGROUND, MessageBoxW,
+    };
+    let wide = |s: &str| s.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let text = wide(&format!(
+        "LizMeter cannot find its data folder.\n\n{}\n\nThe drive may not be connected. Reconnect it, then choose Try Again.\n\
+         Choose Continue to go back to the default folder:\n{}\n\n\
+         Going back to the default folder does not delete anything.\nCancel quits LizMeter.",
+        status.data_dir, status.default_data_dir
+    ));
+    let title = wide("Data Folder Not Found");
+    let answer = unsafe {
+        MessageBoxW(
+            None,
+            PCWSTR(text.as_ptr()),
+            PCWSTR(title.as_ptr()),
+            MB_CANCELTRYCONTINUE | MB_DEFBUTTON1 | MB_ICONWARNING | MB_SETFOREGROUND,
+        )
+    };
+    if answer == IDTRYAGAIN {
+        DataDirChoice::Retry
+    } else if answer == IDCONTINUE {
+        DataDirChoice::UseDefault
+    } else {
+        DataDirChoice::Quit
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn ask_missing_data_dir(status: &lizmeter_core::DataLocationInfo) -> lizmeter_services::DataDirChoice {
+    eprintln!("LizMeter cannot find its data folder: {}", status.data_dir);
+    lizmeter_services::DataDirChoice::Quit
 }
 
 #[cfg(target_os = "windows")]

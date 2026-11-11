@@ -504,3 +504,68 @@ fn the_same_bytes_attached_under_two_extensions_leave_no_file_behind() {
     let left = std::fs::read_dir(r.svc.data_dir().join("attachments")).unwrap().count();
     assert_eq!(left, 0);
 }
+
+// --- missing custom data folder at startup ---
+
+fn missing_folder_profile() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf, std::path::PathBuf) {
+    let tmp = tempfile::tempdir().unwrap();
+    let user_data = tmp.path().join("userData");
+    std::fs::create_dir_all(&user_data).unwrap();
+    let missing = tmp.path().join("OneDrive").join("LizMeterData");
+    lizmeter_db::data_location::DataLocation::new(&user_data).set_custom_data_dir(&missing).unwrap();
+    let projects = tmp.path().join("projects");
+    (tmp, user_data, missing, projects)
+}
+
+#[test]
+fn open_never_creates_a_database_in_a_missing_custom_folder() {
+    let (_tmp, user_data, missing, projects) = missing_folder_profile();
+    let host = std::sync::Arc::new(lizmeter_services::os::RecordingHost::default());
+    let err = lizmeter_services::Services::open(lizmeter_db::data_location::DataLocation::new(&user_data), host, &projects)
+        .err()
+        .expect("a missing custom folder is refused");
+    assert!(err.to_string().contains("data folder was not found"), "{err}");
+    assert!(!missing.exists(), "nothing was created at the missing folder");
+    assert!(!missing.parent().unwrap().exists());
+}
+
+#[test]
+fn startup_prompt_retry_picks_up_a_folder_that_came_back() {
+    use lizmeter_services::DataDirChoice;
+    let (_tmp, user_data, missing, _p) = missing_folder_profile();
+    let location = lizmeter_db::data_location::DataLocation::new(&user_data);
+    let mut asked = 0;
+    let ok = lizmeter_services::ensure_data_dir_available(&location, &mut |status| {
+        asked += 1;
+        assert!(!status.available && status.is_custom);
+        std::fs::create_dir_all(&missing).unwrap();
+        DataDirChoice::Retry
+    })
+    .unwrap();
+    assert!(ok);
+    assert_eq!(asked, 1);
+    assert!(location.get_data_dir_status().is_custom, "the pointer is kept");
+}
+
+#[test]
+fn startup_prompt_use_default_forgets_the_pointer_and_deletes_nothing() {
+    use lizmeter_services::DataDirChoice;
+    let (_tmp, user_data, missing, _p) = missing_folder_profile();
+    let location = lizmeter_db::data_location::DataLocation::new(&user_data);
+    let ok = lizmeter_services::ensure_data_dir_available(&location, &mut |_| DataDirChoice::UseDefault).unwrap();
+    assert!(ok);
+    assert!(!location.get_data_dir_status().is_custom);
+    assert!(!missing.exists());
+}
+
+#[test]
+fn startup_prompt_quit_and_no_prompt_when_the_folder_is_there() {
+    use lizmeter_services::DataDirChoice;
+    let (_tmp, user_data, missing, _p) = missing_folder_profile();
+    let location = lizmeter_db::data_location::DataLocation::new(&user_data);
+    assert!(!lizmeter_services::ensure_data_dir_available(&location, &mut |_| DataDirChoice::Quit).unwrap());
+    assert!(location.get_data_dir_status().is_custom, "quit keeps the pointer");
+    std::fs::create_dir_all(&missing).unwrap();
+    location.invalidate_data_dir_cache();
+    assert!(lizmeter_services::ensure_data_dir_available(&location, &mut |_| panic!("no prompt")).unwrap());
+}

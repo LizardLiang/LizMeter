@@ -36,6 +36,38 @@ impl Notifier for HostNotifier {
     }
 }
 
+/// The user's answer to the "data folder not found" prompt (`ensureDataDirAvailable` in `index.ts`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DataDirChoice {
+    Retry,
+    UseDefault,
+    Quit,
+}
+
+/// Blocks startup while the custom data folder is missing, as `ensureDataDirAvailable` does:
+/// opening anything there would create an empty database that reads as total data loss. `ask`
+/// shows the prompt for the folder status. Returns false when the app should quit. Retry
+/// re-reads the folder, Use Default forgets the pointer and keeps every file where it is.
+pub fn ensure_data_dir_available(
+    location: &DataLocation,
+    ask: &mut dyn FnMut(&lizmeter_core::DataLocationInfo) -> DataDirChoice,
+) -> Result<bool> {
+    loop {
+        let status = location.get_data_dir_status();
+        if !status.is_custom || status.available {
+            return Ok(true);
+        }
+        match ask(&status) {
+            DataDirChoice::Retry => location.invalidate_data_dir_cache(),
+            DataDirChoice::UseDefault => {
+                location.clear_custom_data_dir()?;
+                return Ok(true);
+            }
+            DataDirChoice::Quit => return Ok(false),
+        }
+    }
+}
+
 impl Services {
     /// Opens the data folder's database with the sync engine attached, applies a sync action the
     /// last session deferred, and sweeps orphan attachment blobs. The caller holds the
@@ -45,6 +77,12 @@ impl Services {
         host: Arc<dyn Host>,
         projects_root: impl Into<PathBuf>,
     ) -> Result<(Arc<Services>, StartupReport)> {
+        // Nothing below may run against a missing custom folder: it would create an empty database
+        // there. The caller resolves this first with `ensure_data_dir_available`.
+        let status = location.get_data_dir_status();
+        if status.is_custom && !status.available {
+            return Err(ServiceError::Message(format!("The data folder was not found: {}", status.data_dir)));
+        }
         let location = Arc::new(location);
         let user_data_dir = location.default_data_dir().to_path_buf();
         let user_data_dir_copy = user_data_dir.clone();
