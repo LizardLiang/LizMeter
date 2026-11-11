@@ -44,6 +44,34 @@ pub enum DataDirChoice {
     Quit,
 }
 
+/// The words of the "data folder not found" prompt, the same text `ensureDataDirAvailable` shows.
+/// `buttons` run in the order Retry, Use Default, Quit; the Quit button is also the cancel answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingDataDirPrompt {
+    pub title: &'static str,
+    pub message: &'static str,
+    pub detail: String,
+    pub buttons: [&'static str; 3],
+}
+
+pub fn missing_data_dir_prompt(status: &lizmeter_core::DataLocationInfo) -> MissingDataDirPrompt {
+    MissingDataDirPrompt {
+        title: "Data Folder Not Found",
+        message: "LizMeter cannot find its data folder.",
+        detail: [
+            status.data_dir.as_str(),
+            "",
+            "The drive may not be connected. Reconnect it and retry, or go back to the default folder:",
+            status.default_data_dir.as_str(),
+            "",
+            "Going back to the default folder does not delete anything.",
+        ]
+        .join("
+"),
+        buttons: ["Retry", "Use Default Folder", "Quit"],
+    }
+}
+
 /// Blocks startup while the custom data folder is missing, as `ensureDataDirAvailable` does:
 /// opening anything there would create an empty database that reads as total data loss. `ask`
 /// shows the prompt for the folder status. Returns false when the app should quit. Retry
@@ -236,6 +264,7 @@ impl Services {
     /// Stops sync and releases the tracker. The database closes when the last handle drops.
     pub fn shutdown(&self) {
         self.music.shutdown();
+        self.sync.flush_outbox();
         self.sync.stop();
         self.tracker.lock().unwrap_or_else(|e| e.into_inner()).destroy();
     }

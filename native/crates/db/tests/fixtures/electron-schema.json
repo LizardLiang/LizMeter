@@ -1,5 +1,5 @@
 {
-  "sqliteVersion": "3.51.2",
+  "sqliteVersion": "3.53.4",
   "master": [
     {
       "type": "index",
@@ -258,6 +258,12 @@
       "name": "sync_notices",
       "tbl_name": "sync_notices",
       "sql": "CREATE TABLE sync_notices (\n      id          INTEGER PRIMARY KEY AUTOINCREMENT,\n      kind        TEXT NOT NULL,\n      message     TEXT NOT NULL,\n      detail      TEXT,\n      created_at  TEXT NOT NULL,\n      dismissed   INTEGER NOT NULL DEFAULT 0\n    )"
+    },
+    {
+      "type": "table",
+      "name": "sync_outbox",
+      "tbl_name": "sync_outbox",
+      "sql": "CREATE TABLE sync_outbox (\n      seq         INTEGER PRIMARY KEY AUTOINCREMENT,\n      line        TEXT NOT NULL,\n      created_at  TEXT NOT NULL\n    )"
     },
     {
       "type": "table",
@@ -882,6 +888,32 @@
         "type": "INTEGER",
         "notnull": 1,
         "dflt_value": "0",
+        "pk": 0
+      }
+    ],
+    "sync_outbox": [
+      {
+        "cid": 0,
+        "name": "seq",
+        "type": "INTEGER",
+        "notnull": 0,
+        "dflt_value": null,
+        "pk": 1
+      },
+      {
+        "cid": 1,
+        "name": "line",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
+        "pk": 0
+      },
+      {
+        "cid": 2,
+        "name": "created_at",
+        "type": "TEXT",
+        "notnull": 1,
+        "dflt_value": null,
         "pk": 0
       }
     ],

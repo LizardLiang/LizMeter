@@ -103,6 +103,22 @@ impl Database {
         &self.conn
     }
 
+    /// Opens the transaction every synced write runs in, so a row change and the oplog lines it
+    /// queued in `sync_outbox` commit or roll back together. Inside an open transaction it is a
+    /// savepoint and the outermost owner flushes; dropping it without `commit` rolls back.
+    pub(crate) fn begin_txn(&self) -> Result<SyncTxn<'_>> {
+        let nested = !self.conn.is_autocommit();
+        self.conn.execute_batch(if nested { "SAVEPOINT lizmeter_db_sp" } else { "BEGIN" })?;
+        Ok(SyncTxn { db: self, nested, done: false })
+    }
+
+    /// Appends queued oplog lines to the shared folder. Never fails the caller.
+    pub fn flush_outbox(&self) {
+        if self.conn.is_autocommit() {
+            self.sync.flush_outbox(&self.conn);
+        }
+    }
+
     /// Replaces the sync hook (the sync engine installs its own once it is running).
     pub fn set_sync_hook(&mut self, sync: Box<dyn SyncHook>) {
         self.sync = sync;
@@ -347,6 +363,51 @@ impl Database {
             })
             .optional()?;
         row.ok_or_else(|| DbError::Message("No state is marked as completed".into()))
+    }
+}
+
+/// An open write transaction from [`Database::begin_txn`]. Derefs to the connection.
+pub(crate) struct SyncTxn<'a> {
+    db: &'a Database,
+    nested: bool,
+    done: bool,
+}
+
+impl std::ops::Deref for SyncTxn<'_> {
+    type Target = Connection;
+    fn deref(&self) -> &Connection {
+        &self.db.conn
+    }
+}
+
+impl SyncTxn<'_> {
+    /// Commits (or releases the savepoint), then flushes the outbox when this was the outermost transaction.
+    pub(crate) fn commit(mut self) -> Result<()> {
+        let end = if self.nested { "RELEASE lizmeter_db_sp" } else { "COMMIT" };
+        if let Err(e) = self.db.conn.execute_batch(end) {
+            // A failed COMMIT (a deferred foreign key violation) leaves the transaction open.
+            self.rollback();
+            return Err(e.into());
+        }
+        self.done = true;
+        if !self.nested {
+            self.db.sync.flush_outbox(&self.db.conn);
+        }
+        Ok(())
+    }
+
+    fn rollback(&mut self) {
+        let undo = if self.nested { "ROLLBACK TO lizmeter_db_sp; RELEASE lizmeter_db_sp" } else { "ROLLBACK" };
+        let _ = self.db.conn.execute_batch(undo);
+        self.done = true;
+    }
+}
+
+impl Drop for SyncTxn<'_> {
+    fn drop(&mut self) {
+        if !self.done {
+            self.rollback();
+        }
     }
 }
 

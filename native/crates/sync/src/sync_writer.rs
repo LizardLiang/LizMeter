@@ -8,13 +8,16 @@
 use crate::device_identity::{allocate_next_todo_id, get_device_id, get_or_assign_device_number};
 use crate::hlc::{tick, Hlc};
 use crate::lexorank::generate_ordered_keys;
+use crate::notices::{clear_publish_pending_notice, set_publish_pending_notice};
 use crate::oplog::{
-    append_oplog_entry, build_delete_entry, build_link_entry, build_upsert_entry, FieldMap, LinkKind,
+    build_delete_entry, build_link_entry, build_upsert_entry, get_oplog_file_path, get_sync_devices_dir, FieldMap,
+    LinkKind, OplogEntry,
 };
 use crate::Result;
 use lizmeter_db::{ensure_uuid, is_sync_enabled, Fields, LinkOp, SyncHook};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 /// Publishes this device's writes into the shared folder.
@@ -42,19 +45,70 @@ impl SyncWriter {
         &self.device_id
     }
 
+    /// Queues one oplog line in the local `sync_outbox`. The insert joins the caller's open
+    /// transaction, so the line exists if and only if the row change it describes committed.
+    /// `flush_outbox` appends queued lines to the shared file after the commit.
+    fn enqueue(&self, conn: &Connection, entry: &OplogEntry) -> Result<()> {
+        conn.execute(
+            "INSERT INTO sync_outbox (line, created_at) VALUES (?, ?)",
+            params![entry.to_line(), lizmeter_db::util::now_iso()],
+        )?;
+        Ok(())
+    }
+
+    /// Appends every queued line to this device's oplog file in one write, then removes the queue
+    /// rows. Never fails the caller: a failed append keeps the rows and raises one "publish pending"
+    /// notice with the count; a later flush retries. A crash between the append and the delete
+    /// re-sends the same lines later, which peers ignore by `opId`.
+    pub fn flush_outbox(&self, conn: &Connection) {
+        if let Err(err) = self.try_flush(conn) {
+            eprintln!("[sync] outbox flush failed: {err}");
+        }
+    }
+
+    fn try_flush(&self, conn: &Connection) -> Result<()> {
+        let mut stmt = conn.prepare("SELECT seq, line FROM sync_outbox ORDER BY seq")?;
+        let rows: Vec<(i64, String)> =
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
+        drop(stmt);
+        let Some(last_seq) = rows.last().map(|r| r.0) else {
+            clear_publish_pending_notice(conn)?;
+            return Ok(());
+        };
+
+        if let Err(err) = self.append_lines(&rows) {
+            set_publish_pending_notice(conn, rows.len(), Some(&err.to_string()))?;
+            return Ok(());
+        }
+        conn.execute("DELETE FROM sync_outbox WHERE seq <= ?", [last_seq])?;
+        clear_publish_pending_notice(conn)?;
+        Ok(())
+    }
+
+    fn append_lines(&self, rows: &[(i64, String)]) -> std::io::Result<()> {
+        std::fs::create_dir_all(get_sync_devices_dir(&self.data_dir))?;
+        let path = get_oplog_file_path(&self.data_dir, &self.device_id);
+        let mut text: String = rows.iter().map(|(_, line)| format!("{line}\n")).collect();
+        if ends_with_partial_line(&path) {
+            text.insert(0, '\n');
+        }
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
+        file.write_all(text.as_bytes())
+    }
+
     fn current_hlc(&self, conn: &Connection) -> Result<Hlc> {
         let device_number = get_or_assign_device_number(conn, None)?;
         tick(conn, device_number)
     }
 
-    /// Appends an upsert entry naming only the fields that changed. No-op when sync is off.
+    /// Queues an upsert entry naming only the fields that changed. No-op when sync is off.
     pub fn upsert(&self, conn: &Connection, table: &str, row_uuid: &str, fields: &[(String, Value)]) -> Result<()> {
         if !is_sync_enabled(conn)? || fields.is_empty() {
             return Ok(());
         }
         let hlc = self.current_hlc(conn)?;
         let changes = FieldMap::with_hlc(fields.iter().cloned(), hlc);
-        append_oplog_entry(&self.data_dir, &self.device_id, &build_upsert_entry(hlc, table, row_uuid, changes))?;
+        self.enqueue(conn, &build_upsert_entry(hlc, table, row_uuid, changes))?;
 
         // A local write competes with a remote one for the same field just as much as two remote
         // writes do, so it needs the same high-water mark the merge engine reads. The merge engine
@@ -71,13 +125,13 @@ impl SyncWriter {
         Ok(())
     }
 
-    /// Appends a tombstone and records it locally so this device's own delete always wins. No-op when sync is off.
+    /// Queues a tombstone and records it locally so this device's own delete always wins. No-op when sync is off.
     pub fn delete(&self, conn: &Connection, table: &str, row_uuid: &str) -> Result<()> {
         if !is_sync_enabled(conn)? {
             return Ok(());
         }
         let hlc = self.current_hlc(conn)?;
-        append_oplog_entry(&self.data_dir, &self.device_id, &build_delete_entry(hlc, table, row_uuid))?;
+        self.enqueue(conn, &build_delete_entry(hlc, table, row_uuid))?;
         conn.execute(
             "INSERT OR REPLACE INTO sync_tombstones
                (table_name, row_uuid, deleted_at, hlc_physical_ms, hlc_counter, hlc_device_number)
@@ -96,13 +150,13 @@ impl SyncWriter {
         Ok(())
     }
 
-    /// Appends a link/unlink entry for a join table. No-op when sync is off.
+    /// Queues a link/unlink entry for a join table. No-op when sync is off.
     pub fn link(&self, conn: &Connection, table: &str, op: LinkKind, from_uuid: &str, to_uuid: &str) -> Result<()> {
         if !is_sync_enabled(conn)? {
             return Ok(());
         }
         let hlc = self.current_hlc(conn)?;
-        append_oplog_entry(&self.data_dir, &self.device_id, &build_link_entry(hlc, table, op, from_uuid, to_uuid))
+        self.enqueue(conn, &build_link_entry(hlc, table, op, from_uuid, to_uuid))
     }
 
     /// Gives a freshly reordered list a new set of `sync_order` values and records each as an
@@ -125,6 +179,20 @@ impl SyncWriter {
         }
         Ok(())
     }
+}
+
+/// True when the file is non-empty and its last byte is not a newline (a torn last line).
+fn ends_with_partial_line(path: &Path) -> bool {
+    let Ok(mut file) = std::fs::File::open(path) else { return false };
+    let Ok(size) = file.metadata().map(|m| m.len()) else { return false };
+    if size == 0 {
+        return false;
+    }
+    let mut last = [0u8; 1];
+    file.seek(SeekFrom::Start(size - 1))
+        .and_then(|_| file.read_exact(&mut last))
+        .map(|_| last[0] != b'\n')
+        .unwrap_or(false)
 }
 
 impl SyncHook for SyncWriter {
@@ -161,5 +229,11 @@ impl SyncHook for SyncWriter {
 
     fn record_reorder(&self, conn: &Connection, table: &str, ordered_ids: &[i64]) -> lizmeter_db::Result<()> {
         Ok(self.reorder(conn, table, ordered_ids)?)
+    }
+
+    fn flush_outbox(&self, conn: &Connection) {
+        if is_sync_enabled(conn).unwrap_or(false) {
+            SyncWriter::flush_outbox(self, conn);
+        }
     }
 }

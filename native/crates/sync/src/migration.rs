@@ -153,6 +153,7 @@ pub fn renumber_block_allocated_todo_ids(
             Some(&renumbered.iter().map(|(f, t)| format!("#{f} -> #{t}")).collect::<Vec<_>>().join(", ")),
         )
     })?;
+    writer.flush_outbox(conn);
 
     Ok(RenumberResult { backup_path, renumbered })
 }
@@ -167,7 +168,12 @@ pub fn enable_sync_on_existing_machine(
     writer: &SyncWriter,
 ) -> Result<SyncMigrationResult> {
     let result = run_sync_migration(conn, db_path, data_dir, writer)?;
-    set_sync_enabled(conn, true)?;
-    publish_existing_data(conn, writer)?;
+    // One transaction: a crash leaves either nothing done, or the flag on with every publish line
+    // already queued in the outbox for the startup flush to send.
+    in_transaction(conn, || {
+        set_sync_enabled(conn, true)?;
+        publish_existing_data(conn, writer)
+    })?;
+    writer.flush_outbox(conn);
     Ok(result)
 }

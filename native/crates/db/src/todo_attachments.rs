@@ -65,7 +65,8 @@ impl Database {
         }
 
         let kind = input.kind.unwrap_or_else(|| attachment_kind_for_ext(&ext_from_file_name(&input.file_name)));
-        conn.execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             "INSERT INTO todo_attachments (todo_id, sha256, file_name, mime_type, size_bytes, kind, created_at) \
              VALUES (?, ?, ?, ?, ?, ?, ?)",
             params![
@@ -80,15 +81,15 @@ impl Database {
         )?;
 
         // Read before the sync hook runs any SQL of its own: last_insert_rowid() is connection-global.
-        let row = conn.query_row(
+        let row = tx.query_row(
             &format!("{ATTACHMENT_SELECT} WHERE id = last_insert_rowid()"),
             [],
             attachment_from_row,
         )?;
 
-        let todo_uuid = ensure_uuid(conn, "todos", input.todo_id)?;
+        let todo_uuid = ensure_uuid(&tx, "todos", input.todo_id)?;
         self.sync().record_upsert(
-            conn,
+            &tx,
             "todo_attachments",
             &attachment_row_key(&todo_uuid, &input.sha256),
             &vec![
@@ -98,6 +99,7 @@ impl Database {
                 ("kind", json!(kind.as_str())),
             ],
         )?;
+        tx.commit()?;
         Ok(row)
     }
 
@@ -115,10 +117,11 @@ impl Database {
     /// Deletes one attachment row and hands back what it deleted, so the caller can collect the blob.
     pub fn delete_todo_attachment(&self, id: i64) -> Result<Option<TodoAttachment>> {
         let Some(existing) = self.get_todo_attachment(id)? else { return Ok(None) };
-        let conn = self.conn();
-        conn.execute("DELETE FROM todo_attachments WHERE id = ?", [id])?;
-        let todo_uuid = ensure_uuid(conn, "todos", existing.todo_id)?;
-        self.sync().record_delete(conn, "todo_attachments", &attachment_row_key(&todo_uuid, &existing.sha256))?;
+        let tx = self.begin_txn()?;
+        tx.execute("DELETE FROM todo_attachments WHERE id = ?", [id])?;
+        let todo_uuid = ensure_uuid(&tx, "todos", existing.todo_id)?;
+        self.sync().record_delete(&tx, "todo_attachments", &attachment_row_key(&todo_uuid, &existing.sha256))?;
+        tx.commit()?;
         Ok(Some(existing))
     }
 

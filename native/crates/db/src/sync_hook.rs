@@ -44,6 +44,8 @@ pub trait SyncHook: Send {
     fn record_delete(&self, conn: &Connection, table: &str, row_uuid: &str) -> Result<()>;
     fn record_link(&self, conn: &Connection, table: &str, op: LinkOp, from_uuid: &str, to_uuid: &str) -> Result<()>;
     fn record_reorder(&self, conn: &Connection, table: &str, ordered_ids: &[i64]) -> Result<()>;
+    /// Publishes the lines queued in `sync_outbox`. Called after an outermost commit; never fails the caller.
+    fn flush_outbox(&self, _conn: &Connection) {}
 }
 
 /// Sync never turned on: nothing is published and ids come from AUTOINCREMENT.

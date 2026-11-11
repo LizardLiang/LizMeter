@@ -44,16 +44,18 @@ impl Database {
         let color = validate_tag_color(&input.color)?;
         let created_at = now_iso();
         let uuid = new_uuid();
-        conn.execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             "INSERT INTO tags (name, color, created_at, uuid) VALUES (?, ?, ?, ?)",
             params![name, color, created_at, uuid],
         )?;
         self.sync().record_upsert(
-            conn,
+            &tx,
             "tags",
             &uuid,
             &vec![("name", json!(name)), ("color", json!(color)), ("created_at", json!(created_at))],
         )?;
+        tx.commit()?;
         Ok(conn.query_row(
             "SELECT id, name, color, created_at FROM tags WHERE name = ? COLLATE NOCASE",
             [&name],
@@ -71,43 +73,48 @@ impl Database {
         let conn = self.conn();
         let name = validate_tag_name(&input.name)?;
         let color = validate_tag_color(&input.color)?;
-        let changes = conn.execute(
+        let tx = self.begin_txn()?;
+        let changes = tx.execute(
             "UPDATE tags SET name = ?, color = ? WHERE id = ?",
             params![name, color, input.id],
         )?;
         if changes == 0 {
             return fail(format!("Tag with id {} not found", input.id));
         }
-        let uuid = ensure_uuid(conn, "tags", input.id)?;
-        self.sync().record_upsert(conn, "tags", &uuid, &vec![("name", json!(name)), ("color", json!(color))])?;
+        let uuid = ensure_uuid(&tx, "tags", input.id)?;
+        self.sync().record_upsert(&tx, "tags", &uuid, &vec![("name", json!(name)), ("color", json!(color))])?;
+        tx.commit()?;
         Ok(conn.query_row("SELECT id, name, color, created_at FROM tags WHERE id = ?", [input.id], tag_from_row)?)
     }
 
     pub fn delete_tag(&self, id: i64) -> Result<()> {
-        let conn = self.conn();
-        let uuid = ensure_uuid(conn, "tags", id)?;
-        conn.execute("DELETE FROM tags WHERE id = ?", [id])?;
-        self.sync().record_delete(conn, "tags", &uuid)
+        let tx = self.begin_txn()?;
+        let uuid = ensure_uuid(&tx, "tags", id)?;
+        tx.execute("DELETE FROM tags WHERE id = ?", [id])?;
+        self.sync().record_delete(&tx, "tags", &uuid)?;
+        tx.commit()
     }
 
     pub fn assign_tag(&self, input: &AssignTagInput) -> Result<()> {
-        let conn = self.conn();
-        conn.execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             "INSERT OR IGNORE INTO session_tags (session_id, tag_id) VALUES (?, ?)",
             params![input.session_id, input.tag_id],
         )?;
-        let tag_uuid = ensure_uuid(conn, "tags", input.tag_id)?;
-        self.sync().record_link(conn, "session_tags", LinkOp::Link, &input.session_id, &tag_uuid)
+        let tag_uuid = ensure_uuid(&tx, "tags", input.tag_id)?;
+        self.sync().record_link(&tx, "session_tags", LinkOp::Link, &input.session_id, &tag_uuid)?;
+        tx.commit()
     }
 
     pub fn unassign_tag(&self, input: &AssignTagInput) -> Result<()> {
-        let conn = self.conn();
-        conn.execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             "DELETE FROM session_tags WHERE session_id = ? AND tag_id = ?",
             params![input.session_id, input.tag_id],
         )?;
-        let tag_uuid = ensure_uuid(conn, "tags", input.tag_id)?;
-        self.sync().record_link(conn, "session_tags", LinkOp::Unlink, &input.session_id, &tag_uuid)
+        let tag_uuid = ensure_uuid(&tx, "tags", input.tag_id)?;
+        self.sync().record_link(&tx, "session_tags", LinkOp::Unlink, &input.session_id, &tag_uuid)?;
+        tx.commit()
     }
 
     pub fn list_tags_for_session(&self, session_id: &str) -> Result<Vec<Tag>> {

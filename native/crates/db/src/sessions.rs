@@ -100,7 +100,8 @@ impl Database {
         let id = new_uuid();
         let completed_at = now_iso();
 
-        self.conn().execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             INSERT_SESSION,
             params![
                 id,
@@ -116,7 +117,8 @@ impl Database {
                 input.issue_id,
             ],
         )?;
-        self.sync().record_upsert(self.conn(), "sessions", &id, &session_upsert_fields(&title, input, &completed_at))?;
+        self.sync().record_upsert(&tx, "sessions", &id, &session_upsert_fields(&title, input, &completed_at))?;
+        tx.commit()?;
         Ok(build_session_result(id, title, input, completed_at))
     }
 
@@ -138,7 +140,7 @@ impl Database {
         let id = new_uuid();
         let completed_at = now_iso();
 
-        let tx = self.conn().unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         tx.execute(
             INSERT_SESSION,
             params![
@@ -222,21 +224,25 @@ impl Database {
 
     /// No-op if the id does not exist.
     pub fn delete_session(&self, id: &str) -> Result<()> {
-        self.conn().execute("DELETE FROM sessions WHERE id = ?", [id])?;
-        self.sync().record_delete(self.conn(), "sessions", id)
+        let tx = self.begin_txn()?;
+        tx.execute("DELETE FROM sessions WHERE id = ?", [id])?;
+        self.sync().record_delete(&tx, "sessions", id)?;
+        tx.commit()
     }
 
     pub fn update_session_duration(&self, id: &str, actual_duration_seconds: i64) -> Result<Session> {
-        self.conn().execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             "UPDATE sessions SET actual_duration_seconds = ? WHERE id = ?",
             params![actual_duration_seconds, id],
         )?;
         self.sync().record_upsert(
-            self.conn(),
+            &tx,
             "sessions",
             id,
             &vec![("actual_duration_seconds", json!(actual_duration_seconds))],
         )?;
+        tx.commit()?;
         match self.get_session_by_id(id)? {
             Some(s) => Ok(s),
             None => fail(format!("Session not found after update: {id}")),
@@ -244,7 +250,7 @@ impl Database {
     }
 
     pub fn update_worklog_status(&self, session_id: &str, status: WorklogStatus, worklog_id: Option<&str>) -> Result<()> {
-        let conn = self.conn();
+        let conn = self.begin_txn()?;
         let mut fields: Vec<(&'static str, Value)> = vec![("worklog_status", json!(status.as_str()))];
         if let Some(wid) = worklog_id {
             conn.execute(
@@ -258,7 +264,8 @@ impl Database {
                 params![status.as_str(), session_id],
             )?;
         }
-        self.sync().record_upsert(conn, "sessions", session_id, &fields)
+        self.sync().record_upsert(&conn, "sessions", session_id, &fields)?;
+        conn.commit()
     }
 
     pub fn get_claude_code_data_for_session(&self, session_id: &str) -> Result<Option<Vec<ClaudeCodeSessionSummary>>> {

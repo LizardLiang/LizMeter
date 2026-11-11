@@ -152,19 +152,20 @@ impl Database {
             conn.query_row("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_states", [], |r| r.get(0))?;
         let created_at = now_iso();
         let uuid = new_uuid();
-        conn.execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             "INSERT INTO todo_states (label, color, position, is_completed, is_default, created_at, uuid) VALUES (?, ?, ?, 0, 0, ?, ?)",
             params![label, color, next, created_at, uuid],
         )?;
         // last_insert_rowid() is connection-global: read before the sync hook runs SQL of its own.
-        let row = conn.query_row(
+        let row = tx.query_row(
             &format!("SELECT {TODO_STATE_COLUMNS} FROM todo_states WHERE id = last_insert_rowid()"),
             [],
             state_from_row,
         )?;
         // Flags publish as 0/1, never booleans: better-sqlite3 cannot bind a boolean.
         self.sync().record_upsert(
-            conn,
+            &tx,
             "todo_states",
             &uuid,
             &vec![
@@ -175,6 +176,7 @@ impl Database {
                 ("created_at", json!(created_at)),
             ],
         )?;
+        tx.commit()?;
         Ok(row)
     }
 
@@ -224,7 +226,7 @@ impl Database {
             return fail("Pick another state as the default rather than clearing this one");
         }
 
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         // Default and completed are single-winner flags.
         if is_default {
             tx.execute("UPDATE todo_states SET is_default = 0 WHERE id != ?", [input.id])?;
@@ -236,7 +238,6 @@ impl Database {
             "UPDATE todo_states SET label = ?, color = ?, is_completed = ?, is_default = ? WHERE id = ?",
             params![label, color, i64::from(is_completed), i64::from(is_default), input.id],
         )?;
-        tx.commit()?;
 
         // Only fields this call touched go to the oplog: re-publishing an untouched field would
         // carry a fresh HLC that can silently revert a concurrent edit made on another device.
@@ -253,8 +254,9 @@ impl Database {
         if input.is_default.is_some() {
             changed.push(("is_default", json!(i64::from(is_default))));
         }
-        let uuid = ensure_uuid(conn, "todo_states", input.id)?;
-        self.sync().record_upsert(conn, "todo_states", &uuid, &changed)?;
+        let uuid = ensure_uuid(&tx, "todo_states", input.id)?;
+        self.sync().record_upsert(&tx, "todo_states", &uuid, &changed)?;
+        tx.commit()?;
 
         Ok(conn.query_row(
             &format!("SELECT {TODO_STATE_COLUMNS} FROM todo_states WHERE id = ?"),
@@ -296,13 +298,12 @@ impl Database {
             conn.query_row("SELECT COUNT(*) AS count FROM todos WHERE state_id = ?", [id], |r| r.get(0))?;
         let uuid = ensure_uuid(conn, "todo_states", id)?;
 
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         tx.execute("UPDATE todos SET state_id = ? WHERE state_id = ?", params![reassign_to_id, id])?;
         tx.execute("DELETE FROM todo_states WHERE id = ?", [id])?;
         renumber_positions(&tx, "todo_states")?;
+        self.sync().record_delete(&tx, "todo_states", &uuid)?;
         tx.commit()?;
-
-        self.sync().record_delete(conn, "todo_states", &uuid)?;
         Ok(count)
     }
 
@@ -311,12 +312,12 @@ impl Database {
         let conn = self.conn();
         let all = ids_by_position(conn, "todo_states")?;
         let order = final_order(&all, ordered_ids, "State")?;
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         for (index, id) in order.iter().enumerate() {
             tx.execute("UPDATE todo_states SET position = ? WHERE id = ?", params![index as i64, id])?;
         }
+        self.sync().record_reorder(&tx, "todo_states", &order)?;
         tx.commit()?;
-        self.sync().record_reorder(conn, "todo_states", &order)?;
         self.list_todo_states()
     }
 
@@ -357,21 +358,23 @@ impl Database {
             conn.query_row("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM todo_projects", [], |r| r.get(0))?;
         let created_at = now_iso();
         let uuid = new_uuid();
-        conn.execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             "INSERT INTO todo_projects (name, color, position, created_at, uuid) VALUES (?, ?, ?, ?, ?)",
             params![name, color, next, created_at, uuid],
         )?;
-        let row = conn.query_row(
+        let row = tx.query_row(
             &format!("SELECT {TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = last_insert_rowid()"),
             [],
             project_from_row,
         )?;
         self.sync().record_upsert(
-            conn,
+            &tx,
             "todo_projects",
             &uuid,
             &vec![("name", json!(name)), ("color", json!(color)), ("created_at", json!(created_at))],
         )?;
+        tx.commit()?;
         Ok(row)
     }
 
@@ -403,7 +406,8 @@ impl Database {
                 return fail(format!("A project named \"{name}\" already exists"));
             }
         }
-        conn.execute("UPDATE todo_projects SET name = ?, color = ? WHERE id = ?", params![name, color, input.id])?;
+        let tx = self.begin_txn()?;
+        tx.execute("UPDATE todo_projects SET name = ?, color = ? WHERE id = ?", params![name, color, input.id])?;
         let mut changed: Fields = vec![];
         if input.name.is_some() {
             changed.push(("name", json!(name)));
@@ -411,8 +415,9 @@ impl Database {
         if input.color.is_some() {
             changed.push(("color", json!(color)));
         }
-        let uuid = ensure_uuid(conn, "todo_projects", input.id)?;
-        self.sync().record_upsert(conn, "todo_projects", &uuid, &changed)?;
+        let uuid = ensure_uuid(&tx, "todo_projects", input.id)?;
+        self.sync().record_upsert(&tx, "todo_projects", &uuid, &changed)?;
+        tx.commit()?;
         Ok(conn.query_row(
             &format!("SELECT {TODO_PROJECT_COLUMNS} FROM todo_projects WHERE id = ?"),
             [input.id],
@@ -432,15 +437,14 @@ impl Database {
             conn.query_row("SELECT COUNT(*) AS count FROM todos WHERE project_id = ?", [id], |r| r.get(0))?;
         let uuid = ensure_uuid(conn, "todo_projects", id)?;
 
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         // Explicit rather than relying on ON DELETE SET NULL: an upgraded database added the
         // column by ALTER TABLE, and the pragma is not guaranteed to have been on for those rows.
         tx.execute("UPDATE todos SET project_id = NULL WHERE project_id = ?", [id])?;
         tx.execute("DELETE FROM todo_projects WHERE id = ?", [id])?;
         renumber_positions(&tx, "todo_projects")?;
+        self.sync().record_delete(&tx, "todo_projects", &uuid)?;
         tx.commit()?;
-
-        self.sync().record_delete(conn, "todo_projects", &uuid)?;
         Ok(count)
     }
 
@@ -448,12 +452,12 @@ impl Database {
         let conn = self.conn();
         let all = ids_by_position(conn, "todo_projects")?;
         let order = final_order(&all, ordered_ids, "Project")?;
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         for (index, id) in order.iter().enumerate() {
             tx.execute("UPDATE todo_projects SET position = ? WHERE id = ?", params![index as i64, id])?;
         }
+        self.sync().record_reorder(&tx, "todo_projects", &order)?;
         tx.commit()?;
-        self.sync().record_reorder(conn, "todo_projects", &order)?;
         self.list_todo_projects()
     }
 
@@ -494,21 +498,23 @@ impl Database {
         }
         let created_at = now_iso();
         let uuid = new_uuid();
-        conn.execute(
+        let tx = self.begin_txn()?;
+        tx.execute(
             "INSERT INTO todo_labels (name, color, created_at, uuid) VALUES (?, ?, ?, ?)",
             params![name, color, created_at, uuid],
         )?;
-        let row = conn.query_row(
+        let row = tx.query_row(
             &format!("SELECT {TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = last_insert_rowid()"),
             [],
             label_from_row,
         )?;
         self.sync().record_upsert(
-            conn,
+            &tx,
             "todo_labels",
             &uuid,
             &vec![("name", json!(name)), ("color", json!(color)), ("created_at", json!(created_at))],
         )?;
+        tx.commit()?;
         Ok(row)
     }
 
@@ -540,7 +546,8 @@ impl Database {
                 return fail(format!("A label named \"{name}\" already exists"));
             }
         }
-        conn.execute("UPDATE todo_labels SET name = ?, color = ? WHERE id = ?", params![name, color, input.id])?;
+        let tx = self.begin_txn()?;
+        tx.execute("UPDATE todo_labels SET name = ?, color = ? WHERE id = ?", params![name, color, input.id])?;
         let mut changed: Fields = vec![];
         if input.name.is_some() {
             changed.push(("name", json!(name)));
@@ -548,8 +555,9 @@ impl Database {
         if input.color.is_some() {
             changed.push(("color", json!(color)));
         }
-        let uuid = ensure_uuid(conn, "todo_labels", input.id)?;
-        self.sync().record_upsert(conn, "todo_labels", &uuid, &changed)?;
+        let uuid = ensure_uuid(&tx, "todo_labels", input.id)?;
+        self.sync().record_upsert(&tx, "todo_labels", &uuid, &changed)?;
+        tx.commit()?;
         Ok(conn.query_row(
             &format!("SELECT {TODO_LABEL_COLUMNS} FROM todo_labels WHERE id = ?"),
             [input.id],
@@ -569,12 +577,11 @@ impl Database {
             conn.query_row("SELECT COUNT(*) AS count FROM todo_label_links WHERE label_id = ?", [id], |r| r.get(0))?;
         let uuid = ensure_uuid(conn, "todo_labels", id)?;
 
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         tx.execute("DELETE FROM todo_label_links WHERE label_id = ?", [id])?;
         tx.execute("DELETE FROM todo_labels WHERE id = ?", [id])?;
+        self.sync().record_delete(&tx, "todo_labels", &uuid)?;
         tx.commit()?;
-
-        self.sync().record_delete(conn, "todo_labels", &uuid)?;
         Ok(count)
     }
 

@@ -383,7 +383,7 @@ impl Database {
 
         // The insert and the label links go in together: a todo that briefly exists without the
         // labels it was created with would be visible to a concurrent read on the same connection.
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         if let Some(label_ids) = &input.label_ids {
             assert_label_ids_exist(&tx, label_ids)?;
         }
@@ -579,7 +579,7 @@ impl Database {
         }
         // Editing a todo that is already completed keeps its original completion time.
 
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         if let Some(label_ids) = &input.label_ids {
             assert_label_ids_exist(&tx, label_ids)?;
         }
@@ -667,7 +667,7 @@ impl Database {
     pub fn delete_todo(&self, id: i64) -> Result<Vec<String>> {
         let conn = self.conn();
         let uuid = ensure_uuid(conn, "todos", id)?;
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         // Read before the delete rather than trusting ON DELETE CASCADE: a cascade leaves nothing to read.
         let shas: Vec<String> = {
             let mut stmt = tx.prepare("SELECT sha256 FROM todo_attachments WHERE todo_id = ?")?;
@@ -677,8 +677,8 @@ impl Database {
         tx.execute("DELETE FROM todo_attachments WHERE todo_id = ?", [id])?;
         tx.execute("UPDATE todos SET parent_id = NULL WHERE parent_id = ?", [id])?;
         tx.execute("DELETE FROM todos WHERE id = ?", [id])?;
+        self.sync().record_delete(&tx, "todos", &uuid)?;
         tx.commit()?;
-        self.sync().record_delete(conn, "todos", &uuid)?;
         Ok(shas)
     }
 
@@ -700,7 +700,7 @@ impl Database {
         };
         let cleared_uuids =
             cleared_ids.iter().map(|id| ensure_uuid(conn, "todos", *id)).collect::<Result<Vec<String>>>()?;
-        let tx = conn.unchecked_transaction()?;
+        let tx = self.begin_txn()?;
         let deleted_shas: Vec<String> = {
             let mut stmt = tx.prepare(
                 "SELECT DISTINCT a.sha256 AS sha256 FROM todo_attachments a \
@@ -721,11 +721,11 @@ impl Database {
                SELECT t.id FROM todos t INNER JOIN todo_states s ON s.id = t.state_id WHERE s.is_completed = 1)",
         )?;
         tx.execute_batch("DELETE FROM todos WHERE state_id IN (SELECT id FROM todo_states WHERE is_completed = 1)")?;
-        tx.commit()?;
         // The same record per todo that delete_todo publishes, so other machines drop the rows too.
         for uuid in &cleared_uuids {
-            self.sync().record_delete(conn, "todos", uuid)?;
+            self.sync().record_delete(&tx, "todos", uuid)?;
         }
+        tx.commit()?;
         Ok(ClearCompletedTodosResult { count, deleted_shas })
     }
 

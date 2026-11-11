@@ -267,3 +267,12 @@
       hlc_device_number INTEGER NOT NULL,
       PRIMARY KEY (table_name, row_uuid)
     );
+
+    -- Oplog lines waiting to be appended to this device's file in the shared folder. A line is
+    -- inserted in the same transaction as the row change it describes and removed only after the
+    -- append succeeded (sync-writer.ts flushOutbox). Local only: never snapshotted or synced.
+    CREATE TABLE IF NOT EXISTS sync_outbox (
+      seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+      line        TEXT NOT NULL,
+      created_at  TEXT NOT NULL
+    );

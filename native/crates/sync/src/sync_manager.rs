@@ -149,6 +149,10 @@ impl SyncManager {
         let device_id = self.writer.device_id();
         let mut todos_changed = false;
 
+        // Lines queued by a previous run, a crash or an unreachable folder go out before any merge.
+        // The periodic pass makes this the retry too, and it runs ahead of the snapshot trim.
+        self.writer.flush_outbox(conn);
+
         let outcome: Result<()> = (|| {
             // FR-032: reported, never blocking.
             scan_for_stray_files(conn, data_dir)?;
@@ -244,6 +248,12 @@ impl SyncManager {
             w.stop();
         }
         Ok(())
+    }
+
+    /// Last chance to publish queued lines, called at shutdown before the database closes.
+    pub fn flush_outbox(&self) {
+        let db = lock(&self.db);
+        self.writer.flush_outbox(db.conn());
     }
 
     pub fn stop(&self) {

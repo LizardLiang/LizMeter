@@ -2,13 +2,34 @@
 
 use crate::Result;
 use lizmeter_core::{SyncNotice, SyncNoticeKind};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
 
 pub fn add_sync_notice(conn: &Connection, kind: SyncNoticeKind, message: &str, detail: Option<&str>) -> Result<()> {
     conn.execute(
         "INSERT INTO sync_notices (kind, message, detail, created_at) VALUES (?, ?, ?, ?)",
         params![kind.as_str(), message, detail, lizmeter_db::util::now_iso()],
     )?;
+    Ok(())
+}
+
+/// Raises, or refreshes in place, the single "changes waiting to publish" notice. A dismissed
+/// notice stays dismissed.
+pub fn set_publish_pending_notice(conn: &Connection, count: usize, detail: Option<&str>) -> Result<()> {
+    let message = format!("{count} change{} waiting to publish", if count == 1 { "" } else { "s" });
+    let existing: Option<i64> = conn
+        .query_row("SELECT id FROM sync_notices WHERE kind = 'publish-pending' LIMIT 1", [], |r| r.get(0))
+        .optional()?;
+    match existing {
+        Some(id) => {
+            conn.execute("UPDATE sync_notices SET message = ?, detail = ? WHERE id = ?", params![message, detail, id])?;
+            Ok(())
+        }
+        None => add_sync_notice(conn, SyncNoticeKind::PublishPending, &message, detail),
+    }
+}
+
+pub fn clear_publish_pending_notice(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM sync_notices WHERE kind = 'publish-pending'", [])?;
     Ok(())
 }
 

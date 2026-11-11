@@ -22,7 +22,7 @@ mod startup;
 pub mod worklog_merge;
 
 pub use error::{Result, ServiceError};
-pub use startup::{ensure_data_dir_available, DataDirChoice, StartupReport};
+pub use startup::{ensure_data_dir_available, missing_data_dir_prompt, DataDirChoice, MissingDataDirPrompt, StartupReport};
 
 use claude_tracker::{ClaudeTracker, PollOutput, ScanResult};
 use error::fail;
@@ -81,7 +81,10 @@ impl Services {
         if self.retired.load(Ordering::SeqCst) {
             return fail("LizMeter is restarting to use the new data folder");
         }
-        f(&guard)
+        let result = f(&guard);
+        // Each write flushes after its own commit; this also publishes lines a failed closure left behind.
+        guard.flush_outbox();
+        result
     }
 
     /// The music backend. The UI drives playback and the library through it directly; the
@@ -519,7 +522,9 @@ impl Services {
 
         // Fold the WAL into the main file and drop the connection before anything is copied. The
         // sync worker stops first (it shares the handle) and every other call fails while the
-        // flag is set, so nothing writes to the stand-in database.
+        // flag is set, so nothing writes to the stand-in database. Queued lines go to the current
+        // folder's file before the folder changes, when it is reachable.
+        self.sync.flush_outbox();
         self.sync.stop();
         {
             let stand_in = Database::open_in_memory()?;

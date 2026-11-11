@@ -1181,6 +1181,7 @@ pub enum SyncNoticeKind {
     TodoIdReassigned,
     OplogEntrySkipped,
     MergeFailed,
+    PublishPending,
 }
 
 impl SyncNoticeKind {
@@ -1195,6 +1196,7 @@ impl SyncNoticeKind {
             SyncNoticeKind::TodoIdReassigned => "todo-id-reassigned",
             SyncNoticeKind::OplogEntrySkipped => "oplog-entry-skipped",
             SyncNoticeKind::MergeFailed => "merge-failed",
+            SyncNoticeKind::PublishPending => "publish-pending",
         }
     }
 }
