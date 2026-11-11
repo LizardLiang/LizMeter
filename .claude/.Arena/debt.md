@@ -400,3 +400,9 @@ collapsed.
 - **`cargo packager` caches NSIS in `%LOCALAPPDATA%\.cargo-packager`** (it ignores a `LOCALAPPDATA` override) and fails with `Plugin not found` while `NSISDIR` points at scoop's NSIS.
 - **Installer run in an isolated profile is not done.** No Windows Sandbox on the dev machine. The installer was built and compiled by makensis, never executed.
 - **Native pipe guard vs fake profiles.** `Services::open_guarded` runs the Electron process check whenever the data folder is `%APPDATA%\lizmeter` (also a redirected `%APPDATA%`), so a running Electron build refuses a fake profile at that path in tests. Tests use another folder name.
+
+## Live checks (2026-11-11)
+
+- **Closed: real yt-dlp extraction.** `lizmeter.exe --data-dir <scratch> --do music-url:https://www.youtube.com/watch?v=jNQXAC9IVRw` (yt-dlp 2026.10.26): title "Me at the zoo", 19 s; play returned at 16-22 s (debug build, mostly yt-dlp), first streamed frame 5.4 s later, cached about 9 s after that; the replay came from the cache with the in-process decoder (`native_decode: true`). YouTube's cached file is DASH-fragmented MP4 (`major_brand: dash`); symphonia plays it.
+- **Fixed in native, still open in Electron: a slow yt-dlp was deleted.** yt-dlp `--version` takes 3.3-4.3 s here (self-unpacking exe); the 5 s health check timed out in 1 of 4 release starts and the check deleted a working yt-dlp. Native (`dc19a2a`) keeps the file on a timeout. `electron/main/music/binary-manager.ts` (`execFileAsync(..., { timeout: 5000 })` then `unlinkSync`) has the same fault.
+- **Playing a cached track blocks `play()` for about 8 s in a debug build** (the decode probe and the in-process open). Not measured in release.
