@@ -210,15 +210,14 @@ pub fn window_button(id: &'static str, icon: &'static str, area: WindowControlAr
         .items_center()
         .justify_center()
         .window_control_area(area)
+        .group(id)
         .text_color(col(TN_TEXT_DIM));
-    if hovered {
-        b = if danger {
-            b.bg(col(TN_RED)).text_color(col(css::hex(0xffffff)))
-        } else {
-            b.bg(col(TN_SURFACE)).text_color(col(TN_TEXT))
-        };
-    }
-    b.child(svg().path(icon).size(px(10.0)).text_color(if danger && hovered { col(css::hex(0xffffff)) } else if hovered { col(TN_TEXT) } else { col(TN_TEXT_DIM) }))
+    // `#titlebar-controls button:hover` (surface, text) and `:last-child:hover` (red, white). `hovered`
+    // forces the look for a capture without a pointer.
+    let (hover_bg, hover_fg) = if danger { (col(TN_RED), col(css::hex(0xffffff))) } else { (col(TN_SURFACE), col(TN_TEXT)) };
+    b = if hovered { b.bg(hover_bg).text_color(hover_fg) } else { b.hover(move |s| s.bg(hover_bg).text_color(hover_fg)) };
+    let icon = svg().path(icon).size(px(10.0)).text_color(if hovered { hover_fg } else { col(TN_TEXT_DIM) });
+    b.child(if hovered { icon } else { icon.group_hover(id, move |s| s.text_color(hover_fg)) })
 }
 
 pub fn titlebar(hover: Option<&'static str>) -> impl IntoElement {
@@ -232,9 +231,16 @@ pub fn titlebar(hover: Option<&'static str>) -> impl IntoElement {
         .flex()
         .items_center()
         .justify_between()
-        .window_control_area(WindowControlArea::Drag)
+        // The drag area stops at the buttons: gpui answers a hit test with the first control area
+        // under the pointer, and a bar-wide drag area would turn every button press into a move.
         .child(
             div()
+                .flex_1()
+                .h_full()
+                .window_control_area(WindowControlArea::Drag)
+                .flex()
+                .items_center()
+                .child(div()
                 .pl(px(12.0))
                 .flex()
                 .flex_row()
@@ -244,7 +250,7 @@ pub fn titlebar(hover: Option<&'static str>) -> impl IntoElement {
                 .font_weight(FontWeight(600.0))
                 .text_color(col(TN_TEXT_DIM))
                 .child(spaced("Liz", 0.5).text_color(col(TN_BLUE)))
-                .child(spaced("Meter", 0.5)),
+                .child(spaced("Meter", 0.5))),
         )
         .child(
             div()
