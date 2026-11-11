@@ -9,6 +9,9 @@
 //!   Music page takes), print the state for 2 s at volume 0.1, then stop.
 //! * `music-latency:<file>`: time from each call (play, seek, speed change, seek at that speed) to
 //!   the first frame the device takes from the new source, at volume 0.1.
+//! * `music-url:<url>`: play a YouTube URL as the Music page does (yt-dlp extraction, stream, cache),
+//!   at volume 0.1, until the track is cached; then play it again from the cache. Needs the network
+//!   and yt-dlp / ffmpeg in `<data dir>/bin`.
 
 use lizmeter_music::{MusicEvent, MusicService};
 use lizmeter_services::Services;
@@ -32,6 +35,9 @@ pub fn run(svc: &Services, ops: &[String]) -> Option<i32> {
         } else if op == "music-library-play" {
             ran = true;
             library_play(svc.music())
+        } else if let Some(url) = op.strip_prefix("music-url:") {
+            ran = true;
+            url_play(svc.music(), url)
         } else if let Some(file) = op.strip_prefix("music-latency:") {
             ran = true;
             latency(svc.music(), Path::new(file))
@@ -198,4 +204,85 @@ fn library_play(m: &MusicService) -> Result<(), String> {
     );
     m.stop();
     first_frame.map(|_| ()).ok_or_else(|| "no frame reached the device".to_string())
+}
+
+/// Streams `url` until its track is cached (at most 180 s), then plays the cached copy (up to 10 s after `play` returns).
+fn url_play(m: &MusicService, url: &str) -> Result<(), String> {
+    m.set_volume(0.1);
+    m.set_playback_speed(1.0).map_err(|e| e.message)?;
+    let cached = std::sync::Arc::new(std::sync::Mutex::new(None::<String>));
+    let sink = cached.clone();
+    m.set_listener(move |e| {
+        if let MusicEvent::Cached { track_id } = e {
+            *sink.lock().unwrap() = Some(track_id);
+        }
+    });
+    let started = Instant::now();
+    let result = m.play(url, None).map_err(|e| format!("{} ({})", e.message, e.code_str()))?;
+    let returned_ms = started.elapsed().as_millis();
+    let mut first_frame = None;
+    let mut last_print = Instant::now();
+    while started.elapsed() < Duration::from_secs(180) && cached.lock().unwrap().is_none() {
+        if first_frame.is_none() && m.output().and_then(|o| o.current_feed()).is_some_and(|f| f.played_frames() > 0) {
+            first_frame = Some(started.elapsed().as_millis());
+        }
+        if last_print.elapsed() >= Duration::from_secs(5) {
+            let s = m.snapshot();
+            println!("{}", serde_json::json!({ "op": "music-url", "at_ms": started.elapsed().as_millis(), "state": s.playback_state, "time": s.current_time, "buffered": s.buffered, "error": s.last_error }));
+            last_print = Instant::now();
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let s = m.snapshot();
+    let track = s.current_track.clone();
+    println!(
+        "{}",
+        serde_json::json!({
+            "op": "music-url",
+            "step": "stream",
+            "play_returned_ms": returned_ms,
+            "from_cache": result.as_ref().map(|r| r.from_cache),
+            "first_frame_ms": first_frame,
+            "cached_after_ms": cached.lock().unwrap().as_ref().map(|_| started.elapsed().as_millis()),
+            "title": track.as_ref().map(|t| t.title.clone()),
+            "duration": s.duration,
+            "state": s.playback_state,
+            "error": s.last_error,
+        })
+    );
+    m.stop();
+    let track_id = cached.lock().unwrap().clone().ok_or("the track was not cached within 180 s")?;
+    first_frame.ok_or("no streamed frame reached the device")?;
+    // The second play must come from the cache, decoded in-process.
+    let input = lizmeter_core::MusicLibraryListInput { cached_only: Some(true), ..Default::default() };
+    let entry = m.library_list(&input).map_err(|e| e.message)?.tracks.into_iter().find(|t| t.id == track_id).ok_or("the cached track is missing from the library")?;
+    let again = Instant::now();
+    let source = entry.source_url.clone();
+    let replay = m.play(&source, Some(entry)).map_err(|e| e.message)?;
+    let replay_returned_ms = again.elapsed().as_millis();
+    let waited = Instant::now();
+    let mut replay_frame = None;
+    while replay_frame.is_none() && waited.elapsed() < Duration::from_secs(10) {
+        if m.output().and_then(|o| o.current_feed()).is_some_and(|f| f.played_frames() > 0) {
+            replay_frame = Some(again.elapsed().as_millis());
+        }
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let s = m.snapshot();
+    println!(
+        "{}",
+        serde_json::json!({
+            "op": "music-url",
+            "step": "replay from cache",
+            "from_cache": replay.as_ref().map(|r| r.from_cache),
+            "play_returned_ms": replay_returned_ms,
+            "feed": m.output().and_then(|o| o.current_feed()).map(|f| f.played_frames()),
+            "native_decode": m.is_native_decode(),
+            "first_frame_ms": replay_frame,
+            "state": s.playback_state,
+            "time": s.current_time,
+        })
+    );
+    m.stop();
+    replay_frame.map(|_| ()).ok_or_else(|| "no cached frame reached the device".to_string())
 }
