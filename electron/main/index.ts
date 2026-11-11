@@ -13,6 +13,7 @@ import {
   applyPendingSyncActionAfterInit,
   consumePendingSyncActionBeforeInit,
   setTodosChangedCallback,
+  flushOutboxOnQuit,
   startSyncManager,
   stopSyncManager,
   writePendingSyncAction,
@@ -343,6 +344,7 @@ app.on("window-all-closed", () => {
 });
 
 app.on("will-quit", () => {
+  flushOutboxOnQuit();
   stopSyncManager();
   destroyPipeServer();
   destroyTracker();

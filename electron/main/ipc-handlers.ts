@@ -56,7 +56,7 @@ import {
   requiresUnsyncedDbConfirmation,
   writePendingSyncAction,
 } from "./sync/sync-manager.ts";
-import { isSyncEnabled } from "./sync/sync-writer.ts";
+import { flushOutbox, isSyncEnabled } from "./sync/sync-writer.ts";
 import { createWidgetWindow, destroyWidgetWindow, getWidgetWindow } from "./widget-window.ts";
 import { getMainWindow } from "./index.ts";
 import {
@@ -719,6 +719,9 @@ export function registerIpcHandlers(): void {
             "This device is syncing with another machine. Moving the data folder now will disconnect it from sync — the new folder does not hold the other machine's history.",
         };
       }
+
+      // Queued oplog lines go to the current folder's file before the folder changes.
+      flushOutbox(getDb());
 
       // Copying an open SQLite file can capture a half-written page, so fold the WAL back into
       // the main file and drop the connection before anything is read -- relocateDbToPrivateStorage

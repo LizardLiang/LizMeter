@@ -856,7 +856,8 @@ export type SyncNoticeKind =
   /** One or more peer oplog entries were unreadable or require a newer schema version. */
   | "oplog-entry-skipped"
   /** A merge pass failed for a reason with no dedicated notice kind of its own (sync-manager.ts). */
-  | "merge-failed";
+  | "merge-failed"
+  | "publish-pending";
 
 export interface SyncNotice {
   id: number;

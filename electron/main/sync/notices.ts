@@ -27,7 +27,9 @@ export type SyncNoticeKind =
   /** One or more peer oplog entries were unreadable or require a newer schema version. */
   | "oplog-entry-skipped"
   /** A merge pass failed for a reason with no dedicated notice kind of its own (sync-manager.ts). */
-  | "merge-failed";
+  | "merge-failed"
+  /** Local edits are saved but their oplog lines could not be written to the shared folder yet. */
+  | "publish-pending";
 
 export function addSyncNotice(database: DbHandle, kind: SyncNoticeKind, message: string, detail?: string): void {
   database
@@ -66,4 +68,23 @@ export function listSyncNotices(database: DbHandle, includeDismissed = false): S
 
 export function dismissSyncNotice(database: DbHandle, id: number): void {
   database.prepare("UPDATE sync_notices SET dismissed = 1 WHERE id = ?").run(id);
+}
+
+/** Raises, or refreshes in place, the single "changes waiting to publish" notice. */
+export function setPublishPendingNotice(database: DbHandle, count: number, detail?: string): void {
+  const message = `${count} change${count === 1 ? "" : "s"} waiting to publish`;
+  const existing = database.prepare("SELECT id FROM sync_notices WHERE kind = 'publish-pending' LIMIT 1").get() as
+    | { id: number }
+    | undefined;
+  if (existing) {
+    database
+      .prepare("UPDATE sync_notices SET message = ?, detail = ?, dismissed = 0 WHERE id = ?")
+      .run(message, detail ?? null, existing.id);
+    return;
+  }
+  addSyncNotice(database, "publish-pending", message, detail);
+}
+
+export function clearPublishPendingNotice(database: DbHandle): void {
+  database.prepare("DELETE FROM sync_notices WHERE kind = 'publish-pending'").run();
 }
