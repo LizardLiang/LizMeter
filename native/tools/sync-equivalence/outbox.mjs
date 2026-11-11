@@ -4,7 +4,8 @@
 //
 //   node native/tools/sync-equivalence/outbox.mjs [--cli <sync_cli.exe>] [--tmp <dir>] [--keep]
 //
-// Scenarios: write-fails-after-record, unreachable-then-recovers, duplicate-flush, enable-sync-resume.
+// Scenarios: write-fails-after-record, unreachable-then-recovers, duplicate-flush, enable-sync-resume,
+// quit-with-sync-off, failed-append-undone.
 // Same prerequisites and temp-folder rules as run.mjs.
 
 import assert from "node:assert/strict";
@@ -69,7 +70,7 @@ function maskResult(result) {
   return copy;
 }
 
-const names = ["write-fails-after-record", "unreachable-then-recovers", "duplicate-flush", "enable-sync-resume"];
+const names = ["write-fails-after-record", "unreachable-then-recovers", "duplicate-flush", "enable-sync-resume", "quit-with-sync-off", "failed-append-undone"];
 
 for (const name of names) {
   const root = path.join(tmpRoot, name);
@@ -110,6 +111,17 @@ for (const name of names) {
   } else if (name === "duplicate-flush") {
     assert.equal(a.oplog.length, a.onceLength * 2, "each line reaches the file twice");
     assert.equal(a.peer.appliedOps, a.onceLength, "the peer applies each opId once");
+  } else if (name === "quit-with-sync-off") {
+    assert.ok(a.queued.outbox > 0, "the edit queued while the folder was unreachable");
+    assert.deepEqual(a.oplogAfterQuitOff, [], "quit with sync off publishes nothing");
+    assert.equal(a.afterQuitOff.outbox, a.queued.outbox, "the queue is kept for when sync is turned on");
+    assert.equal(a.final.outbox, 0, "quit with sync on publishes the queue");
+    assert.deepEqual(a.peer.tags, ["queued"]);
+  } else if (name === "failed-append-undone") {
+    assert.equal(a.afterFailure.outbox, 1, "the failed line stays queued");
+    assert.equal(a.oplogAfterFailure.length, 1, "no torn fragment stays in the file");
+    assert.equal(a.final.outbox, 0);
+    assert.equal(a.oplog.length, 2);
   } else {
     assert.equal(a.blocked.enabled, "true");
     assert.ok(a.blocked.outbox > 0, "the publish lines wait in the outbox");

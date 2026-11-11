@@ -61,12 +61,27 @@ impl SyncWriter {
     /// notice with the count; a later flush retries. A crash between the append and the delete
     /// re-sends the same lines later, which peers ignore by `opId`.
     pub fn flush_outbox(&self, conn: &Connection) {
-        if let Err(err) = self.try_flush(conn) {
+        self.flush_outbox_with_writer(conn, |file, bytes| file.write_all(bytes));
+    }
+
+    /// `flush_outbox` with the final write supplied by the caller, so a test can make the write
+    /// fail partway.
+    #[doc(hidden)]
+    pub fn flush_outbox_with_writer(
+        &self,
+        conn: &Connection,
+        write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    ) {
+        if let Err(err) = self.try_flush(conn, write) {
             eprintln!("[sync] outbox flush failed: {err}");
         }
     }
 
-    fn try_flush(&self, conn: &Connection) -> Result<()> {
+    fn try_flush(
+        &self,
+        conn: &Connection,
+        write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    ) -> Result<()> {
         let mut stmt = conn.prepare("SELECT seq, line FROM sync_outbox ORDER BY seq")?;
         let rows: Vec<(i64, String)> =
             stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?;
@@ -76,7 +91,7 @@ impl SyncWriter {
             return Ok(());
         };
 
-        if let Err(err) = self.append_lines(&rows) {
+        if let Err(err) = self.append_lines(&rows, write) {
             set_publish_pending_notice(conn, rows.len(), Some(&err.to_string()))?;
             return Ok(());
         }
@@ -85,15 +100,27 @@ impl SyncWriter {
         Ok(())
     }
 
-    fn append_lines(&self, rows: &[(i64, String)]) -> std::io::Result<()> {
+    /// Appends the lines. A failed write is cut back to the file's length before the append, so no
+    /// torn fragment stays mid-file when the rows are sent again.
+    fn append_lines(
+        &self,
+        rows: &[(i64, String)],
+        write: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+    ) -> std::io::Result<()> {
         std::fs::create_dir_all(get_sync_devices_dir(&self.data_dir))?;
         let path = get_oplog_file_path(&self.data_dir, &self.device_id);
+        let length_before = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         let mut text: String = rows.iter().map(|(_, line)| format!("{line}\n")).collect();
         if ends_with_partial_line(&path) {
             text.insert(0, '\n');
         }
-        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(path)?;
-        file.write_all(text.as_bytes())
+        let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+        let written = write(&mut file, text.as_bytes());
+        drop(file);
+        if written.is_err() {
+            undo_partial_append(&path, length_before);
+        }
+        written
     }
 
     fn current_hlc(&self, conn: &Connection) -> Result<Hlc> {
@@ -178,6 +205,19 @@ impl SyncWriter {
             self.upsert(conn, table, &row_uuid, &[("sync_order".to_string(), Value::String(key))])?;
         }
         Ok(())
+    }
+}
+
+/// Cuts the file back to `length_before` after a failed append.
+fn undo_partial_append(path: &Path, length_before: u64) {
+    let cut = std::fs::OpenOptions::new().write(true).open(path).and_then(|f| {
+        if f.metadata()?.len() > length_before {
+            f.set_len(length_before)?;
+        }
+        Ok(())
+    });
+    if let Err(err) = cut {
+        eprintln!("[sync] could not cut a failed append from the oplog: {err}");
     }
 }
 

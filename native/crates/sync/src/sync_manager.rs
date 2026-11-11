@@ -250,10 +250,13 @@ impl SyncManager {
         Ok(())
     }
 
-    /// Last chance to publish queued lines, called at shutdown before the database closes.
+    /// Last chance to publish queued lines, called at shutdown and before a data-folder move. Only
+    /// while sync is on: a device that turned sync off publishes nothing.
     pub fn flush_outbox(&self) {
         let db = lock(&self.db);
-        self.writer.flush_outbox(db.conn());
+        if is_sync_enabled(db.conn()).unwrap_or(false) {
+            self.writer.flush_outbox(db.conn());
+        }
     }
 
     pub fn stop(&self) {

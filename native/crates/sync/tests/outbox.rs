@@ -301,3 +301,33 @@ fn clearing_completed_todos_publishes_every_delete_only_with_the_committed_clear
 
     assert!(titles(&h.b).is_empty());
 }
+
+#[test]
+fn a_failed_append_is_cut_off_the_file_before_the_retry() {
+    use std::io::Write;
+    let h = Harness::new();
+    h.a.db.create_tag(&tag("before")).unwrap();
+    let intact = std::fs::read_to_string(h.oplog_path(&h.a)).unwrap();
+
+    let writer = SyncWriter::with_device_id(&h.shared, h.a.device_id.clone());
+    h.a.db
+        .conn()
+        .execute(
+            "INSERT INTO sync_outbox (line, created_at) VALUES ('{\"v\":1,\"torn\":true}', '2026-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    writer.flush_outbox_with_writer(h.a.db.conn(), |file, bytes| {
+        file.write_all(&bytes[..10])?;
+        Err(std::io::Error::other("disk full"))
+    });
+
+    assert_eq!(std::fs::read_to_string(h.oplog_path(&h.a)).unwrap(), intact);
+    assert_eq!(outbox_count(&h.a), 1);
+
+    h.a.db.flush_outbox();
+    assert_eq!(outbox_count(&h.a), 0);
+    for line in oplog_lines(&h, &h.a) {
+        serde_json::from_str::<serde_json::Value>(&line).unwrap();
+    }
+}

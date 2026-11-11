@@ -297,6 +297,52 @@ fn outbox_scenario(args: &Args) -> Res<()> {
             db.flush_outbox();
             json!({ "onceLength": once.len(), "final": checkpoint(&db)?, "oplog": own_oplog(args, &writer)?, "peer": peer_view(args)? })
         }
+        "quit-with-sync-off" => {
+            init_sync_device(&db)?;
+            let blocker = block_shared(args)?;
+            db.create_tag(&tag("queued"))?;
+            let queued = checkpoint(&db)?;
+            set_sync_enabled(db.conn(), false)?;
+            std::fs::remove_file(blocker)?;
+            let db = Arc::new(Mutex::new(db));
+            let manager = SyncManager::new(db.clone(), writer.clone(), args.path("user-data")?, None, Arc::new(NoNotifier));
+            manager.flush_outbox();
+            let after_quit_off = checkpoint(&db.lock().unwrap())?;
+            let oplog_after_quit_off = own_oplog(args, &writer)?;
+            set_sync_enabled(db.lock().unwrap().conn(), true)?;
+            manager.flush_outbox();
+            let db = db.lock().unwrap();
+            json!({
+                "queued": queued,
+                "afterQuitOff": after_quit_off,
+                "oplogAfterQuitOff": oplog_after_quit_off,
+                "final": checkpoint(&db)?,
+                "oplog": own_oplog(args, &writer)?,
+                "peer": peer_view(args)?,
+            })
+        }
+        "failed-append-undone" => {
+            init_sync_device(&db)?;
+            db.create_tag(&tag("before"))?;
+            db.conn().execute(
+                "INSERT INTO sync_outbox (line, created_at) VALUES (?, ?)",
+                rusqlite::params!["{\"v\":1,\"torn\":true}", "2026-01-01T00:00:00.000Z"],
+            )?;
+            writer.flush_outbox_with_writer(db.conn(), |file, bytes| {
+                std::io::Write::write_all(file, &bytes[..10])?;
+                Err(std::io::Error::other("disk full"))
+            });
+            let after_failure = checkpoint(&db)?;
+            let oplog_after_failure = own_oplog(args, &writer)?;
+            db.flush_outbox();
+            json!({
+                "afterFailure": after_failure,
+                "oplogAfterFailure": oplog_after_failure,
+                "final": checkpoint(&db)?,
+                "oplog": own_oplog(args, &writer)?,
+                "peer": peer_view(args)?,
+            })
+        }
         other => return Err(format!("unknown outbox scenario {other}").into()),
     };
     println!("{result}");

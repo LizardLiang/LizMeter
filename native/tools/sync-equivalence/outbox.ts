@@ -17,7 +17,7 @@ import { getDataDir, invalidateDataDirCache } from "../../../electron/main/data-
 import { getDeviceId, invalidateDeviceIdCache } from "../../../electron/main/sync/device-identity.ts";
 import { runMergePass } from "../../../electron/main/sync/merge-pass.ts";
 import { enableSyncOnExistingMachine } from "../../../electron/main/sync/migration.ts";
-import { flushOutbox, setSyncEnabled } from "../../../electron/main/sync/sync-writer.ts";
+import { flushOutbox, flushOutboxIfSyncEnabled, setSyncEnabled } from "../../../electron/main/sync/sync-writer.ts";
 
 export interface OutboxDirs {
   dbPath: string;
@@ -138,6 +138,40 @@ export function tsOutboxScenario(d: OutboxDirs, name: string): Record<string, un
     for (const line of once) insert.run(line, "2026-01-01T00:00:00.000Z");
     flushOutbox(getDb());
     return { onceLength: once.length, final: checkpoint(), oplog: ownOplog(d), peer: peerView(d) };
+  }
+  if (name === "quit-with-sync-off") {
+    const blocker = block(d);
+    createTag({ name: "queued", color: "#7aa2f7" });
+    const queued = checkpoint();
+    setSyncEnabled(getDb(), false);
+    fs.rmSync(blocker, { force: true });
+    flushOutboxIfSyncEnabled(getDb());
+    const afterQuitOff = checkpoint();
+    const oplogAfterQuitOff = ownOplog(d);
+    setSyncEnabled(getDb(), true);
+    flushOutboxIfSyncEnabled(getDb());
+    return { queued, afterQuitOff, oplogAfterQuitOff, final: checkpoint(), oplog: ownOplog(d), peer: peerView(d) };
+  }
+  if (name === "failed-append-undone") {
+    createTag({ name: "before", color: "#7aa2f7" });
+    getDb().prepare("INSERT INTO sync_outbox (line, created_at) VALUES (?, ?)").run(
+      '{"v":1,"torn":true}',
+      "2026-01-01T00:00:00.000Z",
+    );
+    const realAppend = fs.appendFileSync;
+    fs.appendFileSync = ((file: fs.PathOrFileDescriptor, data: string | Uint8Array, options?: fs.WriteFileOptions) => {
+      realAppend(file, String(data).slice(0, 10), options);
+      throw new Error("disk full");
+    }) as typeof fs.appendFileSync;
+    try {
+      flushOutbox(getDb());
+    } finally {
+      fs.appendFileSync = realAppend;
+    }
+    const afterFailure = checkpoint();
+    const oplogAfterFailure = ownOplog(d);
+    flushOutbox(getDb());
+    return { afterFailure, oplogAfterFailure, final: checkpoint(), oplog: ownOplog(d), peer: peerView(d) };
   }
   throw new Error(`unknown outbox scenario ${name}`);
 }

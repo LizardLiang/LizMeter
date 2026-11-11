@@ -427,3 +427,37 @@ fn an_update_with_an_unknown_label_publishes_nothing_new() {
     drop(db);
     assert_eq!(own_todo_upserts(&r), before);
 }
+
+#[test]
+fn a_device_with_sync_off_publishes_nothing_at_quit() {
+    let r = rig();
+    let blocker = r.shared.join("sync");
+    let _ = std::fs::remove_dir_all(&blocker);
+    std::fs::write(&blocker, "not a folder").unwrap();
+    r.db.lock().unwrap().create_todo(&new("queued")).unwrap();
+    let queued: i64 = r.db.lock().unwrap().conn().query_row("SELECT COUNT(*) FROM sync_outbox", [], |x| x.get(0)).unwrap();
+    assert!(queued > 0);
+
+    set_sync_enabled(r.db.lock().unwrap().conn(), false).unwrap();
+    std::fs::remove_file(&blocker).unwrap();
+    r.manager.flush_outbox();
+
+    let left: i64 = r.db.lock().unwrap().conn().query_row("SELECT COUNT(*) FROM sync_outbox", [], |x| x.get(0)).unwrap();
+    assert_eq!(left, queued);
+    assert!(!get_sync_devices_dir(&r.shared).exists());
+}
+
+#[test]
+fn a_device_with_sync_on_publishes_queued_lines_at_quit() {
+    let r = rig();
+    let blocker = r.shared.join("sync");
+    let _ = std::fs::remove_dir_all(&blocker);
+    std::fs::write(&blocker, "not a folder").unwrap();
+    r.db.lock().unwrap().create_todo(&new("queued")).unwrap();
+    std::fs::remove_file(&blocker).unwrap();
+
+    r.manager.flush_outbox();
+
+    let left: i64 = r.db.lock().unwrap().conn().query_row("SELECT COUNT(*) FROM sync_outbox", [], |x| x.get(0)).unwrap();
+    assert_eq!(left, 0);
+}
