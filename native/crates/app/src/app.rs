@@ -609,7 +609,9 @@ impl Render for Root {
         let page = match self.page {
             Page::Timer => {
                 // `.timerPage { animation: fade-in-up 0.28s ease both }`: opacity 0 -> 1, translateY(10px -> 0).
-                let timer = animate(div().relative().size_full().child(self.timer_page(window, cx)), "timer-page-enter", 280, false, ease(), 1.0, |el, t| {
+                // Full height only: a full-width wrapper would leave the 480 px column at the left
+                // (`.timerPage { margin: 0 auto }` centres it).
+                let timer = animate(div().relative().h_full().child(self.timer_page(window, cx)), "timer-page-enter", 280, false, ease(), 1.0, |el, t| {
                     el.opacity(t.clamp(0.0, 1.0)).top(px(10.0 * (1.0 - t)))
                 });
                 div().flex_1().h_full().flex().justify_center().overflow_hidden().child(timer).into_any_element()
