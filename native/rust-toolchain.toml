@@ -1,3 +1,5 @@
 [toolchain]
-channel = "stable-x86_64-pc-windows-msvc"
+# GNU (MinGW gcc) is the default: no Visual Studio needed. The exe links the UCRT and
+# needs no MinGW DLLs at runtime. MSVC still works: cargo +stable-x86_64-pc-windows-msvc ...
+channel = "stable-x86_64-pc-windows-gnu"
 profile = "minimal"

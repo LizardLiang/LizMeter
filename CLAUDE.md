@@ -8,7 +8,7 @@ LizMeter is moving from Electron to a native Rust app drawn with DirectX 11 (gpu
 
 Versions: the native app is LizMeter v2 (2.x). The Electron line ends at 1.x. The version lives in `native/Cargo.toml` (`[workspace.package]`) and `native/Packager.toml`; `crates/app/tests/installer_config.rs` fails when they differ.
 
-Commands, run from `native/` (MSVC toolchain, see `rust-toolchain.toml`):
+Commands, run from `native/` (GNU toolchain, see `rust-toolchain.toml`; needs MinGW-w64 gcc on PATH, e.g. `scoop install mingw`, and the Windows SDK for `fxc.exe`; no Visual Studio):
 
 ```
 cargo build --release                 # build native/target/release/lizmeter.exe

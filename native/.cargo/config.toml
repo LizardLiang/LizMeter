@@ -1,5 +1,7 @@
-# The newest Visual Studio on this machine (18 Community) ships a stale link.exe that rustc
-# auto-selects; pin the working VS 2022 toolchain instead.
+# MSVC fallback only (the default toolchain is GNU, see rust-toolchain.toml).
+# On the machine with Visual Studio 18 Community, its stale link.exe is what rustc
+# auto-selects; these paths pin that machine's VS 2022 Professional instead.
+# GNU builds ignore the linker block, and gcc does not read LIB/INCLUDE.
 [target.x86_64-pc-windows-msvc]
 linker = "C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"
 rustflags = ["-C", "linker=C:/Program Files/Microsoft Visual Studio/2022/Professional/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/link.exe"]
