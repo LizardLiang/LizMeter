@@ -105,7 +105,10 @@ impl TokenStore {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let tmp = path.with_extension(format!("tmp-{}-{unique}", std::process::id()));
-        std::fs::write(&tmp, bytes).map_err(|e| format!("Could not write the token file: {e}"))?;
+        if let Err(e) = std::fs::write(&tmp, bytes) {
+            let _ = std::fs::remove_file(&tmp);
+            return Err(format!("Could not write the token file: {e}"));
+        }
         std::fs::rename(&tmp, path).map_err(|e| {
             let _ = std::fs::remove_file(&tmp);
             format!("Could not write the token file: {e}")

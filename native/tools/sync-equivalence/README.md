@@ -25,9 +25,9 @@ cd .. && node native/tools/sync-equivalence/run.mjs [--tmp <dir>] [--keep] [--fu
 |---|---|---|
 | (a) fixtures | `fixtures.ts`: hand-written scenarios (a case per merge rule, the snapshot order, and `text-edge`: non-ASCII text, emoji, lone surrogates that Node writes as `\ud83d`, BOM, CRLF and NBSP framing) and 6 seeded fuzz scenarios, two phases each | merge counts per pass, then every synced table, field clocks, tombstones, aliases, applied ops, notices, `sync.nextTodoId`, and the snapshot entries each engine builds |
 | (b) mixed run | one TypeScript device and one Rust device on one shared folder, random edits on both sides for several rounds | after every round: todos (ids included), states, projects, labels, tags, sessions, links, attachments, tombstone identities |
+| (b) adopt | a snapshot written by each engine | a fresh Rust device and a fresh TypeScript device rebuilt from the mixed folder must match each other |
 | (c) own-oplog trim | a device's own oplog holding aged and recent entries (emoji, a cut title, a CRLF line) | after `write-snapshot`, both engines keep the same entries. The Rust file also keeps a newer-version line and a torn line byte for byte (the TypeScript engine drops lines it cannot parse) |
 | (d) missing shared folder | both engines merge against a shared folder that does not exist | a merge of 0 entries on both, and Rust creates no folder |
-| (b) adopt | a snapshot written by each engine | a fresh Rust device and a fresh TypeScript device rebuilt from the mixed folder must match each other |
 
 ## What is left out, and why
 

@@ -214,8 +214,8 @@ pub fn setup(source: &Path, soak: &Path, sync: &Path, roots: &[PathBuf]) -> Resu
 
 /// Refuses while a LizMeter writes the source: the native single-writer mutex on the per-user folder
 /// and on the data folder, and a running Electron LizMeter when the source is `%APPDATA%\lizmeter`.
-/// The returned guards keep a native app from starting while the copy runs. No file is written
-/// into the source.
+/// The returned guards keep a native app from starting while the copy runs. The source database file is not
+/// written (SQLite may create its `-shm` beside it while reading).
 fn hold_source(source: &Path, data_dir: &Path) -> Result<Vec<SingleWriterGuard>, SoakError> {
     let busy = |what: String| {
         SoakError::Other(format!("{what} Close every LizMeter, then run setup again. The soak copy was not made."))
