@@ -1,0 +1,4 @@
+// Icon resource 1: gpui's load_icon() reads ID 1 for the window class, which sets the
+// taskbar and title-bar icon; Explorer shows it as the exe icon. Paths are relative to
+// this crate's folder (embed-resource runs the resource compiler there).
+1 ICON "../../../build/icon.ico"
