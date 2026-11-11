@@ -78,7 +78,7 @@ export function setPublishPendingNotice(database: DbHandle, count: number, detai
     | undefined;
   if (existing) {
     database
-      .prepare("UPDATE sync_notices SET message = ?, detail = ?, dismissed = 0 WHERE id = ?")
+      .prepare("UPDATE sync_notices SET message = ?, detail = ? WHERE id = ?")
       .run(message, detail ?? null, existing.id);
     return;
   }

@@ -720,7 +720,7 @@ export function registerIpcHandlers(): void {
         };
       }
 
-      // Queued oplog lines go to the current folder's file before the folder changes.
+      // Queued oplog lines go to the current folder's file before the folder changes, when it is reachable.
       flushOutbox(getDb());
 
       // Copying an open SQLite file can capture a half-written page, so fold the WAL back into

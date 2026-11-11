@@ -2473,16 +2473,9 @@ function labelsByTodoId(database: DbHandle, todoIds: number[]): Map<number, Todo
 /**
  * Validates that every label id exists, without writing anything.
  *
- * B-4: must run before `recordUpsert` for the same create/update, not just before
- * `replaceTodoLabels`'s own writes. `recordUpsert` appends to the oplog file via
- * `fs.appendFileSync`, which no SQL transaction rollback can undo -- so a stale label id
- * discovered only inside `replaceTodoLabels` (as it used to be, when this check lived there)
- * throws *after* the todo's own upsert has already been durably published to every peer, even
- * though the local transaction then rolls back the todo row itself. Every peer ends up with a
- * todo the originating machine does not have, and worse, the next successful create recycles the
- * same block-allocated id (`allocateNextTodoId`'s counter bump is a plain SQL write, rolled back
- * along with everything else), so the *next* publish collides with the still-published phantom
- * and aborts every future merge pass. See `createTodo`/`updateTodo` for where this now runs.
+ * Runs before the todo's own writes so a stale label id fails the operation up front, with a
+ * clear message, instead of surfacing from deep inside `replaceTodoLabels`. Since oplog lines are
+ * queued in the same transaction (see `recordUpsert`), a late failure would also roll those back.
  */
 function assertLabelIdsExist(database: DbHandle, labelIds: readonly number[]): void {
   for (const id of new Set(labelIds)) {
@@ -2494,8 +2487,7 @@ function assertLabelIdsExist(database: DbHandle, labelIds: readonly number[]): v
 
 /**
  * Replaces a todo's whole label set. Callers must already have validated every id via
- * {@link assertLabelIdsExist} *before* calling `recordUpsert` for this same operation -- see its
- * doc comment for why the ordering, not just the check's existence, is what B-4 requires.
+ * {@link assertLabelIdsExist} before calling this for the same operation.
  * `todoUuid` is the row's already-resolved uuid -- passed in rather than looked up here, since
  * callers on the create path only get an id back from `last_insert_rowid()`.
  */
