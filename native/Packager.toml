@@ -16,23 +16,49 @@ binaries = [{ path = "lizmeter.exe", main = true }]
 [nsis]
 installer-mode = "currentUser"
 installer-icon = "../build/icon.ico"
-# Runs before the native files are installed. Removes the Electron build of LizMeter, if present:
-# reads the per-user uninstall key electron-builder wrote for appId com.lizmeter.app and runs that
-# uninstaller silently for the current user, waits for it and checks its exit code. Nothing here reads, copies, moves or deletes
-# %APPDATA%\lizmeter: the data stays in place.
+# Runs before the native files are installed. Removes the Electron build of LizMeter, if present.
+# It stops, and never kills, when Electron is running: a running exe cannot be opened for writing, so
+# a failed write-open of "$ElectronDir\LizMeter.exe" means Electron is running and the installer aborts
+# with a message. No process is ended by name, so a native lizmeter.exe is never hit.
+# It then reads the per-user uninstall key electron-builder wrote for appId com.lizmeter.app and runs that
+# uninstaller silently for the current user. A uninstaller that cannot start, a non-zero exit code, a
+# remaining Electron exe or a remaining uninstall key aborts the install. Nothing here reads, copies, moves
+# or deletes %APPDATA%\lizmeter: the data stays in place.
 preinstall-section = '''
 Var ElectronUninstall
 Var ElectronExit
 Var ElectronDir
+Var ElectronProbe
 Section ElectronCleanup
   ReadRegStr $ElectronUninstall HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\d7c9c3d8-3982-5ac5-a5ff-124a887808d8" "QuietUninstallString"
   StrCmp $ElectronUninstall "" electron_done
   ReadRegStr $ElectronDir HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\d7c9c3d8-3982-5ac5-a5ff-124a887808d8" "InstallLocation"
   StrCmp $ElectronDir "" 0 +2
   StrCpy $ElectronDir "$LOCALAPPDATA\Programs\lizmeter"
+  IfFileExists "$ElectronDir\Uninstall LizMeter.exe" electron_have_uninstaller
+  MessageBox MB_OK|MB_ICONSTOP "The previous LizMeter uninstaller was not found in $ElectronDir. Remove the previous LizMeter in Windows Settings, then run this installer again. Your data was not changed."
+  Abort
+  electron_have_uninstaller:
+  IfFileExists "$ElectronDir\LizMeter.exe" 0 electron_not_running
+  ClearErrors
+  FileOpen $ElectronProbe "$ElectronDir\LizMeter.exe" a
+  IfErrors electron_running
+  FileClose $ElectronProbe
+  Goto electron_not_running
+  electron_running:
+  MessageBox MB_OK|MB_ICONSTOP "The previous LizMeter is running. Close it (also from the tray), then run this installer again. Nothing was changed."
+  Abort
+  electron_not_running:
   ; _?= keeps the uninstaller in place, so ExecWait waits for the real uninstall and its exit code.
+  ClearErrors
   ExecWait '"$ElectronDir\Uninstall LizMeter.exe" /currentuser /S _?=$ElectronDir' $ElectronExit
-  IntCmp $ElectronExit 0 electron_removed
+  IfErrors electron_failed
+  StrCmp $ElectronExit "" electron_failed
+  StrCmp $ElectronExit "0" 0 electron_failed
+  IfFileExists "$ElectronDir\LizMeter.exe" electron_failed
+  ReadRegStr $ElectronUninstall HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\d7c9c3d8-3982-5ac5-a5ff-124a887808d8" "QuietUninstallString"
+  StrCmp $ElectronUninstall "" electron_removed
+  electron_failed:
   MessageBox MB_OK|MB_ICONSTOP "The previous LizMeter could not be removed (exit code $ElectronExit). Close LizMeter and run this installer again. Your data was not changed."
   Abort
   electron_removed:
