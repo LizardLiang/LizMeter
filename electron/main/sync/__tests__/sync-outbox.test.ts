@@ -287,6 +287,48 @@ describe("12b: a failed append is undone before the retry", () => {
   });
 });
 
+describe("12c: the retry timer respects the sync switch", () => {
+  it("publishes nothing when sync was turned off while a retry was waiting", () => {
+    vi.useFakeTimers();
+    try {
+      const blocker = blockSharedFolder();
+      harness.as(harness.deviceA, () => createTag({ name: "waiting", color: "#7aa2f7" }));
+      setSyncEnabled(harness.deviceA.db, false);
+      unblockSharedFolder(blocker);
+      harness.as(harness.deviceA, () => vi.advanceTimersByTime(30_000));
+      expect(oplogLines(harness.deviceA)).toEqual([]);
+      expect(outboxCount(harness.deviceA)).toBeGreaterThan(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("12d: an unreadable file size never truncates the oplog", () => {
+  it("leaves the history alone when the size read fails and the append then fails", () => {
+    harness.as(harness.deviceA, () => createTag({ name: "history", color: "#7aa2f7" }));
+    const intact = fs.readFileSync(oplogPath(harness.deviceA), "utf8");
+    const realStat = fs.statSync;
+    const realAppend = fs.appendFileSync.bind(fs);
+    let statCalls = 0;
+    const statSpy = vi.spyOn(fs, "statSync").mockImplementation(((...args: Parameters<typeof fs.statSync>) => {
+      if (statCalls++ === 0) throw Object.assign(new Error("busy"), { code: "EBUSY" });
+      return realStat(...args);
+    }) as typeof fs.statSync);
+    const appendSpy = vi.spyOn(fs, "appendFileSync").mockImplementationOnce((file, data, options) => {
+      realAppend(file, String(data).slice(0, 20), options as never);
+      throw new Error("disk full");
+    });
+    try {
+      harness.as(harness.deviceA, () => createTag({ name: "next", color: "#7aa2f7" }));
+    } finally {
+      statSpy.mockRestore();
+      appendSpy.mockRestore();
+    }
+    expect(fs.readFileSync(oplogPath(harness.deviceA), "utf8").startsWith(intact)).toBe(true);
+  });
+});
+
 describe("flush timing", () => {
   it("holds lines until the outermost transaction commits", () => {
     harness.as(harness.deviceA, () => {

@@ -100,7 +100,7 @@ function scheduleOutboxRetry(database: DbHandle): void {
   if (retryTimer !== null) return;
   retryTimer = setTimeout(() => {
     retryTimer = null;
-    if (database.open) flushOutbox(database);
+    if (database.open) flushOutboxIfSyncEnabled(database);
   }, OUTBOX_RETRY_MS);
   retryTimer.unref?.();
 }
@@ -128,7 +128,7 @@ export function flushOutbox(database: DbHandle): void {
     }
 
     let filePath: string | null = null;
-    let lengthBefore = 0;
+    let lengthBefore: number | null = 0;
     try {
       const dataDir = getDataDir();
       fs.mkdirSync(getSyncDevicesDir(dataDir), { recursive: true });
@@ -152,18 +152,21 @@ export function flushOutbox(database: DbHandle): void {
   }
 }
 
-function fileLength(filePath: string): number {
+/** The file size, 0 when the file does not exist yet, null when the size cannot be read. */
+function fileLength(filePath: string): number | null {
   try {
     return fs.statSync(filePath).size;
-  } catch {
-    return 0;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ENOENT" ? 0 : null;
   }
 }
 
 /** Cuts the file back to its length before a failed append, so no torn fragment stays mid-file. */
-function undoPartialAppend(filePath: string, lengthBefore: number): void {
+function undoPartialAppend(filePath: string, lengthBefore: number | null): void {
+  if (lengthBefore === null) return;
   try {
-    if (fileLength(filePath) > lengthBefore) fs.truncateSync(filePath, lengthBefore);
+    const now = fileLength(filePath);
+    if (now !== null && now > lengthBefore) fs.truncateSync(filePath, lengthBefore);
   } catch (err) {
     console.warn("[sync] could not cut a failed append from the oplog:", err);
   }
