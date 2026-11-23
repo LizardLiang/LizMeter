@@ -201,6 +201,8 @@ cargo packager --release -c Packager.toml
 | `No soak profile at ...` | 還沒做 `--soak-setup` | 先做第 2 節第 2 步 |
 | `... already holds files` | soak 資料夾已存在，setup 不覆蓋 | 第 2 節第 2 步的 `Remove-Item` 後重做 |
 | 啟動時說資料夾被另一個 LizMeter 使用 | 另一個原生版或 Electron 版正在寫同一個資料夾 | 關閉它；soak 資料夾不受 Electron 版影響 |
+| 備份同步資料夾時 `Copy-Item` 報「雲端檔案提供者未執行」 | OneDrive 沒有執行，資料夾裡有「僅限線上」的檔案 | 啟動 OneDrive 後重試；或只複製本機檔案（`sync\devices\*`） |
+| `--soak-check` 在正式資料夾回報 `NOT CLEAN` | 換裝前 Electron 留下的舊通知也會計入 | 換裝前先對 `%APPDATA%\lizmeter` 的複本跑一次 `--soak-check` 當基準；換裝後的計數與 `todo ids digest` 應與基準相同 |
 
 ## 8. 新行為：「N change(s) waiting to publish」通知與找不到資料夾的對話框
 
