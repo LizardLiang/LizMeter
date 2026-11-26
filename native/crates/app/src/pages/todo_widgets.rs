@@ -94,7 +94,9 @@ pub fn dialog_glass(radius: f32) -> Div {
 /// The blur scrim over the window with `dialog` entering as `modalEntrance` (0.2s, 8px rise).
 /// `top` pins the dialog that far from the top (the pickers); `None` centres it.
 pub fn modal_overlay(id: &'static str, top: Option<f32>, dialog: impl IntoElement, on_close: impl Fn(&mut Window, &mut App) + 'static) -> Stateful<Div> {
-    let entrance = animate(div().relative().child(dialog), id, 200, false, overshoot(), 1.0, |el, t| el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t))));
+    // `occlude` so the scrim behind the dialog is not hovered there: gpui fires every hovered
+    // ancestor's click handler, so without it any click inside the dialog also closed it.
+    let entrance = animate(div().relative().occlude().child(dialog), id, 200, false, overshoot(), 1.0, |el, t| el.opacity(t.clamp(0.0, 1.0)).top(px(8.0 * (1.0 - t))));
     let mut o = Glass::new(0.0, 28.0, 1.25, Spec::rrect(0.0).solid(rgba(192, 202, 245, 0.10)))
         .el()
         .id(SharedString::from(format!("{id}-overlay")))

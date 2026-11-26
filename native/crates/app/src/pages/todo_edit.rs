@@ -429,7 +429,6 @@ impl Render for TodoEditDialog {
             .flex_col()
             .overflow_hidden()
             .track_focus(&self.focus)
-            .on_click(|_, _, _| {})
             .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
                 let k = &ev.keystroke;
                 if k.key == "escape" && !this.is_picker_open() {
