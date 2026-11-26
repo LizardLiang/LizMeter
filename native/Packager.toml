@@ -7,7 +7,7 @@
 name = "lizmeter"
 product-name = "LizMeter"
 identifier = "com.lizmeter.native"
-version = "2.0.0"
+version = "2.0.1"
 publisher = "LizMeter"
 description = "LizMeter: Pomodoro timer, todos and worklogs."
 formats = ["nsis"]
