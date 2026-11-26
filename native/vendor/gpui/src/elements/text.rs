@@ -335,7 +335,7 @@ impl TextLayout {
             .line_height
             .to_pixels(font_size.into(), window.rem_size());
 
-        let mut runs = if let Some(runs) = runs {
+        let runs = if let Some(runs) = runs {
             runs
         } else {
             vec![text_style.to_run(text.len())]
@@ -379,6 +379,10 @@ impl TextLayout {
                     return text_layout.size.unwrap();
                 }
 
+                // A fresh copy per measure: truncation shortens the runs, and taffy calls this
+                // closure again with other widths. Reusing cut runs against the full text slices
+                // inside a multi-byte character and panics in `layout_line`.
+                let mut runs = runs.clone();
                 let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
                 let text = if let Some(truncate_width) = truncate_width {
                     line_wrapper.truncate_line(
